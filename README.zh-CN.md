@@ -142,7 +142,7 @@ Electron 主进程以 RPC 模式启动 `pi`，并注入一个小型桥接扩展�
 <details>
 <summary><b>macOS 提示「无法验证开发者」或「已损坏」？</b></summary>
 
-macOS 版本目前尚未签名。按住 <kbd>Control</kbd> 点击应用并选择「打开」，或在终端解除隔离属性：
+macOS 版本采用 ad-hoc 签名，并在打包时校验签名完整性。目前尚无 Apple Developer ID 签名或公证，Gatekeeper 仍可能阻止首次运行。按住 <kbd>Control</kbd> 点击应用并选择「打开」，或在终端解除隔离属性：
 
 ```bash
 xattr -dr com.apple.quarantine "/Applications/Pi Desktop.app"

@@ -1,7 +1,7 @@
 import { build, Platform } from 'electron-builder';
 // Level 5 keeps rebuilds practical without changing application contents.
 process.env.ELECTRON_BUILDER_COMPRESSION_LEVEL ??= '5';
-// macOS builds are unsigned for now: skip identity discovery so a stray keychain cert is not used.
+// macOS uses explicit ad-hoc signing; do not select an unrelated keychain certificate.
 process.env.CSC_IDENTITY_AUTO_DISCOVERY ??= 'false';
 const dir = process.argv.includes('--dir');
 const platform = { win32: Platform.WINDOWS, darwin: Platform.MAC, linux: Platform.LINUX }[process.platform];

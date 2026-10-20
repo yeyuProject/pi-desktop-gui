@@ -145,7 +145,7 @@ Electron's main process starts `pi` in RPC mode and adds a small bridge extensio
 <details>
 <summary><b>macOS says the app "can't be verified" or "is damaged"</b></summary>
 
-The macOS builds are not signed yet. Control-click the app and choose **Open**, or remove the quarantine attribute:
+macOS builds use ad-hoc signing and pass a signature integrity check during packaging. They do not yet have an Apple Developer ID signature or notarization, so Gatekeeper may still block the first launch. Control-click the app and choose **Open**, or remove the quarantine attribute:
 
 ```bash
 xattr -dr com.apple.quarantine "/Applications/Pi Desktop.app"

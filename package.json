@@ -1,6 +1,6 @@
 {
   "name": "pi-desktop-gui",
-  "version": "0.14.27",
+  "version": "0.14.28",
   "private": true,
   "description": "A local desktop workspace for the Pi coding agent",
   "author": "yeyuProject",
@@ -40,6 +40,7 @@
     "productName": "Pi Desktop",
     "afterPack": "scripts/after-pack.mjs",
     "afterSign": "scripts/after-sign.mjs",
+    "afterAllArtifactBuild": "scripts/verify-mac-package.mjs",
     "directories": {
       "output": "release"
     },
@@ -100,7 +101,7 @@
       ],
       "icon": "build/icon-mac.png",
       "category": "public.app-category.developer-tools",
-      "identity": null,
+      "identity": "-",
       "hardenedRuntime": false,
       "gatekeeperAssess": false,
       "artifactName": "Pi-Desktop-${version}-mac-${arch}.${ext}"
