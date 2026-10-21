@@ -808,12 +808,22 @@ export class AgentService extends EventEmitter {
         this.extension(event);
     });
     let temporarySessionDir: string | undefined;
+    let temporarySessionFile: string | undefined;
     try {
       // Pi restores branch selections itself. Give it a disposable copy so reading an old
       // conversation cannot append metadata or change the original session file.
+      // A missing transcript must not fail the catalog read: fall back to the same
+      // disposable --no-session probe.
       if (session.file) {
         temporarySessionDir = await fs.mkdtemp(path.join(os.tmpdir(), 'pi-desktop-models-'));
-        await fs.copyFile(session.file, path.join(temporarySessionDir, 'session.jsonl'));
+        const copiedFile = path.join(temporarySessionDir, 'session.jsonl');
+        try {
+          await fs.copyFile(session.file, copiedFile);
+          temporarySessionFile = copiedFile;
+        } catch (error) {
+          if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error;
+          // Keep the directory for finally cleanup even when the source vanished.
+        }
       }
       const { environment, resolved } = await preparePi(this.store.state.settings, this.developmentRoot);
       if (this.shutdown || this.stopRequested || epoch !== this.stopEpoch) throw new Error('读取模型已取消');
@@ -823,9 +833,7 @@ export class AgentService extends EventEmitter {
         [
           '--mode',
           'rpc',
-          ...(temporarySessionDir
-            ? ['--session', path.join(temporarySessionDir, 'session.jsonl')]
-            : ['--no-session']),
+          ...(temporarySessionFile ? ['--session', temporarySessionFile] : ['--no-session']),
           '--no-tools',
           '--no-mcp',
           '--no-skills',

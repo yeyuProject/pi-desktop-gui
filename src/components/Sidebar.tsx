@@ -219,7 +219,15 @@ export function Sidebar(
             onClick={() => {
               setMenuId('');
               void attempt(async () => {
-                if (await api.invoke('deleteSession', s.id)) setNotice(`会话已移到${platform.trash}`);
+                const removed = await api.invoke('deleteSession', s.id);
+                if (removed)
+                  setNotice(
+                    removed.trashed
+                      ? `会话已移到${platform.trash}`
+                      : s.file
+                        ? '会话记录已删除（会话文件已不存在）'
+                        : '已删除这个还没有内容的会话',
+                  );
               });
             }}
           >
