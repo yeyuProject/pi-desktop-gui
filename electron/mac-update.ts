@@ -6,6 +6,7 @@ import { execFile, spawn } from 'node:child_process';
 import { promisify } from 'node:util';
 import { compareAppVersions, stableVersion } from '../shared/app-update';
 import { UpdateAttemptFile } from './update-attempt';
+import { machArchitectures } from './macho';
 
 const exec = promisify(execFile);
 // Electron's patched fs sees app.asar as a directory. Bundle traversal, hashing and
@@ -80,12 +81,16 @@ async function checkCandidate(plan: MacUpdatePlan) {
     metadata.CFBundleExecutable !== plan.executable
   )
     throw new MacUpdateError('更新包的应用标识或版本不匹配，已取消安装。');
-  const { stdout } = await exec('/usr/bin/lipo', [
-    '-archs',
-    path.join(plan.candidate, 'Contents/MacOS', plan.executable),
-  ]);
-  const arch = plan.arch === 'x64' ? 'x86_64' : plan.arch;
-  if (!stdout.trim().split(/\s+/).includes(arch)) throw new MacUpdateError('更新包与当前 Mac 架构不匹配。');
+  const file = await fs.open(path.join(plan.candidate, 'Contents/MacOS', plan.executable), 'r');
+  let architectures: string[];
+  try {
+    const header = Buffer.alloc(8 + 32 * 32);
+    const { bytesRead } = await file.read(header, 0, header.length, 0);
+    architectures = machArchitectures(header.subarray(0, bytesRead));
+  } finally {
+    await file.close();
+  }
+  if (!architectures.includes(plan.arch)) throw new MacUpdateError('更新包与当前 Mac 架构不匹配。');
   const team = await signature(plan.candidate);
   if (plan.team && team !== plan.team) throw new MacUpdateError('更新包的开发者签名不匹配，已取消安装。');
   if (plan.team) {
