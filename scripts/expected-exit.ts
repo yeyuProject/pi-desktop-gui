@@ -46,11 +46,22 @@ export async function completeExpectedExit(
       },
     );
   });
-  const [trigger, closure, termination] = await Promise.allSettled([
-    Promise.resolve().then(action),
-    observedClose,
-    exited,
-  ]);
+  const triggered = new Promise<void>((resolve, reject) => {
+    const timer = setTimeout(() => reject(new Error('Exit action timed out')), timeout);
+    Promise.resolve()
+      .then(action)
+      .then(
+        () => {
+          clearTimeout(timer);
+          resolve();
+        },
+        (error) => {
+          clearTimeout(timer);
+          reject(error);
+        },
+      );
+  });
+  const [trigger, closure, termination] = await Promise.allSettled([triggered, observedClose, exited]);
   if (
     trigger.status === 'rejected' &&
     !String(trigger.reason?.message).includes('Target page, context or browser has been closed')

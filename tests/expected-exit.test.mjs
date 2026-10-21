@@ -113,3 +113,21 @@ test('an absent close event has a deadline even if the child exits cleanly', asy
     /Expected close event timed out/,
   );
 });
+
+test('an unacknowledged action has a deadline even if the child exits cleanly', async (t) => {
+  const { child, closed, quit } = fixture(t);
+  await assert.rejects(
+    completeExpectedExit(
+      async () => {
+        quit();
+        await closed;
+        await new Promise(() => {});
+      },
+      closed,
+      child,
+      1000,
+    ),
+    /Exit action timed out/,
+  );
+  assert.equal(child.exitCode, 0);
+});

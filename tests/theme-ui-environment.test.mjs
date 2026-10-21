@@ -52,8 +52,8 @@ test('native appearance still checks actual media against nativeTheme without pe
     script,
     /\(dark\) => matchMedia\('\(prefers-color-scheme: dark\)'\)\.matches === dark,\s*native\.dark/,
   );
-  assert.match(script, /assert\.equal\(native\.source, source,/);
-  assert.match(script, /assert\.equal\(native\.dark, source === 'dark'\)/);
+  assert.match(script, /assert\.equal\(native\.source, nativeSource,/);
+  assert.match(script, /assert\.equal\(native\.dark, nativeSource === 'dark'\)/);
 });
 
 test('native appearance screenshots finish finite entrance animations before capture', async () => {
