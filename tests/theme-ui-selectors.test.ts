@@ -33,6 +33,7 @@ test('real appearance dialog has two Close controls, but one scoped footer Close
         settingsTab: 'appearance',
         prefs: {
           theme,
+          accent: 'mono',
           fontScale: 1,
           sidebarWidth: 240,
           inspectorWidth: 380,
@@ -56,6 +57,11 @@ test('real appearance dialog has two Close controls, but one scoped footer Close
     once(names(section(html, 'footer')), '关闭');
     once(names(section(html, 'nav')), '外观与编辑器');
     for (const label of ['浅色', '深色', '跟随系统']) once(names(html), label);
+    for (const label of ['黑白', '绿色', '蓝色', '紫色']) once(names(html), label);
+    assert.match(
+      html,
+      /<button class="active" aria-pressed="true"><span class="accent-swatch" data-accent="mono"><\/span>黑白/,
+    );
   }
 });
 

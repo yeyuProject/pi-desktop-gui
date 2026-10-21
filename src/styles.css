@@ -1,4 +1,5 @@
 @import './styles/base.css';
+@import './styles/accents.css';
 @import './styles/shell.css';
 @import './styles/conversation.css';
 @import './styles/inspector.css';

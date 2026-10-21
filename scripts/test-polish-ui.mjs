@@ -7,9 +7,20 @@ import { createLocalProvider, prepareRealPiFixture } from '../tests/support/loca
 
 const provider = await createLocalProvider();
 const f = await prepareRealPiFixture(provider.baseUrl, 'polish-ui');
+const menuHistory = path.join(f.dir, 'menu-session.jsonl');
+await fs.writeFile(
+  menuHistory,
+  JSON.stringify({
+    type: 'session',
+    version: 3,
+    id: 'menu-session',
+    timestamp: new Date().toISOString(),
+    cwd: f.projectDir,
+  }) + '\n',
+);
 // Seed protected records before launch; use only the fixture's isolated app-data directory.
 const protectedFields = [
-  { title: '自定义名称' },
+  { title: '自定义名称', file: menuHistory },
   { draft: ' ' },
   { attachments: ['输入 文件.txt'] },
   { draftSnippets: [{ id: 'snippet', offset: 0, text: '长草稿' }] },
@@ -36,6 +47,51 @@ try {
   page = await app.firstWindow();
   page.setDefaultTimeout(15000);
   await page.getByRole('textbox', { name: '任务输入' }).waitFor();
+  const originalViewport = await page.evaluate(() => ({ width: innerWidth, height: innerHeight }));
+  await page.setViewportSize({ width: 1100, height: 450 });
+  const projectList = page.locator('.project-list');
+  const assertMenuReachable = async () => {
+    const menu = page.locator('.context-menu');
+    await menu.evaluate((element) => Promise.all(element.getAnimations().map((a) => a.finished)));
+    const reachable = await menu.locator('button').evaluateAll((buttons) =>
+      buttons.every((button) => {
+        const rect = button.getBoundingClientRect();
+        return (
+          rect.top >= 0 &&
+          rect.bottom <= innerHeight &&
+          rect.left >= 0 &&
+          rect.right <= innerWidth &&
+          button.contains(document.elementFromPoint(rect.x + rect.width / 2, rect.y + rect.height / 2))
+        );
+      }),
+    );
+    assert.equal(reachable, true, 'Every sidebar menu action must be visible and receive pointer input');
+    await menu.locator('button').last().click({ trial: true });
+  };
+  const lastSession = page.locator('.session-row').last();
+  await lastSession.evaluate((element) => element.scrollIntoView({ block: 'end' }));
+  await page.evaluate(() => new Promise(requestAnimationFrame));
+  const scrollHeight = await projectList.evaluate((element) => element.scrollHeight);
+  await lastSession.locator('.icon-button').click();
+  assert.equal(await page.getByRole('menuitem', { name: '导出 HTML', exact: true }).count(), 1);
+  await assertMenuReachable();
+  assert.equal(await projectList.evaluate((element) => element.scrollHeight), scrollHeight);
+  await page.screenshot({ path: path.join(output, 'sidebar-menu.png') });
+  await page.keyboard.press('Escape');
+  assert.equal(await page.locator('.context-menu').count(), 0);
+  await lastSession.click({ button: 'right' });
+  await assertMenuReachable();
+  await projectList.evaluate((element) => {
+    element.scrollTop = element.scrollTop ? 0 : element.scrollHeight;
+  });
+  await page.locator('.context-menu').waitFor({ state: 'detached' });
+  await page.getByRole('button', { name: 'Pi GUI 验收项目 项目操作', exact: true }).click();
+  await assertMenuReachable();
+  await page.setViewportSize(originalViewport);
+  await page.locator('.context-menu').waitFor({ state: 'detached' });
+  console.log(
+    'PASS session and project menus remain clickable at the list bottom; scroll, resize and Escape close them',
+  );
   const result = await page.evaluate(async () => {
     const api = window.desktop;
     const first = await api.invoke('newSession');

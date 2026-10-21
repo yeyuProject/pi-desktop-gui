@@ -50,7 +50,7 @@ Sessions and workspaces stay on your machine. Model requests go to whichever pro
 - **Steer while it runs** — Add instructions mid-run (steer) or queue follow-ups within each conversation.
 - **Clear retry progress** — See retry backoff and response wait time, cancel an active retry request, and distinguish recovered attempts from failures in the run log. Consecutive empty error replies show the latest failure once, with earlier attempts expandable.
 - **Keyboard-first** — Global search across sessions, in-session find, and shortcuts for every panel.
-- **Consistent appearance** — Light, dark and system themes cover the desktop title bar and confirmations while retaining native window controls. Pi configuration stays editable during a run; saving waits until it is safe and reports separately when a saved change could not yet be applied.
+- **Consistent appearance** — Light, dark and system themes, plus black-and-white (default), green, blue or violet accent colors, cover the desktop title bar and confirmations while retaining native window controls. Pi configuration stays editable during a run; saving waits until it is safe and reports separately when a saved change could not yet be applied.
 
 <table>
   <tr>
@@ -99,6 +99,8 @@ The Windows installer and Linux AppImage update themselves in the background (ca
 3. Pick a model and reasoning level in the composer, then start a chat or open a project folder.
 
 A new, untouched chat is temporary: leaving it hides it, and it is excluded from the saved index and backups. Repeated new-chat requests reuse that temporary chat in the same project or standalone scope. Typing anything, adding attachments, renaming or pinning, choosing session settings, connecting the conversation, or starting a task makes it permanent, even if the content is later cleared or the operation fails. Browsing the model catalog alone stays temporary after it finishes; starting another chat while that read is still active conservatively preserves its original chat. Existing saved empty entries are preserved; clean them up explicitly in **Settings → Diagnostics & Data (诊断与数据) → Clean empty sessions (清理空会话)**, after confirmation.
+
+Deleting a conversation reports whether its transcript was moved to the trash; an empty conversation or an entry whose transcript is already missing is removed from the list without claiming a trash operation. Reading the model catalog can still succeed when a saved transcript is missing, using a disposable probe. Other file access errors remain visible.
 
 Opening or switching chats restores saved history and drafts without starting Pi. The model picker uses a short-lived Pi process to read the project's actual models and reasoning levels, without loading the desktop bridge or connecting the conversation. Pi connects the conversation when you send a task or explicitly connect; existing connections and background tasks stay with their own chat. Sending uses your saved model preference or Pi's effective defaults, including project settings. Projects still require trust before Pi starts.
 

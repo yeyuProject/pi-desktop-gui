@@ -91,7 +91,7 @@ async function fixture(t: TestContext, dependencies: Record<string, unknown> = {
      let stateRevision = 0;
      const stateSnapshot = ${initializer('stateSnapshot')};
      return {
-       handlers: { ${['saveDraft', 'consumeDraft', 'saveView', 'renameSession', 'pinSession', 'selectSession', 'editDraft', 'readModels'].map(handler).join(',')} },
+       handlers: { ${['saveDraft', 'consumeDraft', 'saveView', 'renameSession', 'pinSession', 'selectSession', 'editDraft', 'readModels', 'deleteSession'].map(handler).join(',')} },
        newSession, protectSessionOperation, stateSnapshot
      };`,
     {
@@ -1020,3 +1020,77 @@ test('actual update persistence boundary waits for a promoted no-agent draft', a
     await saving.catch(() => {});
   }
 });
+
+test('deleting the selected empty conversation removes it without claiming the recycle bin', async (t) => {
+  const dialogs: string[] = [];
+  const f = await fixture(t, {
+    showAppDialog: async (options: { message: string }) => {
+      dialogs.push(options.message);
+      return { response: 1 };
+    },
+  });
+  const current = await f.newSession();
+  const other = f.store.createSession();
+  f.store.selectSession(current.id);
+  const removed = await f.handlers.deleteSession(current.id);
+  assert.deepEqual(removed, { trashed: false });
+  assert.equal(dialogs.length, 1);
+  assert.equal(
+    f.store.state.sessions.some((session) => session.id === current.id),
+    false,
+  );
+  assert.equal(f.store.state.selectedSessionId, other.id);
+  const lastEvent = f.events.at(-1);
+  assert.equal(lastEvent?.type, 'state');
+  if (lastEvent?.type === 'state') assert.equal(lastEvent.state.selectedSessionId, other.id);
+});
+
+for (const scenario of [
+  'missing',
+  'present',
+  'lstat-EACCES',
+  'lstat-EIO',
+  'trash-EACCES',
+  'trash-ENOENT',
+  'cancel',
+]) {
+  test(`delete session transcript boundary: ${scenario}`, async (t) => {
+    const calls: string[] = [];
+    const failure = Object.assign(new Error(scenario), { code: scenario.split('-')[1] });
+    const f = await fixture(t, {
+      showAppDialog: async () => ({ response: scenario === 'cancel' ? 0 : 1 }),
+      fs: {
+        lstat: async () => {
+          calls.push('lstat');
+          if (scenario === 'missing') throw Object.assign(new Error('missing'), { code: 'ENOENT' });
+          if (scenario.startsWith('lstat-')) throw failure;
+          return {};
+        },
+      },
+      shell: {
+        trashItem: async () => {
+          calls.push('trash');
+          if (scenario.startsWith('trash-')) throw failure;
+        },
+      },
+    });
+    const current = f.store.createSession();
+    current.file = path.join(f.store.dir, 'transcript.jsonl');
+    const other = f.store.createSession();
+    f.store.selectSession(current.id);
+    if (scenario.includes('-')) {
+      await assert.rejects(f.handlers.deleteSession(current.id), (error) => error === failure);
+      assert.equal(f.store.state.sessions.includes(current), true);
+      assert.equal(f.store.state.selectedSessionId, current.id);
+    } else if (scenario === 'cancel') {
+      assert.equal(await f.handlers.deleteSession(current.id), false);
+      assert.deepEqual(calls, []);
+      assert.equal(f.store.state.sessions.includes(current), true);
+    } else {
+      assert.deepEqual(await f.handlers.deleteSession(current.id), { trashed: scenario === 'present' });
+      assert.deepEqual(calls, scenario === 'present' ? ['lstat', 'trash'] : ['lstat']);
+      assert.equal(f.store.state.sessions.includes(current), false);
+      assert.equal(f.store.state.selectedSessionId, other.id);
+    }
+  });
+}

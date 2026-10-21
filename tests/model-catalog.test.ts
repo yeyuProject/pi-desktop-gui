@@ -202,4 +202,52 @@ export default function(pi) {
   assert.equal(historical.runtime.connected, false);
   assert.equal(await fs.readFile(imported.file, 'utf8'), history, 'the source history is untouched');
   assert.equal(await fs.readFile(path.join(agentDir, 'settings.json'), 'utf8'), settingsBefore);
+
+  const missing = store.createSession();
+  missing.file = path.join(directory, 'already-removed.jsonl');
+  const orphaned = new AgentService(store, new Workspace(store.dir));
+  services.push(orphaned);
+  await orphaned.readModels(missing.id);
+  assert.equal(orphaned.runtime.modelsLoaded, true);
+  assert.equal(orphaned.runtime.connected, false);
+  assert.equal(orphaned.runtime.error, undefined);
+  assert.ok(orphaned.runtime.models.length > 0, 'a missing transcript still loads the model catalog');
+
+  for (const code of ['ENOENT', 'EACCES', 'EIO']) {
+    await t.test(`transcript copy ${code} cleans its temporary directory`, async (t) => {
+      const recorded: string[] = [];
+      const mkdtemp = fs.mkdtemp;
+      const copyFile = fs.copyFile;
+      t.mock.method(fs, 'mkdtemp', async (...args: Parameters<typeof fs.mkdtemp>) => {
+        const dir = await mkdtemp(...args);
+        if (String(args[0]).includes('pi-desktop-models-')) recorded.push(String(dir));
+        return dir;
+      });
+      const failure = Object.assign(new Error(`copy ${code}`), { code });
+      t.mock.method(fs, 'copyFile', async (...args: Parameters<typeof fs.copyFile>) => {
+        if (args[0] === imported.file) throw failure;
+        return copyFile(...args);
+      });
+      t.after(async () => {
+        for (const dir of recorded) await fs.rm(dir, { recursive: true, force: true });
+      });
+      const probe = new AgentService(store, new Workspace(store.dir));
+      services.push(probe);
+      if (code === 'ENOENT') {
+        await probe.readModels(imported.id);
+        assert.equal(probe.runtime.modelsLoaded, true);
+        assert.equal(probe.runtime.error, undefined);
+      } else {
+        await assert.rejects(probe.readModels(imported.id), (error) => error === failure);
+        assert.equal(probe.runtime.modelsLoaded, false);
+        assert.match(probe.runtime.error ?? '', new RegExp(code));
+      }
+      assert.equal(probe.runtime.modelsLoading, false);
+      assert.equal(probe.runtime.connected, false);
+      assert.equal(recorded.length, 1, 'copy is attempted after creating a directory');
+      for (const dir of recorded)
+        await assert.rejects(fs.lstat(dir), { code: 'ENOENT' }, 'the probe directory is cleaned');
+      assert.equal(await fs.readFile(imported.file!, 'utf8'), history);
+    });
+  }
 });

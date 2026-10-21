@@ -69,6 +69,7 @@ import {
   terminalOpen,
 } from './platform';
 import {
+  ACCENTS,
   busy,
   messageText,
   type AppEvent,
@@ -648,6 +649,7 @@ const handlers: Record<keyof ApiMap, (...args: any[]) => any> = {
     });
     if (result.response !== 1) return false;
     if (!store.state.sessions.includes(s)) return false;
+    let removedFile = false;
     if (service.active(id)) throw new Error('请先停止这个会话的任务');
     await service.release(id);
     await assertTerminalClosed(id);
@@ -659,7 +661,10 @@ const handlers: Record<keyof ApiMap, (...args: any[]) => any> = {
           throw error;
         },
       );
-      if (exists) await shell.trashItem(s.file);
+      if (exists) {
+        await shell.trashItem(s.file);
+        removedFile = true;
+      }
     }
     store.removeSessions([id]);
     if (store.state.selectedSessionId === id) {
@@ -670,7 +675,7 @@ const handlers: Record<keyof ApiMap, (...args: any[]) => any> = {
       store.selectSession(next.id);
     }
     await save();
-    return true;
+    return { trashed: removedFile };
   },
   pinSession: async (id, pinned) => {
     text(id, 100);
@@ -936,6 +941,10 @@ const handlers: Record<keyof ApiMap, (...args: any[]) => any> = {
     if (value.theme !== undefined) {
       if (!['light', 'dark', 'system'].includes(value.theme)) throw new Error('主题无效');
       next.theme = value.theme;
+    }
+    if (value.accent !== undefined) {
+      if (!(ACCENTS as readonly unknown[]).includes(value.accent)) throw new Error('强调色无效');
+      next.accent = value.accent;
     }
     for (const [key, min, max] of [
       ['fontScale', 1, 2],
@@ -1451,6 +1460,19 @@ async function createWindow() {
     window.setAutoHideMenuBar(false);
     window.setMenuBarVisibility(false);
   }
+  window.webContents.on('context-menu', (_event, { isEditable, editFlags }) => {
+    if (!isEditable) return;
+    Menu.buildFromTemplate([
+      { role: 'undo', label: '撤销', enabled: editFlags.canUndo },
+      { role: 'redo', label: '重做', enabled: editFlags.canRedo },
+      { type: 'separator' },
+      { role: 'cut', label: '剪切', enabled: editFlags.canCut },
+      { role: 'copy', label: '复制', enabled: editFlags.canCopy },
+      { role: 'paste', label: '粘贴', enabled: editFlags.canPaste },
+      { type: 'separator' },
+      { role: 'selectAll', label: '全选', enabled: editFlags.canSelectAll },
+    ]).popup({ window });
+  });
   const rendererLost = () => {
     appDialogsReady = false;
     cancelAppDialogs();
