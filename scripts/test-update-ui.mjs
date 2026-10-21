@@ -104,7 +104,7 @@ try {
     });
   });
   await page.reload();
-  for (const installation of ['portable', 'mac', 'deb']) {
+  for (const installation of ['portable', 'deb']) {
     await update({ installation });
     await page.getByRole('button', { name: 'v0.9.1 可用', exact: true }).click();
     await page.getByRole('heading', { name: '更新验证', exact: true }).waitFor();
@@ -116,9 +116,9 @@ try {
   }
   assert.deepEqual(
     await app.evaluate(() => globalThis.updateUiFixture.links),
-    Array(3).fill('https://github.com/yeyuProject/pi-desktop-gui/releases/tag/v0.9.1'),
+    Array(2).fill('https://github.com/yeyuProject/pi-desktop-gui/releases/tag/v0.9.1'),
   );
-  console.log('PASS portable/macOS/deb notification-only actions and correct release links');
+  console.log('PASS portable/deb notification-only actions and correct release links');
 
   await update({
     installation: 'nsis',
@@ -175,7 +175,10 @@ try {
   console.log('PASS an unchanged version shows an unconfirmed update and the target installer download');
 
   const runtime = { ...emptyRuntime(), sessionId: session.id, connected: true, status: 'running' };
-  await update({ state: 'ready', version: '0.9.1', progress: 100, lastInstall: undefined }, runtime);
+  await update(
+    { installation: 'mac', state: 'ready', version: '0.9.1', progress: 100, lastInstall: undefined },
+    runtime,
+  );
   await page.getByRole('button', { name: '重启以更新到 v0.9.1', exact: true }).click();
   const restart = page.getByRole('button', { name: '立即重启', exact: true });
   assert.equal(await restart.isDisabled(), true);

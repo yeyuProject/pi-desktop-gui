@@ -22,10 +22,11 @@ import { extractFile } from '@electron/asar';
 import { Store } from '../electron/store';
 import writeWindowsUpdateFileChecks from './after-sign.mjs';
 import { completeExpectedExit } from './expected-exit.ts';
+import { testMacUpdateSafety } from './mac-update-safety';
 
 // Build two copies of the production app. Only identity, data directory and update transport differ.
 // The fixture has its own installer GUID and never installs or removes the user's Pi Desktop.
-if (!['win32', 'linux'].includes(process.platform)) throw new Error('Update roundtrip runs on Windows/Linux');
+if (!['win32', 'linux', 'darwin'].includes(process.platform)) throw new Error('Unsupported update platform');
 const exec = promisify(execFile);
 const root = await fs.realpath(await fs.mkdtemp(path.join(os.tmpdir(), 'pi-update-roundtrip-')));
 const name = 'pi-desktop-update-fixture-' + randomUUID().slice(0, 8);
@@ -97,10 +98,16 @@ const port = (server.address() as import('node:net').AddressInfo).port;
 const feed = `http://127.0.0.1:${port}/`;
 const config = JSON.parse(await fs.readFile('package.json', 'utf8'));
 // Electron 44 downloads its binary lazily when required; a fresh npm ci has no dist directory yet.
-const electronDist = path.dirname(createRequire(import.meta.url)('electron') as string);
+const electronExecutable = createRequire(import.meta.url)('electron') as string;
+const electronDist =
+  process.platform === 'darwin'
+    ? path.resolve(path.dirname(electronExecutable), '../../..')
+    : path.dirname(electronExecutable);
 const env: Record<string, string> = Object.fromEntries(
   Object.entries(process.env).filter((entry): entry is [string, string] => entry[1] !== undefined),
 );
+const previousFixtureSigning = process.env.CSC_FOR_PULL_REQUEST;
+if (process.platform === 'darwin') process.env.CSC_FOR_PULL_REQUEST = 'true';
 env.PI_OFFLINE = '1';
 env.APPIMAGE_EXTRACT_AND_RUN = '1';
 delete env.PI_DESKTOP_DATA_DIR;
@@ -164,6 +171,7 @@ const until = async <T>(check: () => Promise<T>, timeout = 120000): Promise<NonN
 const readBoot = (dir: string) =>
   until(async () => JSON.parse(await fs.readFile(path.join(dir, `boot-${nextVersion}.json`), 'utf8')));
 const instrument = `
+process.env.PI_OFFLINE = '1';
 const fixtureFs = require('node:fs'), fixturePath = require('node:path');
 const fixtureRoot = ${JSON.stringify(root)};
 const fixtureCase = JSON.parse(fixtureFs.readFileSync(fixturePath.join(fixtureRoot, 'active-case.json'), 'utf8'));
@@ -228,20 +236,24 @@ try {
         {
           name: 'loopback-update-feed',
           setup(build) {
-            build.onLoad({ filter: /electron[\\/]update-driver\.ts$/ }, async (args) => {
-              const source = await fs.readFile(args.path, 'utf8');
-              const options = JSON.stringify({
-                provider: 'generic',
-                url: feed,
-                useMultipleRangeRequest: false,
-              });
-              return {
-                loader: 'ts',
-                contents: source
-                  .replace('new NsisUpdater()', `new NsisUpdater(${options})`)
-                  .replace('new AppImageUpdater()', `new AppImageUpdater(${options})`),
-              };
-            });
+            build.onLoad(
+              { filter: /electron[\\/](?:mac-update-driver|update-driver)\.ts$/ },
+              async (args) => {
+                const source = await fs.readFile(args.path, 'utf8');
+                const options = JSON.stringify({
+                  provider: 'generic',
+                  url: feed,
+                  useMultipleRangeRequest: false,
+                });
+                return {
+                  loader: 'ts',
+                  contents: source
+                    .replace('new NsisUpdater()', `new NsisUpdater(${options})`)
+                    .replace('new AppImageUpdater()', `new AppImageUpdater(${options})`)
+                    .replace('super(null)', `super(${options})`),
+                };
+              },
+            );
             build.onLoad({ filter: /shared[\\/]app-update\.ts$/ }, async (args) => ({
               loader: 'ts',
               contents: (await fs.readFile(args.path, 'utf8')).replace(
@@ -253,7 +265,11 @@ try {
         },
       ],
     });
-    for (const file of ['preload.cjs', 'pi-bridge.mjs'])
+    for (const file of [
+      'preload.cjs',
+      'pi-bridge.mjs',
+      ...(process.platform === 'darwin' ? ['mac-update-helper.cjs', 'mac-update-swap'] : []),
+    ])
       await fs.copyFile(path.resolve('dist-electron', file), path.join(stage, 'dist-electron', file));
     await fs.writeFile(
       path.join(stage, 'package.json'),
@@ -267,11 +283,22 @@ try {
         main: 'dist-electron/main.cjs',
       }),
     );
-    const platform = process.platform === 'win32' ? Platform.WINDOWS : Platform.LINUX;
+    const platform =
+      process.platform === 'win32'
+        ? Platform.WINDOWS
+        : process.platform === 'darwin'
+          ? Platform.MAC
+          : Platform.LINUX;
     await packageApp({
       projectDir: stage,
       targets: platform.createTarget(
-        process.platform === 'win32' ? (version === oldVersion ? ['nsis', 'portable'] : 'nsis') : 'AppImage',
+        process.platform === 'win32'
+          ? version === oldVersion
+            ? ['nsis', 'portable']
+            : 'nsis'
+          : process.platform === 'darwin'
+            ? 'zip'
+            : 'AppImage',
       ),
       publish: 'never',
       config: {
@@ -296,6 +323,7 @@ try {
           createStartMenuShortcut: true,
         },
         portable: { artifactName: 'Pi-Desktop-${version}-win-x64.exe' },
+        mac: { ...config.build.mac, target: 'zip', notarize: false },
         linux: {
           icon: path.resolve('build/icon-mac.png'),
           category: 'Development',
@@ -317,8 +345,20 @@ try {
       }
     }
     for (const file of await fs.readdir(out))
-      if (/\.(?:exe|AppImage|blockmap|yml)$/.test(file)) assets.set(file, path.join(out, file));
+      if (/\.(?:exe|AppImage|zip|blockmap|yml)$/.test(file)) assets.set(file, path.join(out, file));
   }
+  if (process.platform === 'darwin')
+    await testMacUpdateSafety(
+      root,
+      path.join(
+        root,
+        oldVersion,
+        'out',
+        process.arch === 'arm64' ? 'mac-arm64' : 'mac',
+        productName + '.app',
+      ),
+      assets.get(`Pi-Desktop-${nextVersion}-mac-${process.arch}.zip`)!,
+    );
   const modes =
     process.platform === 'win32'
       ? ['restart', 'stale-shortcut', 'unpacked-restart', 'portable-to-installer', 'on-quit']
@@ -332,7 +372,9 @@ try {
     const executable =
       process.platform === 'win32'
         ? path.join(runningDirectory, productName + '.exe')
-        : path.join(root, 'current.AppImage');
+        : process.platform === 'darwin'
+          ? path.join(installDir, productName + '.app/Contents/MacOS', productName)
+          : path.join(root, 'current.AppImage');
     const dataDir = path.join(root, mode, 'data');
     const store = new Store(dataDir, oldVersion);
     await store.load();
@@ -397,6 +439,21 @@ try {
     } else if (process.platform === 'linux') {
       await fs.copyFile(assets.get(`Pi-Desktop-${oldVersion}-linux-x64.AppImage`)!, executable);
       await fs.chmod(executable, 0o755);
+    } else if (process.platform === 'darwin') {
+      await fs.mkdir(installDir, { recursive: true });
+      const app = path.join(installDir, productName + '.app');
+      await fs.rm(app, { recursive: true, force: true });
+      await exec('/usr/bin/ditto', [
+        path.join(
+          root,
+          oldVersion,
+          'out',
+          process.arch === 'arm64' ? 'mac-arm64' : 'mac',
+          productName + '.app',
+        ),
+        app,
+      ]);
+      await exec('/usr/bin/codesign', ['--verify', '--deep', '--strict', app]);
     }
     badChecksum = mode === 'restart';
     let page: Page;
@@ -416,6 +473,9 @@ try {
       page = context.pages()[0] ?? (await context.waitForEvent('page', { timeout: 60000 }));
     } else {
       app = await electron.launch({ executablePath: executable, args: [], env, timeout: 60000 });
+      app.process().stderr?.on('data', (chunk) => {
+        void fs.appendFile(path.join(root, mode + '-stderr.log'), chunk);
+      });
       page = await app.firstWindow();
     }
     page.setDefaultTimeout(60000);
@@ -522,11 +582,21 @@ try {
             JSON.parse(extractFile(path.join(installDir, 'resources/app.asar'), 'package.json').toString())
               .version === nextVersion,
         );
-      else
+      else if (process.platform === 'linux')
         await until(
           async () =>
             (await fs.stat(executable)).size ===
             (await fs.stat(assets.get(`Pi-Desktop-${nextVersion}-linux-x64.AppImage`)!)).size,
+        );
+      else
+        await until(
+          async () =>
+            JSON.parse(
+              extractFile(
+                path.join(installDir, productName + '.app/Contents/Resources/app.asar'),
+                'package.json',
+              ).toString(),
+            ).version === nextVersion,
         );
       await new Promise((resolve) => setTimeout(resolve, 2000));
       const next = spawn(executable, [], { env, windowsHide: true, stdio: 'ignore' });
@@ -563,6 +633,25 @@ try {
           code: 'ENOENT',
         });
       }
+    } else if (process.platform === 'darwin') {
+      assert.equal(boot.executable, executable);
+      await exec('/usr/bin/codesign', [
+        '--verify',
+        '--deep',
+        '--strict',
+        path.join(installDir, productName + '.app'),
+      ]);
+      const backups = (await fs.readdir(installDir)).filter((name) => name.startsWith('.pi-desktop-update-'));
+      assert.ok(backups.length > 0, 'an atomic exchange preserves the previous application');
+      const versions = await Promise.all(
+        backups.map(async (backup) => {
+          const previous = path.join(installDir, backup, 'payload', productName + '.app');
+          return JSON.parse(
+            extractFile(path.join(previous, 'Contents/Resources/app.asar'), 'package.json').toString(),
+          ).version;
+        }),
+      );
+      assert.ok(versions.includes(oldVersion));
     }
     const oldBoot = JSON.parse(await fs.readFile(path.join(dataDir, `boot-${oldVersion}.json`), 'utf8'));
     assert.equal(
@@ -608,6 +697,11 @@ try {
   if (app) {
     const page = app.windows()[0];
     if (page && !page.isClosed())
+      console.error(
+        'Update states:',
+        await page.evaluate(() => (window as any).updateStates).catch(() => []),
+      );
+    if (page && !page.isClosed())
       await page.screenshot({ path: 'test-results/update-roundtrip-failure.png' }).catch(() => {});
   }
   throw error;
@@ -624,5 +718,7 @@ try {
         console.error('Fixture uninstall failed:', error.message),
       );
   }
+  if (previousFixtureSigning === undefined) delete process.env.CSC_FOR_PULL_REQUEST;
+  else process.env.CSC_FOR_PULL_REQUEST = previousFixtureSigning;
   console.log(`Update fixture artifacts: ${root}`);
 }

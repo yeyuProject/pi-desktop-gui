@@ -90,7 +90,7 @@ Get the installer for your platform from the [latest release](https://github.com
 | **macOS**   | Apple Silicon · Intel | `.dmg` · `.zip`                                                      |
 | **Linux**   | x86_64                | `.AppImage` (auto-updates) · `.deb`                                  |
 
-The Windows installer and Linux AppImage update themselves in the background (can be turned off in **Settings → About & Updates**). Other formats notify you when a new version is available.
+The Windows installer, macOS app and Linux AppImage support in-app updates (automatic downloads can be turned off in **Settings → About & Updates**). Other formats notify you when a new version is available. On Mac, run the app from a writable directory, preferably Applications. Versions through v0.14.30 need one manual install of v0.14.31 or later to enable Mac updates. Active tasks and approvals block restart.
 
 ### 3. Connect a model and start
 

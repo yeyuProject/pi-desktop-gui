@@ -167,9 +167,12 @@ test(
         releaseDate: new Date().toISOString(),
       });
       await service.install();
-      for (let tries = 0; tries < 100; tries++) {
+      // macOS can take over a second to start a newly written executable. This
+      // checks launch/result semantics, not scheduler or platform scan latency.
+      const deadline = Date.now() + 10000;
+      while (Date.now() < deadline) {
         if (quits && (await fs.stat(marker).catch(() => undefined))) break;
-        await new Promise((resolve) => setTimeout(resolve, 10));
+        await new Promise((resolve) => setTimeout(resolve, 25));
       }
       assert.equal(quits, 1);
       assert.deepEqual((await fs.readFile(marker, 'utf8')).trim().split('\n'), ['--updated', '--force-run']);

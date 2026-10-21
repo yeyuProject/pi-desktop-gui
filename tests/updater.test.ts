@@ -87,6 +87,66 @@ test('disabled environments make no network requests even when called manually',
   await assert.rejects(service.install(), /尚未下载完成/);
   assert.equal(calls, 0);
 });
+test('Mac updates download and wait for an acknowledged installer before completing restart', async (t) => {
+  const driver = new Driver();
+  let release!: () => void;
+  driver.install = () =>
+    new Promise<void>((resolve) => {
+      release = resolve;
+    });
+  const service = new UpdateService({ ...options(driver), installation: 'mac' });
+  t.after(() => service.dispose());
+  assert.equal(service.state.mode, 'auto');
+  await service.check();
+  await service.download();
+  let completed = false;
+  const installing = service.install().then(() => {
+    completed = true;
+  });
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.equal(completed, false);
+  release();
+  await installing;
+  assert.equal(completed, true);
+});
+test('Mac normal quit records an attempt and awaits preparation; busy or failed preparation cannot install', async (t) => {
+  const driver = new Driver();
+  let busy = true,
+    prepared = 0;
+  const records: string[] = [];
+  const service = new UpdateService({
+    ...options(driver),
+    installation: 'mac',
+    busy: () => busy,
+    recordAttempt: async (attempt) => {
+      records.push(attempt.outcome);
+    },
+    driver: {
+      ...driver,
+      subscribe: driver.subscribe.bind(driver),
+      check: driver.check.bind(driver),
+      download: driver.download.bind(driver),
+      configure: driver.configure.bind(driver),
+      install: () => {},
+      prepareForQuit: async () => {
+        prepared++;
+        throw new Error('installer unavailable');
+      },
+    },
+  });
+  t.after(() => service.dispose());
+  await service.check();
+  await service.download();
+  await service.prepareForQuit(true);
+  assert.equal(prepared, 0);
+  busy = false;
+  await service.prepareForQuit(false);
+  assert.equal(prepared, 0);
+  await service.prepareForQuit(true);
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.equal(prepared, 1);
+  assert.deepEqual(records, ['pending', 'failed']);
+});
 
 test('startup waits ten seconds, periodic checks wait six hours, and manual checks are immediate', async (t) => {
   t.mock.timers.enable({ apis: ['setTimeout', 'setInterval'] });
