@@ -404,7 +404,7 @@ export interface ApiMap {
   importSession: { args: [projectId?: string]; result: Session | null };
   selectSession: { args: [string]; result: Message[] };
   renameSession: { args: [string, string]; result: void };
-  deleteSession: { args: [string]; result: boolean };
+  deleteSession: { args: [string]; result: false | { trashed: boolean } };
   pinSession: { args: [string, boolean]; result: void };
   searchSessions: { args: [string]; result: SessionMatch[] };
   piSessions: { args: []; result: PiSessionInfo[] };

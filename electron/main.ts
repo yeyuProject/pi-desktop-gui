@@ -648,6 +648,7 @@ const handlers: Record<keyof ApiMap, (...args: any[]) => any> = {
     });
     if (result.response !== 1) return false;
     if (!store.state.sessions.includes(s)) return false;
+    const removedFile = Boolean(s.file);
     if (service.active(id)) throw new Error('请先停止这个会话的任务');
     await service.release(id);
     await assertTerminalClosed(id);
@@ -670,7 +671,7 @@ const handlers: Record<keyof ApiMap, (...args: any[]) => any> = {
       store.selectSession(next.id);
     }
     await save();
-    return true;
+    return { trashed: removedFile };
   },
   pinSession: async (id, pinned) => {
     text(id, 100);

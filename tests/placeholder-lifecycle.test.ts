@@ -91,7 +91,7 @@ async function fixture(t: TestContext, dependencies: Record<string, unknown> = {
      let stateRevision = 0;
      const stateSnapshot = ${initializer('stateSnapshot')};
      return {
-       handlers: { ${['saveDraft', 'consumeDraft', 'saveView', 'renameSession', 'pinSession', 'selectSession', 'editDraft', 'readModels'].map(handler).join(',')} },
+       handlers: { ${['saveDraft', 'consumeDraft', 'saveView', 'renameSession', 'pinSession', 'selectSession', 'editDraft', 'readModels', 'deleteSession'].map(handler).join(',')} },
        newSession, protectSessionOperation, stateSnapshot
      };`,
     {
@@ -1019,4 +1019,23 @@ test('actual update persistence boundary waits for a promoted no-agent draft', a
     gate.release.resolve();
     await saving.catch(() => {});
   }
+});
+
+test('deleting the selected empty conversation removes it without claiming the recycle bin', async (t) => {
+  const dialogs: string[] = [];
+  const f = await fixture(t, { showAppDialog: async (options: { message: string }) => {
+    dialogs.push(options.message);
+    return { response: 1 };
+  } });
+  const current = await f.newSession();
+  const other = f.store.createSession();
+  f.store.selectSession(current.id);
+  const removed = await f.handlers.deleteSession(current.id);
+  assert.deepEqual(removed, { trashed: false });
+  assert.equal(dialogs.length, 1);
+  assert.equal(f.store.state.sessions.some((session) => session.id === current.id), false);
+  assert.equal(f.store.state.selectedSessionId, other.id);
+  assert.equal(f.events.at(-1)?.type, 'state');
+  if (f.events.at(-1)?.type === 'state')
+    assert.equal(f.events.at(-1).state.selectedSessionId, other.id);
 });
