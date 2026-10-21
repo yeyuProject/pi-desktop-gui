@@ -42,6 +42,10 @@ jobs:
         run: node --import tsx scripts/test-concurrency-settings.ts
       - name: Package Windows and macOS acceptance builds
         if: matrix.os != 'ubuntu-latest'
+        env:
+          # mac.identity is '-' (ad-hoc); PR acceptance must sign before integrity verification.
+          CSC_FOR_PULL_REQUEST: 'true'
+          CSC_IDENTITY_AUTO_DISCOVERY: 'false'
         run: node scripts/package.mjs --dir
       - name: Measure ten session switches in the packaged app
         if: matrix.os != 'ubuntu-latest'
