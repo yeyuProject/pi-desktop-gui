@@ -1,16 +1,13 @@
 :root {
   font-family:
-    'Segoe UI Variable Text',
+    'PingFang SC',
+    'Microsoft YaHei',
     'Segoe UI',
     -apple-system,
     BlinkMacSystemFont,
-    'Microsoft YaHei UI',
-    'Microsoft YaHei',
-    'PingFang SC',
     sans-serif;
   font-synthesis: none;
-  --font-display:
-    'Segoe UI Variable Display', 'Segoe UI', 'Microsoft YaHei UI', 'Microsoft YaHei', sans-serif;
+  --font-display: 'PingFang SC', 'Microsoft YaHei', 'Segoe UI Variable Display', 'Segoe UI', sans-serif;
   --font-math: 'Cambria Math', Cambria, 'STIX Two Math', Georgia, serif;
   --font-mono: 'Cascadia Mono', 'SFMono-Regular', 'JetBrains Mono', Consolas, 'Microsoft YaHei', monospace;
   --font-scale: 1;
