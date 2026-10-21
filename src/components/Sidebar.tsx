@@ -15,7 +15,7 @@ import {
   PinOff,
 } from 'lucide-react';
 import { busy, type Session } from '../../shared/types';
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { isOlderSession } from '../../shared/usage';
 import '../styles/management.css';
 import { platform, shortcut } from '../lib/platform';
@@ -80,7 +80,35 @@ export function Sidebar(
     return new Set(project ? [project.id] : []);
   });
   const [olderOpen, setOlderOpen] = useState<Set<string>>(new Set());
+  const menuRef = useRef<HTMLDivElement>(null);
   const previousProject = useRef(project?.id);
+  useLayoutEffect(() => {
+    const menu = menuRef.current;
+    if (!menu) return;
+    // Fixed positioning keeps the menu outside the project list's overflow clipping.
+    const anchor = menu.parentElement!.getBoundingClientRect();
+    const { clientWidth, clientHeight } = document.documentElement;
+    const width = menu.offsetWidth;
+    const height = menu.offsetHeight;
+    const below = anchor.bottom + 4;
+    const top = below + height <= clientHeight - 8 ? below : anchor.top - height - 4;
+    menu.style.left = `${Math.max(8, Math.min(anchor.right - width, clientWidth - width - 8))}px`;
+    menu.style.top = `${Math.max(8, Math.min(top, clientHeight - height - 8))}px`;
+
+    const close = () => setMenuId('');
+    const list = menu.closest('.project-list')!;
+    const { scrollTop, scrollLeft } = list;
+    const closeOnScroll = () => {
+      // Revealing the trigger can leave a scroll event queued before the menu opens.
+      if (list.scrollTop !== scrollTop || list.scrollLeft !== scrollLeft) close();
+    };
+    list.addEventListener('scroll', closeOnScroll);
+    window.addEventListener('resize', close);
+    return () => {
+      list.removeEventListener('scroll', closeOnScroll);
+      window.removeEventListener('resize', close);
+    };
+  }, [menuId, setMenuId]);
   useEffect(() => {
     try {
       localStorage.setItem('pi-desktop-expanded-projects', JSON.stringify([...expandedProjects]));
@@ -149,7 +177,7 @@ export function Sidebar(
         <MoreHorizontal size={14} />
       </IconButton>
       {menuId === s.id && (
-        <div className="context-menu" role="menu">
+        <div ref={menuRef} className="context-menu" role="menu">
           <button
             role="menuitem"
             onClick={() => {
@@ -293,39 +321,39 @@ export function Sidebar(
                   <MoreHorizontal size={15} />
                 </IconButton>
               </div>
+              {menuId === p.id && (
+                <div ref={menuRef} className="context-menu">
+                  <button
+                    onClick={() => {
+                      setRename({ kind: 'project', id: p.id, name: p.name });
+                      setMenuId('');
+                    }}
+                  >
+                    <Pencil size={14} />
+                    重命名
+                  </button>
+                  <button
+                    onClick={() => {
+                      void attempt(() => api.invoke('importSession', p.id));
+                      setMenuId('');
+                    }}
+                  >
+                    <Import size={14} />
+                    导入 Pi 会话
+                  </button>
+                  <button
+                    className="danger"
+                    onClick={() => {
+                      void attempt(() => api.invoke('removeProject', p.id));
+                      setMenuId('');
+                    }}
+                  >
+                    <Trash2 size={14} />
+                    移除项目入口
+                  </button>
+                </div>
+              )}
             </div>
-            {menuId === p.id && (
-              <div className="context-menu">
-                <button
-                  onClick={() => {
-                    setRename({ kind: 'project', id: p.id, name: p.name });
-                    setMenuId('');
-                  }}
-                >
-                  <Pencil size={14} />
-                  重命名
-                </button>
-                <button
-                  onClick={() => {
-                    void attempt(() => api.invoke('importSession', p.id));
-                    setMenuId('');
-                  }}
-                >
-                  <Import size={14} />
-                  导入 Pi 会话
-                </button>
-                <button
-                  className="danger"
-                  onClick={() => {
-                    void attempt(() => api.invoke('removeProject', p.id));
-                    setMenuId('');
-                  }}
-                >
-                  <Trash2 size={14} />
-                  移除项目入口
-                </button>
-              </div>
-            )}
             {expandedProjects.has(p.id) && (
               <div className="session-list" aria-label={`${p.name} 的会话`}>
                 {renderSessionList(p.id)}

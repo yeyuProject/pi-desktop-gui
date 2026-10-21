@@ -608,6 +608,19 @@ UI1–UI5 已实现，沿用浅色墨绿 `#1F6B52` / 深色 `#74C7A3`、运行�
 
 **测试。** `tests/templates-v014.test.ts` 增加 `describeResource` 对 Skill / 模板 frontmatter、正文首段回退与损坏文件容错的单元测试；`scripts/test-features-ui.mjs` 与 `scripts/test-management-v014-ui.mjs` 回归分类筛选、简介展示与模板编辑操作。
 
+## v0.14.29：外观强调色（已实现）
+
+主题（浅色 / 深色 / 跟随系统）决定背景与文字，强调色决定主按钮、选中项、焦点框、滑块、徽标等高亮元素。两者独立设置、自由组合。
+
+### A1 强调色选择，默认黑白
+
+- “设置 → 外观与编辑器”在“主题”下方新增“强调色”，提供黑白、绿色、蓝色、紫色四项，每项带色块，当前项高亮并设置 `aria-pressed`。点击立即生效并保存，无需点击底部保存。
+- 默认“黑白”：浅色主题下强调元素为黑底白字，深色主题下为白底黑字，与原生窗口按钮和标题栏的黑白配色一致。原有绿色保留为可选项。
+- 四种强调色在浅色、深色和跟随系统下各有一组配色（`--accent`、`--accent-soft`、`--on-accent`），深色下使用提亮版本，保证主按钮文字和选中背景的对比度。
+- 设置字段为 `Settings.accent`（`mono` / `green` / `blue` / `violet`，常量 `ACCENTS` 位于 `shared/types.ts`）。主进程 `saveSettings` 拒绝未知值；读取 `state.json` 时缺失字段使用默认黑白，未知值按坏设置修复并计入恢复提示。
+- 实现：`src/styles/accents.css` 只覆盖强调色变量，根元素通过 `data-accent` 切换；`src/main.tsx` 在状态加载前先设为黑白，避免启动闪烁成绿色。
+- 测试：`tests/store.test.ts` 覆盖默认值、有效值保留与未知值修复；`tests/theme-ui-selectors.test.ts` 覆盖四个强调色按钮名称与默认选中项。
+
 ## v0.7.0 需求补充：工具审批、Git 快照与长会话性能
 
 以下三项为 v0.7.0 的新增功能。审批使用真实 Pi 1.1.0 和本地测试接口验收（`scripts/test-approval.ts`、`scripts/test-approval-ui.mjs`）；快照与增量状态使用回归测试验证（`tests/core.test.ts`、`tests/snapshot.test.ts`、`tests/runtime-patch.test.ts`）。性能部分尚未完成原方案全部目标。

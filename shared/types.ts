@@ -52,6 +52,8 @@ export interface Session {
   thinking?: string;
   approvalMode?: ApprovalMode;
 }
+export const ACCENTS = ['mono', 'green', 'blue', 'violet'] as const;
+export type Accent = (typeof ACCENTS)[number];
 export interface Settings {
   piPath: string;
   nodePath: string;
@@ -61,6 +63,7 @@ export interface Settings {
   modelId: string;
   thinking: string;
   theme: 'light' | 'dark' | 'system';
+  accent: Accent;
   fontScale: number;
   sidebarWidth: number;
   inspectorWidth: number;

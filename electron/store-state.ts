@@ -1,5 +1,5 @@
 import path from 'node:path';
-import { busy, type AppState, type Project, type Session, type Settings } from '../shared/types';
+import { ACCENTS, busy, type AppState, type Project, type Session, type Settings } from '../shared/types';
 
 export const defaultSettings: Settings = {
   piPath: '',
@@ -10,6 +10,7 @@ export const defaultSettings: Settings = {
   modelId: '',
   thinking: '',
   theme: 'system',
+  accent: 'mono',
   fontScale: 1,
   sidebarWidth: 240,
   inspectorWidth: 380,
@@ -146,9 +147,11 @@ export function parseState(value: unknown) {
     const valid =
       key === 'theme'
         ? ['light', 'dark', 'system'].includes(String(candidate))
-        : typeof defaultSettings[key] === 'number'
-          ? typeof candidate === 'number' && Number.isFinite(candidate) && candidate > 0
-          : typeof candidate === typeof defaultSettings[key];
+        : key === 'accent'
+          ? (ACCENTS as readonly unknown[]).includes(candidate)
+          : typeof defaultSettings[key] === 'number'
+            ? typeof candidate === 'number' && Number.isFinite(candidate) && candidate > 0
+            : typeof candidate === typeof defaultSettings[key];
     if (valid) Object.assign(state.settings, { [key]: candidate });
     else repairedSettings++;
   }

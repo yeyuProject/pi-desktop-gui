@@ -210,10 +210,6 @@
 .session-row.menu-open > .icon-button {
   opacity: 1;
 }
-.session-row > .context-menu {
-  top: 34px;
-  right: 0;
-}
 .pin-icon {
   color: var(--accent);
   transform: rotate(35deg);

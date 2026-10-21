@@ -50,7 +50,7 @@ Sessions and workspaces stay on your machine. Model requests go to whichever pro
 - **Steer while it runs** — Add instructions mid-run (steer) or queue follow-ups within each conversation.
 - **Clear retry progress** — See retry backoff and response wait time, cancel an active retry request, and distinguish recovered attempts from failures in the run log. Consecutive empty error replies show the latest failure once, with earlier attempts expandable.
 - **Keyboard-first** — Global search across sessions, in-session find, and shortcuts for every panel.
-- **Consistent appearance** — Light, dark and system themes cover the desktop title bar and confirmations while retaining native window controls. Pi configuration stays editable during a run; saving waits until it is safe and reports separately when a saved change could not yet be applied.
+- **Consistent appearance** — Light, dark and system themes, plus black-and-white (default), green, blue or violet accent colors, cover the desktop title bar and confirmations while retaining native window controls. Pi configuration stays editable during a run; saving waits until it is safe and reports separately when a saved change could not yet be applied.
 
 <table>
   <tr>

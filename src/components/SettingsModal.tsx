@@ -370,6 +370,30 @@ export function SettingsModal(
                       </button>
                     ))}
                   </div>
+                  <label className="field-label">强调色</label>
+                  <div className="accent-options">
+                    {(
+                      [
+                        ['mono', '黑白'],
+                        ['green', '绿色'],
+                        ['blue', '蓝色'],
+                        ['violet', '紫色'],
+                      ] as const
+                    ).map(([key, label]) => (
+                      <button
+                        className={prefs.accent === key ? 'active' : ''}
+                        aria-pressed={prefs.accent === key}
+                        key={key}
+                        onClick={() => {
+                          setPrefs({ ...prefs, accent: key });
+                          void attempt(() => api.invoke('saveSettings', { accent: key }));
+                        }}
+                      >
+                        <span className="accent-swatch" data-accent={key} />
+                        {label}
+                      </button>
+                    ))}
+                  </div>
                   <label className="field-label">
                     字号比例 <span>{Math.round(prefs.fontScale * 100)}%</span>
                   </label>

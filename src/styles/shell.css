@@ -189,10 +189,10 @@
   padding: 12px 10px 0;
 }
 .context-menu {
-  position: absolute;
-  top: 37px;
-  right: 0;
-  width: 174px;
+  position: fixed;
+  width: min(174px, calc(100vw - 16px));
+  max-height: calc(100vh - 16px);
+  overflow-y: auto;
   background: var(--surface);
   box-shadow: var(--shadow);
   border: 1px solid var(--line);

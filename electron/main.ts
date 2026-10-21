@@ -69,6 +69,7 @@ import {
   terminalOpen,
 } from './platform';
 import {
+  ACCENTS,
   busy,
   messageText,
   type AppEvent,
@@ -937,6 +938,10 @@ const handlers: Record<keyof ApiMap, (...args: any[]) => any> = {
       if (!['light', 'dark', 'system'].includes(value.theme)) throw new Error('主题无效');
       next.theme = value.theme;
     }
+    if (value.accent !== undefined) {
+      if (!(ACCENTS as readonly unknown[]).includes(value.accent)) throw new Error('强调色无效');
+      next.accent = value.accent;
+    }
     for (const [key, min, max] of [
       ['fontScale', 1, 2],
       ['sidebarWidth', 180, 360],
@@ -1451,6 +1456,19 @@ async function createWindow() {
     window.setAutoHideMenuBar(false);
     window.setMenuBarVisibility(false);
   }
+  window.webContents.on('context-menu', (_event, { isEditable, editFlags }) => {
+    if (!isEditable) return;
+    Menu.buildFromTemplate([
+      { role: 'undo', label: '撤销', enabled: editFlags.canUndo },
+      { role: 'redo', label: '重做', enabled: editFlags.canRedo },
+      { type: 'separator' },
+      { role: 'cut', label: '剪切', enabled: editFlags.canCut },
+      { role: 'copy', label: '复制', enabled: editFlags.canCopy },
+      { role: 'paste', label: '粘贴', enabled: editFlags.canPaste },
+      { type: 'separator' },
+      { role: 'selectAll', label: '全选', enabled: editFlags.canSelectAll },
+    ]).popup({ window });
+  });
   const rendererLost = () => {
     appDialogsReady = false;
     cancelAppDialogs();
