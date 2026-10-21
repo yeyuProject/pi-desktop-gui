@@ -2,6 +2,7 @@ import electronUpdater from 'electron-updater';
 import type { AppUpdater } from 'electron-updater';
 import path from 'node:path';
 import type { DesktopRelease, UpdateDriver, UpdateDriverEvent } from './updater';
+import { MacArchiveUpdater } from './mac-update-driver';
 
 function release(info: {
   version: string;
@@ -53,7 +54,15 @@ export function nativeUpdateDriver(updater: AppUpdater): UpdateDriver {
     },
   };
 }
-export function createNativeUpdateDriver(installation: 'nsis' | 'appimage') {
+export function createNativeUpdateDriver(installation: 'nsis' | 'appimage' | 'mac'): UpdateDriver {
+  if (installation === 'mac') {
+    const updater = new MacArchiveUpdater();
+    return {
+      ...nativeUpdateDriver(updater),
+      install: () => updater.installDownloaded(),
+      prepareForQuit: () => updater.prepareForQuit(),
+    };
+  }
   const { NsisUpdater, AppImageUpdater } = electronUpdater;
   if (installation === 'nsis') {
     const updater = new NsisUpdater();

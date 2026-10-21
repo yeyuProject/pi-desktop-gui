@@ -1,4 +1,5 @@
 import { EventEmitter } from 'node:events';
+import { MacUpdateError } from './mac-update';
 import {
   compareAppVersions,
   stableVersion,
@@ -22,7 +23,8 @@ export interface UpdateDriver {
   configure(autoDownload: boolean, installOnQuit: boolean): void;
   check(): Promise<void>;
   download(): Promise<void>;
-  install(): void;
+  install(): void | Promise<void>;
+  prepareForQuit?(): Promise<void>;
 }
 export function updateInstallation(
   platform: NodeJS.Platform,
@@ -35,6 +37,7 @@ export function updateInstallation(
   return env.APPIMAGE ? 'appimage' : 'deb';
 }
 export function updateError(error: unknown) {
+  if (error instanceof MacUpdateError) return error.message;
   const detail = error instanceof Error ? error.message : String(error);
   if (/ENOENT/i.test(detail) && /app-update\.yml/i.test(detail))
     return '当前程序缺少自动更新配置，请前往版本页面下载完整安装包。';
@@ -108,7 +111,7 @@ export class UpdateService extends EventEmitter {
       state: 'idle',
       currentVersion: options.currentVersion,
       installation: options.installation,
-      mode: ['nsis', 'appimage'].includes(options.installation) ? 'auto' : 'notify',
+      mode: ['nsis', 'appimage', 'mac'].includes(options.installation) ? 'auto' : 'notify',
       enabled: options.enabled,
       disabledReason: options.disabledReason,
       installing: false,
@@ -240,9 +243,29 @@ export class UpdateService extends EventEmitter {
     if (enable && this.state.state === 'available') void this.download();
   }
   /** Call after the normal exit flow has stopped Pi and flushed data. */
-  prepareForQuit(allowInstall: boolean) {
+  async prepareForQuit(allowInstall: boolean) {
     this.installOnQuit = allowInstall && this.state.state === 'ready' && !this.options.busy();
     this.options.driver?.configure(this.autoDownload, this.installOnQuit);
+    if (this.installOnQuit && this.options.driver?.prepareForQuit) {
+      try {
+        const attempt: UpdateInstallAttempt = {
+          currentVersion: this.state.currentVersion,
+          targetVersion: this.state.version!,
+          startedAt: Date.now(),
+          outcome: 'pending',
+        };
+        await this.options.recordAttempt?.(attempt);
+        this.publish({ lastInstall: attempt });
+        if (!this.installOnQuit || this.state.state !== 'ready' || this.options.busy()) {
+          this.markInstallFailed();
+          return;
+        }
+        await this.options.driver.prepareForQuit();
+      } catch (error) {
+        this.markInstallFailed();
+        this.fail(error);
+      }
+    }
   }
   async install() {
     if (!this.state.enabled || this.state.mode !== 'auto' || this.state.state !== 'ready')
@@ -264,7 +287,7 @@ export class UpdateService extends EventEmitter {
       if (!this.state.installing || this.state.state !== 'ready' || this.state.version !== targetVersion)
         throw new Error('更新状态已变化，已取消重启更新，请重试。');
       this.publish({ lastInstall: attempt });
-      this.options.driver!.install();
+      await this.options.driver!.install();
     } catch (error) {
       this.options.installFailed();
       this.markInstallFailed();

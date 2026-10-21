@@ -1420,7 +1420,8 @@ const handlers: Record<keyof ApiMap, (...args: any[]) => any> = {
     await shell.openPath(store.dir);
   },
   quit: () => {
-    window?.close();
+    // On macOS a window close only hides it. Quit must enter the normal persistence/install barrier.
+    app.quit();
   },
 };
 
@@ -1588,7 +1589,9 @@ async function createWindow() {
         }
         workspaceWatcher?.dispose();
         await finalWindowWrite;
-        updates.prepareForQuit(!sessionEnding && (store.storage.writable || !!store.storage.newerFormat));
+        await updates.prepareForQuit(
+          !sessionEnding && (store.storage.writable || !!store.storage.newerFormat),
+        );
         updates.dispose();
         window?.destroy();
         app.quit();
@@ -1652,7 +1655,7 @@ else {
       const installation = updateInstallation(process.platform, app.isPackaged, process.env);
       const updateEnabled = app.isPackaged && !process.env.PI_DESKTOP_DATA_DIR;
       const updateAttempts =
-        updateEnabled && ['nsis', 'appimage'].includes(installation)
+        updateEnabled && ['nsis', 'appimage', 'mac'].includes(installation)
           ? new UpdateAttemptFile(store.dir)
           : undefined;
       updates = new UpdateService({
@@ -1664,7 +1667,7 @@ else {
         previousAttempt: await updateAttempts?.read(app.getVersion()),
         recordAttempt: updateAttempts ? (attempt) => updateAttempts.record(attempt) : undefined,
         driver:
-          updateEnabled && (installation === 'nsis' || installation === 'appimage')
+          updateEnabled && (installation === 'nsis' || installation === 'appimage' || installation === 'mac')
             ? createNativeUpdateDriver(installation)
             : undefined,
         fetchRelease: () => fetchLatestRelease(net.fetch),

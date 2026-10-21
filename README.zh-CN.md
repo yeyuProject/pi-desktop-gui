@@ -87,7 +87,7 @@ npm install -g --ignore-scripts @earendil-works/pi-coding-agent
 | **macOS**   | Apple Silicon · Intel | `.dmg` · `.zip`                                          |
 | **Linux**   | x86_64                | `.AppImage`（支持自动更新）· `.deb`                      |
 
-Windows 安装版和 Linux AppImage 会在后台自动更新（可在 **设置 → 关于与更新** 关闭）；其他格式在有新版本时提示手动下载。
+Windows 安装版、macOS 和 Linux AppImage 支持应用内更新（可在 **设置 → 关于与更新** 关闭自动下载）；其他格式在有新版本时提示手动下载。Mac 请从可写目录运行应用，推荐放入“应用程序”；v0.14.30 及更早版本需先手动安装一次 v0.14.31 或更新版本，之后可直接在应用内升级。任务或审批未结束时不会重启更新。
 
 ### 3. 连接模型并开始
 
