@@ -21,6 +21,7 @@ import {
 import { extractFile } from '@electron/asar';
 import { Store } from '../electron/store';
 import writeWindowsUpdateFileChecks from './after-sign.mjs';
+import { completeExpectedExit } from './expected-exit.ts';
 
 // Build two copies of the production app. Only identity, data directory and update transport differ.
 // The fixture has its own installer GUID and never installs or removes the user's Pi Desktop.
@@ -493,12 +494,20 @@ try {
     const closed = portable
       ? new Promise<void>((resolve) => portableBrowser!.once('disconnected', () => resolve()))
       : app!.waitForEvent('close', { timeout: 120000 });
-    if (restart) await page.getByRole('button', { name: '立即重启', exact: true }).click();
-    else {
-      await page.getByRole('button', { name: '稍后', exact: true }).click();
-      await page.evaluate(() => window.desktop.invoke('quit'));
-    }
-    await closed;
+    const exitingProcess = portable ? portableProcess! : app!.process();
+    const exit = await completeExpectedExit(
+      async () => {
+        if (restart) await page.getByRole('button', { name: '立即重启', exact: true }).click();
+        else {
+          await page.getByRole('button', { name: '稍后', exact: true }).click();
+          await page.evaluate(() => window.desktop.invoke('quit'));
+        }
+      },
+      closed,
+      exitingProcess,
+      120000,
+    );
+    console.log(`Exit evidence ${mode}: ${JSON.stringify(exit)}`);
     app = undefined;
     portableBrowser = undefined;
     if (portable)
