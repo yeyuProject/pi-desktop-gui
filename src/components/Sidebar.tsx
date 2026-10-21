@@ -194,7 +194,11 @@ export function Sidebar(
                 const removed = await api.invoke('deleteSession', s.id);
                 if (removed)
                   setNotice(
-                    removed.trashed ? `会话已移到${platform.trash}` : '已删除这个还没有内容的会话',
+                    removed.trashed
+                      ? `会话已移到${platform.trash}`
+                      : s.file
+                        ? '会话记录已删除（会话文件已不存在）'
+                        : '已删除这个还没有内容的会话',
                   );
               });
             }}
