@@ -44,7 +44,7 @@ const menuFactory = helper(
   `let activeOperations = 0; const operationWaiters = new Set(); ${finishOperation.getText(source)}`,
   '{ invoke: newSessionFromMenu, pending: () => activeOperations }',
 );
-const themeFactory = helper('updateWindowTheme', 'window, nativeTheme, isMac, windowTheme');
+const themeFactory = helper('updateWindowTheme', 'window, nativeTheme, isMac, windowTheme, store');
 
 test('normal confirmations use themed requests and restore/show/focus before publishing', async () => {
   const calls: string[] = [];
@@ -217,10 +217,33 @@ test('theme changes update native controls only on Windows/Linux and retain macO
         { shouldUseDarkColors: dark },
         isMac,
         windowTheme,
+        undefined,
       );
       apply();
       const { background, ...overlay } = windowTheme(dark);
       assert.deepEqual(colors, [background]);
       assert.deepEqual(overlays, isMac ? [] : [overlay]);
     }
+});
+
+test('background themes paint the native window and title bar with their own palette', () => {
+  for (const theme of ['sepia', 'green', 'navy'] as const) {
+    const colors: unknown[] = [],
+      overlays: unknown[] = [];
+    themeFactory(
+      {
+        isDestroyed: () => false,
+        setBackgroundColor: (color: string) => colors.push(color),
+        setTitleBarOverlay: (overlay: unknown) => overlays.push(overlay),
+      },
+      { shouldUseDarkColors: theme === 'navy' },
+      false,
+      windowTheme,
+      { state: { settings: { theme } } },
+    )();
+    const { background, ...overlay } = windowTheme(theme === 'navy', theme);
+    assert.deepEqual(colors, [background]);
+    assert.deepEqual(overlays, [overlay]);
+    assert.notEqual(background, windowTheme(theme === 'navy').background);
+  }
 });

@@ -16,7 +16,7 @@ import {
   type Rectangle,
 } from 'electron';
 import { AppDialogRequests, type DialogOptions } from './app-dialogs';
-import { windowTheme } from '../shared/window-theme';
+import { nativeThemeSource, THEMES, windowTheme } from '../shared/window-theme';
 import fs from 'node:fs/promises';
 import path from 'node:path';
 import { randomUUID } from 'node:crypto';
@@ -69,7 +69,6 @@ import {
   terminalOpen,
 } from './platform';
 import {
-  ACCENTS,
   busy,
   messageText,
   type AppEvent,
@@ -162,7 +161,10 @@ async function confirmUnsavedQuit(error: unknown, copyOnly = false) {
 }
 function updateWindowTheme() {
   if (!window || window.isDestroyed()) return;
-  const { background, ...overlay } = windowTheme(nativeTheme.shouldUseDarkColors);
+  const { background, ...overlay } = windowTheme(
+    nativeTheme.shouldUseDarkColors,
+    store?.state.settings.theme,
+  );
   window.setBackgroundColor(background);
   if (!isMac) window.setTitleBarOverlay(overlay);
 }
@@ -939,12 +941,8 @@ const handlers: Record<keyof ApiMap, (...args: any[]) => any> = {
         next[key] = value[key];
       }
     if (value.theme !== undefined) {
-      if (!['light', 'dark', 'system'].includes(value.theme)) throw new Error('主题无效');
+      if (!(THEMES as readonly unknown[]).includes(value.theme)) throw new Error('主题无效');
       next.theme = value.theme;
-    }
-    if (value.accent !== undefined) {
-      if (!(ACCENTS as readonly unknown[]).includes(value.accent)) throw new Error('强调色无效');
-      next.accent = value.accent;
     }
     for (const [key, min, max] of [
       ['fontScale', 1, 2],
@@ -964,7 +962,7 @@ const handlers: Record<keyof ApiMap, (...args: any[]) => any> = {
     }
     store.state.settings = next;
     await save();
-    nativeTheme.themeSource = next.theme;
+    nativeTheme.themeSource = nativeThemeSource(next.theme);
     updateWindowTheme();
     updates.configure(next.autoDownloadUpdates);
   },
@@ -1434,7 +1432,10 @@ async function createWindow() {
         ? path.join(process.resourcesPath, 'icon.ico')
         : path.join(app.getAppPath(), 'build', 'icon.ico')
       : path.join(app.getAppPath(), 'build', 'icon.png');
-  const { background, ...titleBarOverlay } = windowTheme(nativeTheme.shouldUseDarkColors);
+  const { background, ...titleBarOverlay } = windowTheme(
+    nativeTheme.shouldUseDarkColors,
+    store?.state.settings.theme,
+  );
   window = new BrowserWindow({
     width: saved.bounds?.width ?? 1440,
     height: saved.bounds?.height ?? 900,
@@ -1618,7 +1619,7 @@ else {
       await loadLoginShellPath();
       store = new Store(app.getPath('userData'), app.getVersion());
       await store.load();
-      nativeTheme.themeSource = store.state.settings.theme;
+      nativeTheme.themeSource = nativeThemeSource(store.state.settings.theme);
       nativeTheme.on('updated', updateWindowTheme);
       if (!store.state.sessions.some((s) => s.id === store.state.selectedSessionId)) {
         // An omitted transient selection may still carry a valid project scope on disk.

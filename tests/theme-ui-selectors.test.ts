@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import React from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
+import { THEMES } from '../shared/window-theme';
 
 // Render the real components without a browser. This checks DOM/name contracts,
 // not focus, visibility, or native Electron interactions (covered by the UI script).
@@ -26,14 +27,13 @@ const once = (labels: string[], expected: string) =>
   assert.equal(labels.filter((label) => label === expected).length, 1, `Expected unique ${expected}`);
 
 test('real appearance dialog has two Close controls, but one scoped footer Close and each exact theme label', () => {
-  for (const theme of ['light', 'dark', 'system']) {
+  for (const theme of THEMES) {
     const html = renderToStaticMarkup(
       React.createElement(SettingsModal, {
         settingsOpen: true,
         settingsTab: 'appearance',
         prefs: {
           theme,
-          accent: 'mono',
           fontScale: 1,
           sidebarWidth: 240,
           inspectorWidth: 380,
@@ -56,12 +56,7 @@ test('real appearance dialog has two Close controls, but one scoped footer Close
     once(names(section(html, 'header')), '关闭');
     once(names(section(html, 'footer')), '关闭');
     once(names(section(html, 'nav')), '外观与编辑器');
-    for (const label of ['浅色', '深色', '跟随系统']) once(names(html), label);
-    for (const label of ['黑白', '绿色', '蓝色', '紫色']) once(names(html), label);
-    assert.match(
-      html,
-      /<button class="active" aria-pressed="true"><span class="accent-swatch" data-accent="mono"><\/span>黑白/,
-    );
+    for (const label of ['浅色', '深色', '跟随系统', '护眼米黄', '豆沙绿', '深蓝']) once(names(html), label);
   }
 });
 

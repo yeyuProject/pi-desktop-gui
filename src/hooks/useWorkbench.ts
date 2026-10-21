@@ -253,7 +253,6 @@ export function useWorkbench() {
   useEffect(() => {
     if (!state) return;
     document.documentElement.dataset.theme = state.settings.theme;
-    document.documentElement.dataset.accent = state.settings.accent;
     document.documentElement.dataset.platform = api.platform;
     document.documentElement.style.setProperty('--font-scale', String(state.settings.fontScale));
     document.documentElement.style.setProperty('--sidebar-width', state.settings.sidebarWidth + 'px');
