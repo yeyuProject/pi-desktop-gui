@@ -345,7 +345,7 @@ const latestDelete = () =>
 const finishDelete = async (expected) => {
   const call = await eventually(latestDelete, (call) => call?.done, 'Delete IPC did not settle');
   assert.equal(call.error, undefined);
-  assert.equal(call.result, expected);
+  assert.deepEqual(call.result, expected);
   await page.locator('[data-app-dialog]').waitFor({ state: 'hidden' });
 };
 
@@ -665,7 +665,7 @@ try {
   assert.ok((await bootstrap()).state.sessions.some((item) => item.id === disposable.id));
   const box = await beginDelete(disposable.id);
   await box.locator(':scope > footer').getByRole('button', { name: '删除', exact: true }).click();
-  await finishDelete(true);
+  await finishDelete({ trashed: true });
   assert.equal(
     (await bootstrap()).state.sessions.some((item) => item.id === disposable.id),
     false,
