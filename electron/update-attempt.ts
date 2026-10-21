@@ -24,17 +24,14 @@ export class UpdateAttemptFile {
         await fs.rm(this.file, { force: true });
         return undefined;
       }
+      const completed = compareAppVersions(currentVersion, target) >= 0;
+      if (completed) await fs.rm(this.file, { force: true });
       return {
         currentVersion: current,
         targetVersion: target,
         startedAt: value.startedAt,
         // The old app may have been opened while installation is still running, or after cancellation.
-        outcome:
-          compareAppVersions(currentVersion, target) >= 0
-            ? 'completed'
-            : value.outcome === 'failed'
-              ? 'failed'
-              : 'unconfirmed',
+        outcome: completed ? 'completed' : value.outcome === 'failed' ? 'failed' : 'unconfirmed',
       };
     } catch {
       // A missing, unreadable or corrupt receipt must never prevent starting the app.
