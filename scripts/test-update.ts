@@ -172,6 +172,7 @@ const readBoot = (dir: string) =>
   until(async () => JSON.parse(await fs.readFile(path.join(dir, `boot-${nextVersion}.json`), 'utf8')));
 const instrument = `
 process.env.PI_OFFLINE = '1';
+if (process.platform === 'darwin') process.env.DEVELOPER_DIR = '/pi-update-no-xcode-installed';
 const fixtureFs = require('node:fs'), fixturePath = require('node:path');
 const fixtureRoot = ${JSON.stringify(root)};
 const fixtureCase = JSON.parse(fixtureFs.readFileSync(fixturePath.join(fixtureRoot, 'active-case.json'), 'utf8'));
@@ -347,18 +348,26 @@ try {
     for (const file of await fs.readdir(out))
       if (/\.(?:exe|AppImage|zip|blockmap|yml)$/.test(file)) assets.set(file, path.join(out, file));
   }
-  if (process.platform === 'darwin')
-    await testMacUpdateSafety(
-      root,
-      path.join(
+  if (process.platform === 'darwin') {
+    const previousDeveloperDirectory = process.env.DEVELOPER_DIR;
+    process.env.DEVELOPER_DIR = '/pi-update-no-xcode-installed';
+    try {
+      await testMacUpdateSafety(
         root,
-        oldVersion,
-        'out',
-        process.arch === 'arm64' ? 'mac-arm64' : 'mac',
-        productName + '.app',
-      ),
-      assets.get(`Pi-Desktop-${nextVersion}-mac-${process.arch}.zip`)!,
-    );
+        path.join(
+          root,
+          oldVersion,
+          'out',
+          process.arch === 'arm64' ? 'mac-arm64' : 'mac',
+          productName + '.app',
+        ),
+        assets.get(`Pi-Desktop-${nextVersion}-mac-${process.arch}.zip`)!,
+      );
+    } finally {
+      if (previousDeveloperDirectory === undefined) delete process.env.DEVELOPER_DIR;
+      else process.env.DEVELOPER_DIR = previousDeveloperDirectory;
+    }
+  }
   const modes =
     process.platform === 'win32'
       ? ['restart', 'stale-shortcut', 'unpacked-restart', 'portable-to-installer', 'on-quit']
