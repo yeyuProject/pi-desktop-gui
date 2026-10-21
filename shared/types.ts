@@ -3,6 +3,7 @@ import type { ApprovalMode, ApprovalRequest, ApprovalGrant } from './approval';
 import type { AttachmentInfo } from './attachments';
 import type { CheckpointSummary, CheckpointPreview } from './checkpoints';
 import type { AgentRulesFile } from './workspace';
+import type { Theme } from './window-theme';
 import type { PromptTemplateInput, PromptTemplateDocument } from './prompts';
 import type { LocalUsageSummary } from './usage';
 import type { PiCompatibility } from './pi-version';
@@ -52,8 +53,6 @@ export interface Session {
   thinking?: string;
   approvalMode?: ApprovalMode;
 }
-export const ACCENTS = ['mono', 'green', 'blue', 'violet'] as const;
-export type Accent = (typeof ACCENTS)[number];
 export interface Settings {
   piPath: string;
   nodePath: string;
@@ -62,8 +61,7 @@ export interface Settings {
   provider: string;
   modelId: string;
   thinking: string;
-  theme: 'light' | 'dark' | 'system';
-  accent: Accent;
+  theme: Theme;
   fontScale: number;
   sidebarWidth: number;
   inspectorWidth: number;

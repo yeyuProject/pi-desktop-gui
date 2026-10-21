@@ -57,18 +57,19 @@ test('bad backups are skipped and no usable backup starts an empty index without
   assert.equal(await fs.readFile(f.file('sessions/keep.jsonl'), 'utf8'), 'untouched Pi history');
 });
 
-test('accent defaults to black-and-white, keeps valid choices and repairs unknown values', async (t) => {
+test('background themes are kept and unknown themes are repaired to follow the system', async (t) => {
   const f = await fixture(t);
-  assert.equal(f.store.state.settings.accent, 'mono');
-  for (const [accent, expected, repaired] of [
-    ['blue', 'blue', undefined],
-    ['orange', 'mono', 1],
+  assert.equal(f.store.state.settings.theme, 'system');
+  for (const [theme, expected, repaired] of [
+    ['sepia', 'sepia', undefined],
+    ['navy', 'navy', undefined],
+    ['purple', 'system', 1],
   ] as const) {
-    const data = { ...f.store.state, settings: { ...f.store.state.settings, accent } };
+    const data = { ...f.store.state, settings: { ...f.store.state.settings, theme } };
     await fs.writeFile(f.file('state.json'), JSON.stringify(data));
     const restored = new Store(f.dir);
     await restored.load();
-    assert.equal(restored.state.settings.accent, expected);
+    assert.equal(restored.state.settings.theme, expected);
     assert.equal(restored.storage.recovery?.repairedSettings, repaired);
   }
 });

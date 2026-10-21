@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { AppDialogRequests } from '../electron/app-dialogs';
 import type { AppDialog } from '../shared/app-dialogs';
-import { windowTheme } from '../shared/window-theme';
+import { nativeThemeSource, windowTheme } from '../shared/window-theme';
 import fs from 'node:fs';
 
 test('confirmation needs an explicit valid reply; stale and duplicate replies cannot confirm', async () => {
@@ -79,6 +79,23 @@ test('request buttons are snapshotted and cannot be expanded while confirmation 
   assert.throws(() => dialogs.respond(current!.id, 2), /无效/);
   dialogs.cancelAll();
   await result;
+});
+
+test('native window palette agrees with background theme tokens', () => {
+  const css = fs.readFileSync(new URL('../src/styles/themes.css', import.meta.url), 'utf8');
+  for (const theme of ['sepia', 'green', 'navy'] as const) {
+    const start = css.indexOf(`:root[data-theme='${theme}'] {`);
+    assert.ok(start >= 0, theme);
+    const section = css.slice(start, css.indexOf('}', start));
+    const palette = windowTheme(false, theme);
+    for (const [token, color] of [
+      ['--bg', palette.background],
+      ['--rail', palette.color],
+      ['--ink', palette.symbolColor],
+    ])
+      assert.match(section, new RegExp(`${token}: ${color};`));
+    assert.equal(nativeThemeSource(theme), theme === 'navy' ? 'dark' : 'light');
+  }
 });
 
 test('native window palette agrees with light and dark renderer tokens', () => {

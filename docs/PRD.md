@@ -608,18 +608,18 @@ UI1–UI5 已实现，沿用浅色墨绿 `#1F6B52` / 深色 `#74C7A3`、运行�
 
 **测试。** `tests/templates-v014.test.ts` 增加 `describeResource` 对 Skill / 模板 frontmatter、正文首段回退与损坏文件容错的单元测试；`scripts/test-features-ui.mjs` 与 `scripts/test-management-v014-ui.mjs` 回归分类筛选、简介展示与模板编辑操作。
 
-## v0.14.29：外观强调色（已实现）
+## v0.14.30：背景配色主题（已实现）
 
-主题（浅色 / 深色 / 跟随系统）决定背景与文字，强调色决定主按钮、选中项、焦点框、滑块、徽标等高亮元素。两者独立设置、自由组合。
+默认仍是浅色（白）、深色（黑）及跟随系统。新增三套整体背景配色，改变窗口背景、侧栏、面板、文字、分隔线和标题栏；按钮、选中项等强调色沿用浅色或深色的原有配色，不随背景主题改变。v0.14.29 的独立“强调色”设置已移除。
 
-### A1 强调色选择，默认黑白
+### A1 护眼米黄、豆沙绿与深蓝主题
 
-- “设置 → 外观与编辑器”在“主题”下方新增“强调色”，提供黑白、绿色、蓝色、紫色四项，每项带色块，当前项高亮并设置 `aria-pressed`。点击立即生效并保存，无需点击底部保存。
-- 默认“黑白”：浅色主题下强调元素为黑底白字，深色主题下为白底黑字，与原生窗口按钮和标题栏的黑白配色一致。原有绿色保留为可选项。
-- 四种强调色在浅色、深色和跟随系统下各有一组配色（`--accent`、`--accent-soft`、`--on-accent`），深色下使用提亮版本，保证主按钮文字和选中背景的对比度。
-- 设置字段为 `Settings.accent`（`mono` / `green` / `blue` / `violet`，常量 `ACCENTS` 位于 `shared/types.ts`）。主进程 `saveSettings` 拒绝未知值；读取 `state.json` 时缺失字段使用默认黑白，未知值按坏设置修复并计入恢复提示。
-- 实现：`src/styles/accents.css` 只覆盖强调色变量，根元素通过 `data-accent` 切换；`src/main.tsx` 在状态加载前先设为黑白，避免启动闪烁成绿色。
-- 测试：`tests/store.test.ts` 覆盖默认值、有效值保留与未知值修复；`tests/theme-ui-selectors.test.ts` 覆盖四个强调色按钮名称与默认选中项。
+- “设置 → 外观与编辑器 → 主题”在浅色、深色、跟随系统之后新增护眼米黄、豆沙绿、深蓝三项，每项显示背景色块；点击立即生效并保存。
+- 护眼米黄与豆沙绿是浅色系，原生菜单、对话框和滚动条按浅色显示；深蓝是深色系，按深色显示，代码语法色使用深色版本。
+- Windows/Linux 的窗口背景与标题栏按钮区使用所选主题的 `--bg`、`--rail`、`--ink`，避免标题栏与界面颜色不一致；macOS 保留系统红绿灯。
+- `Settings.theme` 取值为 `light` / `dark` / `system` / `sepia` / `green` / `navy`（`THEMES` 位于 `shared/window-theme.ts`）。主进程拒绝未知值；读取 `state.json` 时未知主题按坏设置修复为跟随系统并计入恢复提示。旧版本残留的 `accent` 字段会被忽略。
+- 实现：`src/styles/themes.css` 覆盖背景、文字、线条与阴影变量；`windowTheme()` 与 `nativeThemeSource()` 负责原生窗口配色与系统外观。
+- 测试：`tests/store.test.ts` 覆盖主题保留与修复；`tests/app-dialogs.test.ts` 校验原生窗口配色与 CSS 一致；`tests/desktop-chrome.test.ts` 覆盖切换主题时窗口背景与标题栏；`tests/theme-ui-selectors.test.ts` 覆盖六个主题按钮。
 
 ## v0.7.0 需求补充：工具审批、Git 快照与长会话性能
 

@@ -11,7 +11,8 @@
   --ansi-magenta: #9c52ac;
   --ansi-cyan: #28828d;
 }
-[data-theme='dark'] {
+[data-theme='dark'],
+[data-theme='navy'] {
   --syntax-keyword: #c99cdf;
   --syntax-string: #91c6a2;
   --syntax-comment: #929ca5;

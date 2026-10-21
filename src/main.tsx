@@ -6,7 +6,6 @@ import { TitleBar } from './components/TitleBar';
 import { AppDialogs } from './components/AppDialogs';
 // The native theme override also drives prefers-color-scheme before bootstrap finishes.
 document.documentElement.dataset.theme = 'system';
-document.documentElement.dataset.accent = 'mono';
 document.documentElement.dataset.platform = window.desktop.platform;
 createRoot(document.getElementById('root')!).render(
   <React.StrictMode>

@@ -7,6 +7,7 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs/promises';
 import path from 'node:path';
 import { Store } from '../electron/store.ts';
+import { completeExpectedExit } from './expected-exit.ts';
 import { createLocalProvider, prepareRealPiFixture } from '../tests/support/local-provider.ts';
 
 const provider = await createLocalProvider();
@@ -501,8 +502,11 @@ try {
   await app.evaluate(({ app }) => {
     setImmediate(() => app.quit());
   });
-  await unsaved.getByRole('button', { name: '仍然退出，丢弃未保存内容', exact: true }).click();
-  await failedClosing;
+  const discardedExit = await completeExpectedExit(
+    () => unsaved.getByRole('button', { name: '仍然退出，丢弃未保存内容', exact: true }).click(),
+    failedClosing,
+    app.process(),
+  );
   app = undefined;
   const prior = JSON.parse(await fs.readFile(path.join(failedDraft.dataDir, 'state.json'), 'utf8'));
   assert.equal(
@@ -512,6 +516,7 @@ try {
   );
   evidence.push({
     label: 'real-no-agent-ENOSPC-quit',
+    exit: discardedExit,
     id: failedDraft.id,
     retainedUntilExplicitDiscard: true,
     historyHandlerHeld: true,

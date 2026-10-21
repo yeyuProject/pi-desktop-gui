@@ -118,7 +118,6 @@ const mock = () => {
       modelId: 'claude-sonnet-5',
       thinking: 'medium',
       theme: 'light',
-      accent: 'mono',
       fontScale: 1,
       sidebarWidth: 232,
       inspectorWidth: 380,

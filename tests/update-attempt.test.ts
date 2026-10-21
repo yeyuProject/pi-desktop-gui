@@ -27,11 +27,16 @@ test('installation receipts reconcile against the running version, not installer
   const { file } = await receipt(t);
   await file.record(attempt());
   assert.equal((await file.read('0.14.18'))?.outcome, 'unconfirmed');
+  assert.equal(await fs.readFile(file.file, 'utf8').then((value) => JSON.parse(value).outcome), 'pending');
   assert.equal((await file.read('0.14.19'))?.outcome, 'completed');
+  await assert.rejects(fs.access(file.file), { code: 'ENOENT' });
+  await file.record(attempt());
   assert.equal((await file.read('0.14.20'))?.outcome, 'completed');
+  await assert.rejects(fs.access(file.file), { code: 'ENOENT' });
   await file.record({ ...attempt(), outcome: 'failed' });
   assert.equal((await file.read('0.14.18'))?.outcome, 'failed');
   assert.equal((await file.read('0.14.19'))?.outcome, 'completed');
+  await assert.rejects(fs.access(file.file), { code: 'ENOENT' });
 });
 
 test('only the latest minimal receipt is saved, writes are ordered and retention is seven days', async (t) => {

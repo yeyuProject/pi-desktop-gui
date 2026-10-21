@@ -37,6 +37,9 @@ await store.save();
 const palette = {
   light: { background: '#ffffff', color: '#f5f7f6', symbolColor: '#18221f', height: 36 },
   dark: { background: '#121816', color: '#141b18', symbolColor: '#e4ebe8', height: 36 },
+  sepia: { background: '#f7f1e3', color: '#efe6d2', symbolColor: '#3a3125', height: 36 },
+  green: { background: '#dcebdc', color: '#cfe2d0', symbolColor: '#1c2b20', height: 36 },
+  navy: { background: '#0f1828', color: '#0c1422', symbolColor: '#e2e9f3', height: 36 },
 };
 const rgb = (hex) => `rgb(${[1, 3, 5].map((i) => parseInt(hex.slice(i, i + 2), 16)).join(', ')})`;
 const errors = [];
@@ -204,9 +207,10 @@ async function checkTheme(source, { changed = false } = {}) {
     background: BrowserWindow.getAllWindows()[0].getBackgroundColor(),
     overlay: globalThis.themeUi.overlays.at(-1),
   }));
-  assert.equal(native.source, source, 'Saved appearance must control Electron nativeTheme');
-  if (source !== 'system') assert.equal(native.dark, source === 'dark');
-  const expected = palette[native.dark ? 'dark' : 'light'];
+  const nativeSource = { sepia: 'light', green: 'light', navy: 'dark' }[source] ?? source;
+  assert.equal(native.source, nativeSource, 'Saved appearance must control Electron nativeTheme');
+  if (source !== 'system') assert.equal(native.dark, nativeSource === 'dark');
+  const expected = palette[source === 'system' ? (native.dark ? 'dark' : 'light') : source];
   // Electron's native background has ARGB alpha order; CSS hex tokens below use RGBA.
   assert.equal(hexColor(native.background, 'electron'), hexColor(expected.background));
   await page.waitForFunction(
@@ -221,6 +225,8 @@ async function checkTheme(source, { changed = false } = {}) {
       rail: style.getPropertyValue('--rail').trim(),
       ink: style.getPropertyValue('--ink').trim(),
       background: style.getPropertyValue('--bg').trim(),
+      accent: style.getPropertyValue('--accent').trim(),
+      syntaxKeyword: style.getPropertyValue('--syntax-keyword').trim(),
       titlebar: bar
         ? { color: getComputedStyle(bar).color, background: getComputedStyle(bar).backgroundColor }
         : null,
@@ -230,6 +236,8 @@ async function checkTheme(source, { changed = false } = {}) {
   assert.equal(hexColor(renderer.rail), hexColor(expected.color));
   assert.equal(hexColor(renderer.ink), hexColor(expected.symbolColor));
   assert.equal(hexColor(renderer.background), hexColor(expected.background));
+  assert.equal(hexColor(renderer.accent), hexColor(native.dark ? '#74c7a3' : '#1f6b52'));
+  if (source === 'navy') assert.equal(hexColor(renderer.syntaxKeyword), hexColor('#c99cdf'));
   if (process.platform !== 'darwin') {
     assert.equal(renderer.titlebar.background, rgb(expected.color));
     assert.equal(renderer.titlebar.color, rgb(expected.symbolColor));
@@ -254,7 +262,17 @@ async function chooseTheme(source) {
   const callsBefore = await app.evaluate(() => globalThis.themeUi.calls.length);
   await settings
     .locator('.theme-options')
-    .getByRole('button', { name: { light: '浅色', dark: '深色', system: '跟随系统' }[source], exact: true })
+    .getByRole('button', {
+      name: {
+        light: '浅色',
+        dark: '深色',
+        system: '跟随系统',
+        sepia: '护眼米黄',
+        green: '豆沙绿',
+        navy: '深蓝',
+      }[source],
+      exact: true,
+    })
     .click();
   const save = await eventually(
     () =>
@@ -388,8 +406,13 @@ try {
   }
   pass('native application menu retains File/Edit/View, platform roles and CmdOrCtrl+N');
 
-  for (const source of ['dark', 'light', 'system']) {
+  for (const source of ['sepia', 'green', 'navy', 'dark', 'light', 'system']) {
     await chooseTheme(source);
+    if (['sepia', 'green', 'navy'].includes(source)) {
+      await page.reload();
+      await page.getByRole('textbox', { name: '任务输入', exact: true }).waitFor();
+      await checkTheme(source);
+    }
     await checkTitlebarGeometry();
     await screenshot(source);
     if (source !== 'system' && process.platform !== 'darwin') {
@@ -410,7 +433,7 @@ try {
     }
   }
   pass(
-    'appearance UI synchronizes nativeTheme, native background/overlay, renderer CSS, and current system appearance',
+    'all six appearance choices synchronize nativeTheme, native background/overlay and renderer CSS; custom themes survive reload',
   );
   pass(
     'light/dark native popup APIs execute; renderer screenshots deliberately make no claim about OS popup pixels',
@@ -459,7 +482,10 @@ try {
       const popup = await app.evaluate(() => globalThis.themeUi.popups.at(-1));
       assert.equal(popup.id, id);
       assert.equal(popup.windowId, await app.evaluate(() => globalThis.themeUi.win.id));
-      assert.ok(Number.isInteger(popup.x) && Number.isInteger(popup.y) && popup.x >= 0 && popup.y > 0);
+      assert.ok(
+        Number.isInteger(popup.x) && Number.isInteger(popup.y) && popup.x >= 0 && popup.y > 0,
+        `Native menu anchor: ${JSON.stringify(popup)}`,
+      );
       await focused(input);
     }
     for (const zoom of [0.8, 1.25]) {

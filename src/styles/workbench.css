@@ -226,9 +226,10 @@ select:hover:not(:disabled) {
   font-weight: 500;
 }
 .suggestions > button > small {
+  font-size: calc(13px * var(--font-scale));
   font-weight: 400;
-  color: var(--muted);
-  line-height: 1.55;
+  color: color-mix(in srgb, var(--ink) 72%, var(--muted));
+  line-height: 1.65;
   overflow: hidden;
   display: -webkit-box;
   -webkit-line-clamp: 2;
@@ -261,7 +262,9 @@ select:hover:not(:disabled) {
   border-radius: 14px 14px 4px 14px;
 }
 .message-content {
+  font-family: 'PingFang SC', 'Microsoft YaHei', 'Segoe UI', sans-serif;
   line-height: 1.8;
+  color: var(--ink);
 }
 .message-content h1,
 .message-content h2,

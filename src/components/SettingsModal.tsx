@@ -355,6 +355,9 @@ export function SettingsModal(
                         ['light', '浅色', Sun],
                         ['dark', '深色', Moon],
                         ['system', '跟随系统', Monitor],
+                        ['sepia', '护眼米黄', null],
+                        ['green', '豆沙绿', null],
+                        ['navy', '深蓝', null],
                       ] as const
                     ).map(([key, label, Icon]) => (
                       <button
@@ -365,31 +368,7 @@ export function SettingsModal(
                           void attempt(() => api.invoke('saveSettings', { theme: key }));
                         }}
                       >
-                        <Icon size={23} />
-                        {label}
-                      </button>
-                    ))}
-                  </div>
-                  <label className="field-label">强调色</label>
-                  <div className="accent-options">
-                    {(
-                      [
-                        ['mono', '黑白'],
-                        ['green', '绿色'],
-                        ['blue', '蓝色'],
-                        ['violet', '紫色'],
-                      ] as const
-                    ).map(([key, label]) => (
-                      <button
-                        className={prefs.accent === key ? 'active' : ''}
-                        aria-pressed={prefs.accent === key}
-                        key={key}
-                        onClick={() => {
-                          setPrefs({ ...prefs, accent: key });
-                          void attempt(() => api.invoke('saveSettings', { accent: key }));
-                        }}
-                      >
-                        <span className="accent-swatch" data-accent={key} />
+                        {Icon ? <Icon size={23} /> : <span className="theme-swatch" data-theme={key} />}
                         {label}
                       </button>
                     ))}
