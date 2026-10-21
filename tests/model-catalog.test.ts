@@ -202,4 +202,14 @@ export default function(pi) {
   assert.equal(historical.runtime.connected, false);
   assert.equal(await fs.readFile(imported.file, 'utf8'), history, 'the source history is untouched');
   assert.equal(await fs.readFile(path.join(agentDir, 'settings.json'), 'utf8'), settingsBefore);
+
+  const missing = store.createSession();
+  missing.file = path.join(directory, 'already-removed.jsonl');
+  const orphaned = new AgentService(store, new Workspace(store.dir));
+  services.push(orphaned);
+  await orphaned.readModels(missing.id);
+  assert.equal(orphaned.runtime.modelsLoaded, true);
+  assert.equal(orphaned.runtime.connected, false);
+  assert.equal(orphaned.runtime.error, undefined);
+  assert.ok(orphaned.runtime.models.length > 0, 'a missing transcript still loads the model catalog');
 });

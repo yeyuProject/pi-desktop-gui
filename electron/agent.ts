@@ -811,9 +811,17 @@ export class AgentService extends EventEmitter {
     try {
       // Pi restores branch selections itself. Give it a disposable copy so reading an old
       // conversation cannot append metadata or change the original session file.
+      // A missing transcript (deleted, or a Windows 8.3 temp path that cannot reach it)
+      // must not fail the catalog read: fall back to the same disposable --no-session probe.
       if (session.file) {
-        temporarySessionDir = await fs.mkdtemp(path.join(os.tmpdir(), 'pi-desktop-models-'));
-        await fs.copyFile(session.file, path.join(temporarySessionDir, 'session.jsonl'));
+        try {
+          await fs.access(session.file);
+          temporarySessionDir = await fs.mkdtemp(path.join(os.tmpdir(), 'pi-desktop-models-'));
+          await fs.copyFile(session.file, path.join(temporarySessionDir, 'session.jsonl'));
+        } catch (error) {
+          if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error;
+          temporarySessionDir = undefined;
+        }
       }
       const { environment, resolved } = await preparePi(this.store.state.settings, this.developmentRoot);
       if (this.shutdown || this.stopRequested || epoch !== this.stopEpoch) throw new Error('读取模型已取消');
