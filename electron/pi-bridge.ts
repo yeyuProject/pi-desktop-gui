@@ -285,13 +285,17 @@ export default function desktopBridge(pi: ExtensionAPI) {
             break;
           case 'providers': {
             const m = await models(ctx);
-            data = m.getProviders().map((v) => ({
-              id: v.id,
-              name: v.name,
-              configured: m.hasConfiguredAuth(v.id),
-              oauth: !!v.auth.oauth,
-              apiKey: !!v.auth.apiKey?.login,
-            }));
+            data = m.getProviders().map((v) => {
+              const auth = m.getProviderAuthStatus(v.id);
+              return {
+                id: v.id,
+                name: v.name,
+                configured: auth.configured,
+                authSource: auth.source,
+                oauth: !!v.auth.oauth,
+                apiKey: !!v.auth.apiKey?.login,
+              };
+            });
             break;
           }
           case 'login': {

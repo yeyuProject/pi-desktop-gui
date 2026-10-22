@@ -100,6 +100,13 @@ try {
       failScope: false,
       failReads: [],
       failSave: false,
+      providers: [
+        { id: 'key-only', name: 'API Key provider', oauth: false, apiKey: true },
+        { id: 'oauth-only', name: 'OAuth provider', oauth: true, apiKey: false },
+        { id: 'minimax', name: 'MiniMax', authSource: 'environment', oauth: false, apiKey: true },
+        { id: 'custom', name: 'Custom', authSource: 'models_json_key', oauth: false, apiKey: true },
+      ],
+      independentAuth: { minimax: 'environment', custom: 'models_json_key' },
       result: { applied: true },
       documents: {
         'settings:false': { retry: { enabled: true }, untouched: 'preserve me' },
@@ -140,11 +147,11 @@ try {
           mock.documents[args[1] + ':' + args[2]] = JSON.parse(args[3].text);
           return mock.result;
         }
-        if (method === 'providers')
-          return [
-            { id: 'key-only', name: 'API Key provider', configured: false, oauth: false, apiKey: true },
-            { id: 'oauth-only', name: 'OAuth provider', configured: false, oauth: true, apiKey: false },
-          ];
+        if (method === 'providers') return mock.providers.map((provider) => ({ ...provider }));
+        if (method === 'login' || method === 'logout') {
+          mock.providers.find((provider) => provider.id === args[1]).authSource =
+            method === 'login' ? 'stored' : mock.independentAuth[args[1]];
+        }
         if (method === 'resources') return { resources: [], tools: [], activeTools: [], packages: [] };
         if (method === 'sessionTree') return [];
         if (method === 'usageSummary') {
@@ -329,10 +336,30 @@ try {
   await json.fill('{"providers":{},"unsavedProviderEdit":true}');
   await modal.getByRole('button', { name: '设置 API Key', exact: true }).click();
   await modal.getByText('凭据已保存', { exact: true }).waitFor();
+  const providerSelect = modal.getByRole('combobox', { name: '登录供应商' });
+  await expect(providerSelect.locator('option:checked')).toHaveText('API Key provider · 已保存凭据');
   await expect(json).toHaveValue(/unsavedProviderEdit/);
   await expect(nav('常用设置')).toBeDisabled();
   await modal.getByRole('button', { name: '放弃修改并重新读取', exact: true }).click();
   await readyJson('models');
+  const logout = modal.getByRole('button', { name: '退出登录', exact: true });
+  await logout.click();
+  await expect(providerSelect.locator('option:checked')).toHaveText('API Key provider · 未配置');
+  for (const [id, label] of [
+    ['minimax', 'MiniMax · 环境变量凭据'],
+    ['custom', 'Custom · models.json 凭据'],
+  ]) {
+    await providerSelect.selectOption(id);
+    await expect(providerSelect.locator('option:checked')).toHaveText(label);
+    await modal.getByRole('button', { name: '设置 API Key', exact: true }).click();
+    await expect(providerSelect.locator('option:checked')).toHaveText(/已保存凭据/);
+    await logout.click();
+    await expect(providerSelect.locator('option:checked')).toHaveText(label);
+    await expect(modal.locator('.feature-notice')).toContainText('当前来源显示在供应商名称后');
+  }
+  console.log(
+    'PASS logout clears saved credentials and identifies remaining environment/models.json sources',
+  );
   await nav('命令与快捷键').click();
   await modal.getByText(/终端主题.*尚未在桌面实现/).waitFor();
   console.log(

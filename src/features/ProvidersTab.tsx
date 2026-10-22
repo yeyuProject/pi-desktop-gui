@@ -1,5 +1,14 @@
 const api = window.desktop;
 import type { FeatureModel } from './usePiFeatures';
+import type { ProviderInfo } from '../../shared/types';
+const authSourceLabels: Record<NonNullable<ProviderInfo['authSource']>, string> = {
+  stored: '已保存凭据',
+  runtime: '临时凭据',
+  environment: '环境变量凭据',
+  fallback: '扩展凭据',
+  models_json_key: 'models.json 凭据',
+  models_json_command: 'models.json 命令凭据',
+};
 export function ProvidersTab({
   session,
   setNotice,
@@ -87,7 +96,7 @@ export function ProvidersTab({
           .filter((p) => (p.name + p.id).toLowerCase().includes(providerQuery.toLowerCase()))
           .map((p) => (
             <option key={p.id} value={p.id}>
-              {p.name} {p.configured ? '· 已配置' : ''}
+              {p.name} · {p.authSource ? authSourceLabels[p.authSource] : '未配置'}
             </option>
           ))}
       </select>
@@ -139,7 +148,7 @@ export function ProvidersTab({
             void run(async () => {
               await api.invoke('logout', session.id, provider);
               await refresh();
-              setNotice('已移除登录凭据；环境变量和 models.json 中的配置仍独立生效。');
+              setNotice('已移除保存的登录凭据；其他来源的凭据仍独立生效，当前来源显示在供应商名称后。');
             })
           }
         >
