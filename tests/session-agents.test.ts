@@ -46,6 +46,84 @@ async function until(condition: () => boolean) {
   }
 }
 
+test('idle background processes and cached runtimes are released, selected and busy sessions survive', async (t) => {
+  const { agents, store, a, b, runtimes } = await fixture(t);
+  const first = agents.get(a.id),
+    selected = agents.get(b.id);
+  await first.connect(a.id);
+  await selected.connect(b.id);
+  await agents.collectIdle(Date.now() + 6 * 60_000);
+  assert.equal(first.runtime.connected, false);
+  assert.equal(runtimes.has(a.id), false);
+  assert.equal(selected.runtime.connected, true);
+  const restored = agents.get(a.id);
+  assert.notEqual(restored, first);
+  await restored.send(a.id, 'hold', [], 'steer');
+  await agents.collectIdle(Date.now() + 12 * 60_000);
+  assert.equal(agents.get(a.id), restored);
+  assert.equal(busy(restored.runtime.status), true);
+  await restored.stop();
+  restored.runtime.dialogs = [{ id: 'waiting' } as never];
+  await agents.collectIdle(Date.now() + 18 * 60_000);
+  assert.equal(agents.get(a.id), restored);
+  restored.runtime.dialogs = [];
+  restored.runtime.followUp = ['queued'];
+  await agents.collectIdle(Date.now() + 24 * 60_000);
+  assert.equal(agents.get(a.id), restored);
+  restored.runtime.followUp = [];
+  assert.equal(store.state.selectedSessionId, b.id);
+});
+
+test('opening an idle conversation while its process closes retains ownership and reconnects in order', async (t) => {
+  const { agents, a } = await fixture(t);
+  const first = agents.get(a.id);
+  await first.connect(a.id);
+  const rpc = (first as any).rpc;
+  let enter!: () => void, finish!: () => void;
+  const entered = new Promise<void>((resolve) => {
+    enter = resolve;
+  });
+  const finished = new Promise<void>((resolve) => {
+    finish = resolve;
+  });
+  const close = rpc.close.bind(rpc);
+  t.mock.method(rpc, 'close', async () => {
+    enter();
+    await finished;
+    await close();
+  });
+  const collecting = agents.collectIdle(Date.now() + 6 * 60_000);
+  await entered;
+  const reopened = agents.get(a.id);
+  const reconnecting = reopened.connect(a.id);
+  finish();
+  await Promise.all([collecting, reconnecting]);
+  assert.equal(agents.get(a.id), first);
+  assert.equal(first.runtime.connected, true);
+});
+
+test('failed idle termination retains its process until a verified retry, including subsequent reconnects', async (t) => {
+  const { agents, a } = await fixture(t);
+  const agent = agents.get(a.id);
+  await agent.connect(a.id);
+  const rpc = (agent as any).rpc;
+  const close = rpc.close.bind(rpc);
+  let fail = true;
+  t.mock.method(rpc, 'close', async () => {
+    if (fail) throw new Error('termination unconfirmed');
+    await close();
+  });
+  await assert.rejects(agent.releaseIdleProcess(), /termination unconfirmed/);
+  assert.equal((agent as any).rpc, rpc);
+  assert.equal(agent.runtime.connected, false);
+  await assert.rejects(agent.connect(a.id), /termination unconfirmed/);
+  assert.equal((agent as any).rpc, rpc);
+  fail = false;
+  await agent.connect(a.id);
+  assert.equal(rpc.closed, true);
+  assert.notEqual((agent as any).rpc, rpc);
+});
+
 test('conversations run in separate processes; queues, models and stopping stay in their own session', async (t) => {
   const { agents, store, a, b, runtimes } = await fixture(t);
   const first = agents.get(a.id);

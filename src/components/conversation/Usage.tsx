@@ -1,6 +1,7 @@
 import { type Runtime, type Message } from '../../../shared/types';
 import { useEffect, useRef, useState } from 'react';
 import { contextUsageLabel, sessionUsageRows } from '../../lib/context-usage';
+import { useLayer } from '../../hooks/useLayer';
 
 export function SessionUsageDetails({ stats }: { stats: NonNullable<Runtime['stats']> }) {
   return sessionUsageRows(stats).map(({ label, value, title }) => (
@@ -54,23 +55,15 @@ export function ContextMeter({
 }) {
   const [expanded, setExpanded] = useState(false);
   const panel = useRef<HTMLSpanElement>(null);
+  useLayer(panel, expanded, () => setExpanded(false), { kind: 'menu' });
   useEffect(() => {
     if (!expanded) return;
     const outside = (event: MouseEvent) => {
       if (!panel.current?.contains(event.target as Node)) setExpanded(false);
     };
-    const key = (event: KeyboardEvent) => {
-      if (event.key === 'Escape') {
-        event.preventDefault();
-        event.stopPropagation();
-        setExpanded(false);
-      }
-    };
     document.addEventListener('mousedown', outside);
-    document.addEventListener('keydown', key, true);
     return () => {
       document.removeEventListener('mousedown', outside);
-      document.removeEventListener('keydown', key, true);
     };
   }, [expanded]);
   const percent = stats.contextPercent;

@@ -1,8 +1,10 @@
 import { useRuntime } from './useRuntime';
+import { useHistory } from './useHistory';
+import { useStableCallbacks } from './useStableCallbacks';
 import { useDraft } from './useDraft';
 import { useShortcuts } from './useShortcuts';
 import { useWorkspace } from './useWorkspace';
-import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { builtinCommands } from '../lib/commands';
 import {
   busy,
@@ -16,16 +18,13 @@ import {
 } from '../../shared/types';
 
 import { readableError } from '../lib/format';
-import { hideRecoveredErrors } from '../lib/conversation-layout';
 import { PI_SOURCE_URL } from '../../shared/pi-version';
 
-import { useFocusScope } from './useFocusScope';
+import { useLayer } from './useLayer';
 import { type MessageContext } from '../components/conversation/ChatMessage';
 const api = window.desktop;
 const noTools: ToolActivity[] = [];
-const noMessages: Message[] = [];
 export function useWorkbench() {
-  const [history, setHistory] = useState<{ sessionId: string; messages: Message[] }>();
   const [errors, setErrors] = useState<Record<string, string>>({});
   const [notice, setNotice] = useState(''),
     [settingsOpen, setSettingsOpen] = useState(false),
@@ -37,6 +36,7 @@ export function useWorkbench() {
     receivedState,
     receiveState,
     runtime,
+    activities,
     anyRunning,
     environment,
     setEnvironment,
@@ -176,6 +176,9 @@ export function useWorkbench() {
     chooseImages,
     acceptDrop,
     composeDraft,
+    flushDraft,
+    isReadingAttachments,
+    getDraftRevision,
     snippets,
   } = draftState;
   const workspace = useWorkspace({
@@ -189,37 +192,31 @@ export function useWorkbench() {
     action,
     setNotice,
   });
-  const { tab, setTab, inspectFile, checkpoints, openCheckpoint } = workspace;
+  const { tab, setTab, selectTab, inspectFile, checkpoints, openCheckpoint } = workspace;
   const [checkpointRevision, setCheckpointRevision] = useState(0);
   useEffect(() => {
     setCheckpointRevision((value) => value + 1);
   }, [checkpoints]);
-  const messages = useMemo(
-    () =>
-      hideRecoveredErrors(
-        ownRuntime && (runtime.connected || runtime.messages.length)
-          ? runtime.messages
-          : history?.sessionId === selected?.id
-            ? (history?.messages ?? noMessages)
-            : noMessages,
-      ),
-    [ownRuntime, runtime.connected, runtime.messages, history, selected?.id],
-  );
-  const approvals = runtime.dialogs.filter((d) => d.approval);
-  const prompts = runtime.dialogs.filter((d) => !d.approval);
+  const { history, messages } = useHistory(selected, runtime, thread, autoScroll, setNewContent, setError);
+  const approvals = useMemo(() => runtime.dialogs.filter((d) => d.approval), [runtime.dialogs]);
+  const prompts = useMemo(() => runtime.dialogs.filter((d) => !d.approval), [runtime.dialogs]);
   const lastAssistant = messages.findLast((m) => m.role === 'assistant');
   const actionsLocked = pending || running || !sessionEnabled;
-  const visibleMessages = messages.slice(-messageLimit);
-  const sentPrompts = messages
-    .filter((m) => m.role === 'user')
-    .map((m) => {
-      const t = messageText(m),
-        cut = t.indexOf('\n\n<project_file path=');
-      return (cut < 0 ? t : t.slice(0, cut)).trim();
-    })
-    .filter((t, i, all) => t && t !== all[i - 1]);
+  const visibleMessages = useMemo(() => messages.slice(-messageLimit), [messages, messageLimit]);
+  const sentPrompts = useMemo(
+    () =>
+      messages
+        .filter((m) => m.role === 'user')
+        .map((m) => {
+          const t = messageText(m),
+            cut = t.indexOf('\n\n<project_file path=');
+          return (cut < 0 ? t : t.slice(0, cut)).trim();
+        })
+        .filter((t, i, all) => t && t !== all[i - 1]),
+    [messages],
+  );
 
-  useFocusScope(inspectorPanel, inspector && compact, () => setInspector(false));
+  useLayer(inspectorPanel, inspector, () => setInspector(false), { kind: 'panel', trapFocus: compact });
   async function attempt<T>(fn: () => Promise<T>, sessionId = selected?.id ?? ''): Promise<T | undefined> {
     try {
       return await fn();
@@ -252,50 +249,26 @@ export function useWorkbench() {
 
   useEffect(() => {
     if (!state) return;
-    document.documentElement.dataset.theme = state.settings.theme;
+    const appearance = settingsOpen && prefs ? prefs : state.settings;
+    document.documentElement.dataset.theme = appearance.theme;
     document.documentElement.dataset.platform = api.platform;
-    document.documentElement.style.setProperty('--font-scale', String(state.settings.fontScale));
-    document.documentElement.style.setProperty('--sidebar-width', state.settings.sidebarWidth + 'px');
-    document.documentElement.style.setProperty('--inspector-width', state.settings.inspectorWidth + 'px');
-  }, [state?.settings]);
+    document.documentElement.style.setProperty('--font-scale', String(appearance.fontScale));
+    document.documentElement.style.setProperty('--sidebar-width', appearance.sidebarWidth + 'px');
+    document.documentElement.style.setProperty('--inspector-width', appearance.inspectorWidth + 'px');
+  }, [state?.settings, settingsOpen, prefs]);
 
   useEffect(() => {
     document.title = runtime.title || 'Pi Desktop';
   }, [runtime.title]);
   useEffect(() => {
     if (!selected) return;
-    let active = true;
     recall.current = -1;
-    setHistory({ sessionId: selected.id, messages: [] });
     setFileQuery(null);
     setFileResults([]);
     if (!selected.projectId) setInspector(false);
     setMessageLimit(80);
     setExpanded(selected.expandedTools ?? []);
-    autoScroll.current = !(selected.scrollTop && selected.scrollTop > 0);
-    api
-      .invoke('readHistory', selected.id)
-      .then((m) => {
-        if (active) setHistory({ sessionId: selected.id, messages: m });
-      })
-      .catch((e) => {
-        if (active) setError(readableError(e), selected.id);
-      });
-    const timer = setTimeout(() => {
-      if (thread.current) thread.current.scrollTop = selected.scrollTop ?? thread.current.scrollHeight;
-    }, 80);
-    return () => {
-      active = false;
-      clearTimeout(timer);
-    };
   }, [selected?.id]);
-  useLayoutEffect(() => {
-    if (!thread.current) return;
-    if (autoScroll.current) {
-      thread.current.scrollTop = thread.current.scrollHeight;
-      setNewContent(false);
-    } else setNewContent(true);
-  }, [messages, runtime.tools]);
   useEffect(() => {
     const timer = setInterval(
       () => setElapsed(runtime.startedAt ? Math.floor((Date.now() - runtime.startedAt) / 1000) : 0),
@@ -316,19 +289,15 @@ export function useWorkbench() {
       const target = e.target as HTMLElement;
       if (!target.closest('.context-menu') && !target.closest('[aria-expanded="true"]')) setMenuId('');
     };
-    const escape = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') setMenuId('');
-    };
     document.addEventListener('mousedown', outside);
-    document.addEventListener('keydown', escape);
     return () => {
       document.removeEventListener('mousedown', outside);
-      document.removeEventListener('keydown', escape);
     };
   }, [menuId]);
 
-  const toasts = (runtime.notifications ?? []).filter(
-    (n) => n.id > seenNotification && !dismissed.includes(n.id),
+  const toasts = useMemo(
+    () => (runtime.notifications ?? []).filter((n) => n.id > seenNotification && !dismissed.includes(n.id)),
+    [runtime.notifications, seenNotification, dismissed],
   );
   useEffect(() => {
     const timers = toasts
@@ -349,6 +318,18 @@ export function useWorkbench() {
   }, [runtime.status, runtime.retry?.startedAt]);
 
   async function send() {
+    if (isReadingAttachments()) return;
+    const draftRevision = getDraftRevision();
+    const target = selected?.id;
+    if (
+      !target ||
+      !sessionEnabled ||
+      selectionChanging ||
+      target !== stateRef.current?.selectedSessionId ||
+      target !== receivedState.current.state?.selectedSessionId ||
+      renderedSelectionRequest !== selectionRequest.current
+    )
+      return;
     if (!environment?.supported) {
       setError(environment?.errors.join('\n') || '正在检测 Pi 运行环境，请稍候');
       return;
@@ -362,12 +343,24 @@ export function useWorkbench() {
     setError('');
     setPending(true);
     await attempt(async () => {
+      await flushDraft();
+      if (getDraftRevision() !== draftRevision) {
+        setNotice('草稿在准备发送时发生变化，请确认后重新发送');
+        return;
+      }
+      if (isReadingAttachments()) return;
+      if (
+        target !== receivedState.current.state?.selectedSessionId ||
+        target !== stateRef.current?.selectedSessionId ||
+        renderedSelectionRequest !== selectionRequest.current
+      )
+        return;
       if (await handleBuiltin(sent)) {
-        await api.invoke('consumeDraft', selected.id, sent);
+        await api.invoke('consumeDraft', selected.id, sent, attachments, images);
         setHideCommands(true);
       } else if (/^\/\/\S/.test(sent)) {
         await api.invoke('send', selected.id, sent.slice(1), attachments, sendMode, images);
-        await api.invoke('consumeDraft', selected.id, sent);
+        await api.invoke('consumeDraft', selected.id, sent, attachments, images);
       } else await api.invoke('send', selected.id, sent, attachments, sendMode, images);
     });
     setPending(false);
@@ -380,10 +373,8 @@ export function useWorkbench() {
     if (images.length || attachments.length) throw new Error('桌面命令不能附带附件，请先移除附件');
     const [_, cmd, arg = ''] = match;
     if (['tree', 'fork'].includes(cmd)) setFeatureTab('tree');
-    else if (cmd === 'find') {
-      if (compact) setInspector(false);
-      window.dispatchEvent(new CustomEvent('pi:find'));
-    } else if (cmd === 'new') await createSession(selected.projectId);
+    else if (cmd === 'find') runAction('find');
+    else if (cmd === 'new') await createSession(selected.projectId);
     else if (cmd === 'resume') setSearchOpen(true);
     else if (cmd === 'name') {
       if (arg) await api.invoke('renameSession', selected.id, arg);
@@ -421,7 +412,7 @@ export function useWorkbench() {
     else if (cmd === 'trust') {
       if (project) await api.invoke('trustProject', project.id);
     } else if (cmd === 'bug') openSettings('diagnostic');
-    else if (cmd === 'hotkeys') setShortcutsOpen(true);
+    else if (cmd === 'hotkeys') runAction('shortcuts');
     else if (cmd === 'changelog') await api.invoke('openLink', PI_SOURCE_URL + '/CHANGELOG.md');
     else setFeatureTab('help');
     return true;
@@ -439,6 +430,7 @@ export function useWorkbench() {
     setError('', s.id);
     setPending(true, s.id);
     try {
+      await flushDraft();
       // The selected-ID effect owns history; late IPC replies cannot replace it.
       await api.invoke('selectSession', s.id);
       await settleSelection(request);
@@ -453,6 +445,7 @@ export function useWorkbench() {
   }
   async function createSession(projectId?: string) {
     const request = beginSelection();
+    await flushDraft();
     const session = await attempt(() => api.invoke('newSession', projectId));
     const confirmed = await settleSelection(request);
     if (session && confirmed && request === selectionRequest.current) focusComposer();
@@ -667,7 +660,7 @@ export function useWorkbench() {
       checkpointRevision,
     ],
   );
-  const stopArmed = useShortcuts({
+  const { stopArmed, runAction } = useShortcuts({
     state,
     selected,
     runtime,
@@ -682,100 +675,104 @@ export function useWorkbench() {
     setSidebar,
     setShortcutsOpen,
     setInspector,
-    setTab,
+    selectTab,
   });
-  return {
-    ...workspace,
-    ...draftState,
-    askHunk,
-    rerunCommand,
-    update,
-    state,
-    storage,
-    runtime,
-    environment,
-    history,
-    pending,
-    selectionChanging,
-    selectionRevision: renderedSelectionRequest,
-    setFeatureTab,
-    compact,
-    inspector,
-    expanded,
-    messageLimit,
-    setMessageLimit,
-    newContent,
-    setNewContent,
-    thread,
-    autoScroll,
-    selected,
-    project,
-    sessionEnabled,
-    ownRuntime,
-    running,
-    anyRunning,
-    modelLocked,
-    messages,
-    approvals,
-    lastAssistant,
-    visibleMessages,
-    attempt,
-    selectSession,
-    openSettings,
-    connect,
-    readModels,
-    toggleTool,
-    messageContext,
-    error,
-    setError,
-    setNotice,
-    elapsed,
-    setShortcutsOpen,
-    stopArmed,
-    dragging,
-    setDragging,
-    ownRunning,
-    sentPrompts,
-    send,
-    setModel,
-    setThinking,
-    sidebar,
-    setSearchOpen,
-    setRename,
-    menuId,
-    setMenuId,
-    addProject,
-    createSession,
-    setSidebar,
-    setInspector,
-    inspectorPanel,
-    copy,
-    notice,
-    setDismissed,
-    toasts,
-    featureTab,
-    searchOpen,
-    searchQuery,
-    setSearchQuery,
-    rename,
-    shortcutsOpen,
-    prompts,
-    settingsOpen,
-    setSettingsOpen,
-    settingsTab,
-    setSettingsTab,
-    prefs,
-    setPrefs,
-    testResult,
-    setTestResult,
-    diagnostic,
-    setDiagnostic,
-    action,
-    detect,
-    saveSettings,
-    chooseSettingPath,
-    latest,
-    columns,
-  };
+  return useStableCallbacks(
+    {
+      ...workspace,
+      ...draftState,
+      askHunk,
+      rerunCommand,
+      update,
+      state,
+      storage,
+      runtime,
+      environment,
+      history,
+      activities,
+      pending,
+      selectionChanging,
+      selectionRevision: renderedSelectionRequest,
+      setFeatureTab,
+      compact,
+      inspector,
+      expanded,
+      messageLimit,
+      setMessageLimit,
+      newContent,
+      setNewContent,
+      thread,
+      autoScroll,
+      selected,
+      project,
+      sessionEnabled,
+      ownRuntime,
+      running,
+      anyRunning,
+      modelLocked,
+      messages,
+      approvals,
+      lastAssistant,
+      visibleMessages,
+      attempt,
+      selectSession,
+      openSettings,
+      connect,
+      readModels,
+      toggleTool,
+      messageContext,
+      error,
+      setError,
+      setNotice,
+      elapsed,
+      setShortcutsOpen,
+      stopArmed,
+      dragging,
+      setDragging,
+      ownRunning,
+      sentPrompts,
+      send,
+      setModel,
+      setThinking,
+      sidebar,
+      setSearchOpen,
+      setRename,
+      menuId,
+      setMenuId,
+      addProject,
+      createSession,
+      setSidebar,
+      setInspector,
+      inspectorPanel,
+      copy,
+      notice,
+      setDismissed,
+      toasts,
+      featureTab,
+      searchOpen,
+      searchQuery,
+      setSearchQuery,
+      rename,
+      shortcutsOpen,
+      prompts,
+      settingsOpen,
+      setSettingsOpen,
+      settingsTab,
+      setSettingsTab,
+      prefs,
+      setPrefs,
+      testResult,
+      setTestResult,
+      diagnostic,
+      setDiagnostic,
+      action,
+      detect,
+      saveSettings,
+      chooseSettingPath,
+      latest,
+      columns,
+    },
+    `${selected?.id ?? ''}:${renderedSelectionRequest}`,
+  );
 }
 export type Workbench = ReturnType<typeof useWorkbench>;

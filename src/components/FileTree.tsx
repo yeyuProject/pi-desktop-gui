@@ -35,6 +35,7 @@ function Directory({
     [open, setOpen] = useState<string[]>([]),
     [error, setError] = useState('');
   const selected = useRef<HTMLButtonElement>(null);
+  const located = useRef(0);
   useEffect(() => {
     let alive = true;
     api
@@ -53,7 +54,8 @@ function Directory({
     };
   }, [project.id, directory, revision]);
   useEffect(() => {
-    if (!locate || !selectedFile) return;
+    if (!locate || !selectedFile || !items.length || located.current === locate) return;
+    located.current = locate;
     setOpen((old) => [
       ...new Set([
         ...old,
@@ -173,7 +175,7 @@ export function FileTree(props: FileTreeProps) {
         </IconButton>
       </div>
       <div className="file-browser-tree" hidden={!!query.trim()}>
-        <Directory {...props} locate={locate} />
+        <Directory key={props.project.id} {...props} locate={locate} />
       </div>
       {!!query.trim() && (
         <div className="file-search-results">

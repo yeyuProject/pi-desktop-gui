@@ -48,8 +48,12 @@ const launch = async () => {
       if (event.type === 'storage') window.chatUiStorage = event.storage;
       if (event.type === 'runtime' && event.runtime.sessionId)
         window.chatUiRuntimes.set(event.runtime.sessionId, event.runtime);
-      if (event.type === 'runtimePatch' && event.patch.sessionId)
-        window.chatUiRuntimes.set(event.patch.sessionId, event.patch);
+      if (event.type === 'runtimePatch' && event.patch.sessionId) {
+        // Readiness uses scalar fields; omitted fields retain their previous values.
+        const next = { ...window.chatUiRuntimes.get(event.patch.sessionId), ...event.patch };
+        for (const key of event.patch.removed ?? []) delete next[key];
+        window.chatUiRuntimes.set(event.patch.sessionId, next);
+      }
       if (event.type === 'runtimeRemoved') window.chatUiRuntimes.delete(event.sessionId);
     });
     // Bootstrap once after subscribing, rather than repeatedly resyncing during readiness waits.

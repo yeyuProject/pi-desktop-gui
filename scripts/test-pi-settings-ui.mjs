@@ -149,8 +149,10 @@ try {
         }
         if (method === 'providers') return mock.providers.map((provider) => ({ ...provider }));
         if (method === 'login' || method === 'logout') {
+          if (method === 'logout' && mock.cancelLogout) return false;
           mock.providers.find((provider) => provider.id === args[1]).authSource =
             method === 'login' ? 'stored' : mock.independentAuth[args[1]];
+          return true;
         }
         if (method === 'resources') return { resources: [], tools: [], activeTools: [], packages: [] };
         if (method === 'sessionTree') return [];
@@ -343,6 +345,15 @@ try {
   await modal.getByRole('button', { name: '放弃修改并重新读取', exact: true }).click();
   await readyJson('models');
   const logout = modal.getByRole('button', { name: '退出登录', exact: true });
+  await page.evaluate(() => {
+    window.mock.cancelLogout = true;
+  });
+  await logout.click();
+  await expect(providerSelect.locator('option:checked')).toHaveText('API Key provider · 已保存凭据');
+  await expect(modal.getByText('已移除保存的登录凭据', { exact: false })).toHaveCount(0);
+  await page.evaluate(() => {
+    window.mock.cancelLogout = false;
+  });
   await logout.click();
   await expect(providerSelect.locator('option:checked')).toHaveText('API Key provider · 未配置');
   for (const [id, label] of [

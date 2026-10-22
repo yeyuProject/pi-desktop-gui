@@ -274,6 +274,7 @@ async function chooseTheme(source) {
       exact: true,
     })
     .click();
+  await settings.getByRole('button', { name: '保存设置', exact: true }).click();
   const save = await eventually(
     () =>
       app.evaluate(

@@ -1,8 +1,9 @@
-import { useEffect, useState, type Dispatch, type SetStateAction } from 'react';
-import type { AppState, Runtime, Session } from '../../shared/types';
+import { useEffect, useRef, useState } from 'react';
+import type { Runtime, Session, AppState } from '../../shared/types';
+import { workbenchShortcuts, type WorkbenchAction } from '../../shared/workbench-actions';
 import { mod } from '../lib/platform';
-const api = window.desktop;
-type Toggle = Dispatch<SetStateAction<boolean>>;
+import { allowsWorkbenchAction, topLayer } from './useLayer';
+type Toggle = React.Dispatch<React.SetStateAction<boolean>>;
 interface ShortcutsOptions {
   state: AppState | undefined;
   selected: Session | undefined;
@@ -18,122 +19,87 @@ interface ShortcutsOptions {
   setSidebar: Toggle;
   setShortcutsOpen: Toggle;
   setInspector: Toggle;
-  setTab: Dispatch<SetStateAction<'changes' | 'files' | 'output'>>;
+  selectTab: (tab: 'changes' | 'files' | 'output') => void;
 }
-export function useShortcuts({
-  state,
-  selected,
-  runtime,
-  compact,
-  inspector,
-  ownRunning,
-  createSession,
-  openSettings,
-  action,
-  attempt,
-  setSearchOpen,
-  setSidebar,
-  setShortcutsOpen,
-  setInspector,
-  setTab,
-}: ShortcutsOptions) {
+export function useShortcuts(options: ShortcutsOptions) {
+  const latest = useRef(options);
+  latest.current = options;
   const [stopArmed, setStopArmed] = useState(false);
-  useEffect(() => {
-    const key = (e: KeyboardEvent) => {
-      if (e.isComposing || document.querySelector('[data-app-dialog]')) return;
-      if (mod(e) && e.key.toLowerCase() === 'f' && !document.querySelector('[role="dialog"]')) {
-        e.preventDefault();
-        if (compact && inspector) setInspector(false);
+  const runAction = (action: WorkbenchAction) => {
+    if (!allowsWorkbenchAction(action)) return;
+    const o = latest.current;
+    const actions: Record<WorkbenchAction, () => void> = {
+      new: () => {
+        void o.createSession();
+      },
+      search: () => o.setSearchOpen(true),
+      find: () => {
+        if (o.compact) o.setInspector(false);
         window.dispatchEvent(new CustomEvent('pi:find'));
-      }
-      if (mod(e) && e.key.toLowerCase() === 'j' && !document.querySelector('[role="dialog"]')) {
-        e.preventDefault();
-        setInspector((value) => !value);
-      }
-      if (
-        e.altKey &&
-        !e.ctrlKey &&
-        !e.metaKey &&
-        ['1', '2', '3'].includes(e.key) &&
-        !document.querySelector('[role="dialog"]')
-      ) {
-        e.preventDefault();
-        setTab(e.key === '1' ? 'changes' : e.key === '2' ? 'files' : 'output');
-        setInspector(true);
-      }
-      if (
-        mod(e) &&
-        !e.shiftKey &&
-        !e.altKey &&
-        e.key.toLowerCase() === 'n' &&
-        !document.querySelector('[role="dialog"]')
-      ) {
-        e.preventDefault();
-        if (!e.repeat) void createSession();
-      }
-      if (mod(e) && e.key.toLowerCase() === 'k') {
-        e.preventDefault();
-        setSearchOpen(true);
-      }
-      if (mod(e) && e.key === ',') {
-        e.preventDefault();
-        openSettings();
-      }
-      if (mod(e) && e.key.toLowerCase() === 'g' && selected && !document.querySelector('[role="dialog"]')) {
-        e.preventDefault();
-        void action(() => api.invoke('editDraft', selected.id));
-      }
-      if (mod(e) && e.key.toLowerCase() === 'b' && !document.querySelector('[role="dialog"]')) {
-        e.preventDefault();
-        setSidebar((v) => !v);
-      }
-      if (mod(e) && (e.key === '/' || e.code === 'Slash')) {
-        e.preventDefault();
-        setShortcutsOpen((v) => !v);
-      }
+      },
+      sidebar: () => o.setSidebar((value) => !value),
+      inspector: () => o.setInspector((value) => !value),
+      changes: () => o.selectTab('changes'),
+      files: () => o.selectTab('files'),
+      output: () => o.selectTab('output'),
+      settings: () => o.openSettings(),
+      editDraft: () => {
+        if (o.selected) void o.action(() => window.desktop.invoke('editDraft', o.selected!.id));
+      },
+      shortcuts: () => o.setShortcutsOpen((value) => !value),
+    };
+    actions[action]();
+  };
+  useEffect(() => {
+    const key = (event: KeyboardEvent) => {
+      if (event.isComposing || event.defaultPrevented || event.shiftKey) return;
+      const binding = workbenchShortcuts.find(
+        (item) =>
+          event.key.toLowerCase() === item.key &&
+          ('mod' in item ? mod(event) && !event.altKey : event.altKey && !event.ctrlKey && !event.metaKey),
+      );
+      if (!binding) return;
+      event.preventDefault();
+      if (!event.repeat) runAction(binding.action);
     };
     window.addEventListener('keydown', key);
-    return () => window.removeEventListener('keydown', key);
-  }, [state, compact, inspector]);
+    const off = window.desktop.onEvent((event) => {
+      if (event.type === 'action') runAction(event.action);
+    });
+    return () => {
+      window.removeEventListener('keydown', key);
+      off();
+    };
+  }, []);
   useEffect(() => {
     if (!stopArmed) return;
     const timer = setTimeout(() => setStopArmed(false), 2000);
     return () => clearTimeout(timer);
   }, [stopArmed]);
   useEffect(() => {
-    if (!ownRunning) setStopArmed(false);
-  }, [ownRunning]);
+    if (!options.ownRunning) setStopArmed(false);
+  }, [options.ownRunning]);
   useEffect(() => {
-    if (!ownRunning || runtime.status === 'stopping') return;
-    const key = (e: KeyboardEvent) => {
+    const key = (event: KeyboardEvent) => {
+      const o = latest.current;
       if (
-        e.key !== 'Escape' ||
-        e.repeat ||
-        e.defaultPrevented ||
-        e.isComposing ||
-        document.querySelector('[role="dialog"], .context-menu') ||
-        inspector
+        !o.ownRunning ||
+        o.runtime.status === 'stopping' ||
+        event.key !== 'Escape' ||
+        event.repeat ||
+        event.defaultPrevented ||
+        event.isComposing ||
+        topLayer()
       )
         return;
-      e.preventDefault();
+      event.preventDefault();
       if (stopArmed) {
         setStopArmed(false);
-        if (runtime.sessionId) void attempt(() => api.invoke('stop', runtime.sessionId!));
+        if (o.runtime.sessionId) void o.attempt(() => window.desktop.invoke('stop', o.runtime.sessionId!));
       } else setStopArmed(true);
     };
     window.addEventListener('keydown', key);
     return () => window.removeEventListener('keydown', key);
-  }, [ownRunning, runtime.status, runtime.sessionId, stopArmed, inspector]);
-  useEffect(() => {
-    if (!inspector) return;
-    const key = (e: KeyboardEvent) => {
-      if (e.key === 'Escape' && !e.defaultPrevented && !document.querySelector('[role="dialog"]')) {
-        setInspector(false);
-        document.querySelector<HTMLButtonElement>('.workspace-toggle')?.focus();
-      }
-    };
-    window.addEventListener('keydown', key);
-    return () => window.removeEventListener('keydown', key);
-  }, [inspector]);
-  return stopArmed;
+  }, [stopArmed]);
+  return { stopArmed, runAction };
 }

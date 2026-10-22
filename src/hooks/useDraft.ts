@@ -59,6 +59,25 @@ export function useDraft({
   );
   const recall = useRef(-1);
   const composerDraft = useRef({ draft, attachments, images, snippets });
+  const draftRevision = useRef(0);
+  const savingDraft = useRef(Promise.resolve<unknown>(undefined));
+  const pendingDrafts = useRef(0);
+  const loadedDraft = useRef<string | undefined>(undefined);
+  const attachmentJobs = useRef<Record<string, number>>({});
+  const [, updateAttachmentJobs] = useState(0);
+  const isReadingAttachments = () => Boolean(selected && attachmentJobs.current[selected.id]);
+  const withAttachments = async (operation: () => Promise<void>) => {
+    const id = selected?.id;
+    if (!id) return;
+    attachmentJobs.current[id] = (attachmentJobs.current[id] ?? 0) + 1;
+    updateAttachmentJobs((value) => value + 1);
+    try {
+      await operation();
+    } finally {
+      if (--attachmentJobs.current[id] === 0) delete attachmentJobs.current[id];
+      updateAttachmentJobs((value) => value + 1);
+    }
+  };
   const input = useRef<HTMLTextAreaElement>(null),
     commandList = useRef<HTMLDivElement>(null),
     fileList = useRef<HTMLDivElement>(null);
@@ -106,12 +125,22 @@ export function useDraft({
     pieces = moveSnippetOffsets(composerDraft.current.draft, value, composerDraft.current.snippets),
   ) => {
     if (!selected || stateRef.current?.selectedSessionId !== selected.id) return;
+    draftRevision.current++;
+    const picturesChanged = pictures !== composerDraft.current.images;
     composerDraft.current = { draft: value, attachments: files, images: pictures, snippets: pieces };
     setDraft(value);
     setAttachments(files);
     setImages(pictures);
     setSnippets(pieces);
-    if (selected) void attempt(() => api.invoke('saveDraft', selected.id, value, files, pictures, pieces));
+    pendingDrafts.current++;
+    savingDraft.current = attempt(() =>
+      api.invoke('saveDraft', selected.id, value, files, picturesChanged ? pictures : undefined, pieces),
+    ).finally(() => {
+      pendingDrafts.current--;
+    });
+  };
+  const flushDraft = async () => {
+    await savingDraft.current;
   };
   const composeDraft = () => composeDraftText(composerDraft.current.draft, composerDraft.current.snippets);
   const pasteText = (
@@ -279,6 +308,14 @@ export function useDraft({
   }, [inputMaxHeight]);
   useEffect(() => {
     if (!selected) return;
+    if (pendingDrafts.current && selected.id === loadedDraft.current) return;
+    loadedDraft.current = selected.id;
+    composerDraft.current = {
+      draft: selected.draft,
+      attachments: selected.attachments,
+      images: selected.images ?? [],
+      snippets: selected.draftSnippets ?? [],
+    };
     setDraft(selected.draft);
     setAttachments(selected.attachments);
     setImages(selected.images ?? []);
@@ -368,10 +405,14 @@ export function useDraft({
     activeCommand,
     completeCommand,
     persistDraft,
+    flushDraft,
+    getDraftRevision: () => draftRevision.current,
     onDraft,
     focusComposer,
-    addAttachment,
-    chooseImages,
-    acceptDrop,
+    attachmentsPending: isReadingAttachments(),
+    isReadingAttachments,
+    addAttachment: (name: string) => withAttachments(() => addAttachment(name)),
+    chooseImages: () => withAttachments(chooseImages),
+    acceptDrop: (files: File[]) => withAttachments(() => acceptDrop(files)),
   };
 }

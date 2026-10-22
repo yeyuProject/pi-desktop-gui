@@ -273,11 +273,14 @@ const launch = async () => {
       }
       if (event.type === 'runtime' && event.runtime.sessionId)
         window.sessionUiRuntimes.set(event.runtime.sessionId, event.runtime);
-      if (event.type === 'runtimePatch' && event.patch.sessionId)
-        window.sessionUiRuntimes.set(event.patch.sessionId, {
+      if (event.type === 'runtimePatch' && event.patch.sessionId) {
+        const next = {
           ...window.sessionUiRuntimes.get(event.patch.sessionId),
           ...event.patch,
-        });
+        };
+        for (const key of event.patch.removed ?? []) delete next[key];
+        window.sessionUiRuntimes.set(event.patch.sessionId, next);
+      }
       if (event.type === 'runtimeRemoved') window.sessionUiRuntimes.delete(event.sessionId);
     });
     window.otherSessionBannerCount = 0;

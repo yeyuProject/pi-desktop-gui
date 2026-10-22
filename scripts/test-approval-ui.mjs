@@ -34,11 +34,20 @@ try {
   await page.waitForFunction(() => document.querySelector('.approval-pill')?.textContent === '确认修改');
 
   await input.fill('E2E_FILES');
+  await input.evaluate((element) => {
+    window.approvalInputBlurs = 0;
+    window.trackApprovalBlur = () => window.approvalInputBlurs++;
+    element.addEventListener('blur', window.trackApprovalBlur);
+  });
   await input.press('Enter');
+  // Start the next draft after the first send is accepted, beyond its save barrier.
+  await page.locator('.message.user').filter({ hasText: 'E2E_FILES' }).waitFor();
   await input.fill('这条草稿不应被审批卡片打断');
   const write = page.getByRole('region', { name: '等待批准：write', exact: true });
   await write.waitFor();
   assert.match(await write.innerText(), /真实 Pi 工具执行成功/);
+  assert.equal(await page.evaluate(() => window.approvalInputBlurs), 0);
+  await input.evaluate((element) => element.removeEventListener('blur', window.trackApprovalBlur));
   assert.equal(await input.evaluate((el) => document.activeElement === el), true);
   assert.equal(await input.inputValue(), '这条草稿不应被审批卡片打断');
   assert.equal(await exists(path.join(fixture.projectDir, '输出结果.txt')), false);

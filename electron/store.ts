@@ -1,8 +1,17 @@
 import fs from 'node:fs/promises';
 import path from 'node:path';
-import { randomUUID } from 'node:crypto';
+import { createHash, randomUUID } from 'node:crypto';
 import { EventEmitter } from 'node:events';
-import type { AppState, IndexRecovery, Message, Session, StorageStatus } from '../shared/types';
+import type {
+  AppState,
+  ImageAttachment,
+  IndexRecovery,
+  Message,
+  Session,
+  StorageStatus,
+} from '../shared/types';
+import { validateImages } from './images';
+import { MAX_IMAGE_BYTES, MAX_IMAGE_COUNT } from '../shared/images';
 import { emptyState, parseState } from './store-state';
 import { compareAppVersions, stableVersion } from '../shared/app-update';
 import { sessionUsage } from './pi/session-usage';
@@ -15,6 +24,14 @@ export class Store extends EventEmitter {
   state = emptyState();
   storage: StorageStatus = { writable: true };
   private writing = Promise.resolve();
+  private deferredSave?: {
+    timer: NodeJS.Timeout;
+    promise: Promise<void>;
+    resolve: () => void;
+    reject: (error: unknown) => void;
+  };
+  private imageFiles = new WeakMap<ImageAttachment, string>();
+  private writtenImages = new Set<string>();
   // Keep stable IDs for late draft IPC, but never infer this status from loaded blank rows.
   private transientSessions = new Set<string>();
   constructor(
@@ -65,7 +82,7 @@ export class Store extends EventEmitter {
         'version' in raw &&
         typeof raw.version === 'number' &&
         Number.isInteger(raw.version) &&
-        raw.version > 1
+        raw.version > 2
       ) {
         const writer = 'appVersion' in raw ? stableVersion(raw.appVersion) : undefined;
         this.storage = {
@@ -76,8 +93,17 @@ export class Store extends EventEmitter {
         return this.storage;
       }
       try {
-        valid = parseState(raw);
-      } catch {}
+        valid = await this.parseStoredState(raw);
+      } catch {
+        if (raw && typeof raw === 'object' && 'version' in raw && raw.version === 2) {
+          this.storage = {
+            writable: false,
+            problem:
+              '无法完整读取本地索引或草稿图片，已停止写入以保留原数据。请检查数据目录中的 state.json 和 draft-images，恢复缺失文件后重启。',
+          };
+          return this.storage;
+        }
+      }
       if (valid) this.state = valid.state;
       if (valid && this.appVersion) {
         try {
@@ -123,10 +149,18 @@ export class Store extends EventEmitter {
     return this.storage;
   }
   private async restoreBackup(recovery?: IndexRecovery) {
+    let unreadableImages = false;
     for (let i = 1; i <= 3; i++) {
       const backup = this.file(`state.backup-${i}.json`);
       try {
-        const parsed = parseState(JSON.parse(await fs.readFile(backup, 'utf8')));
+        const raw = JSON.parse(await fs.readFile(backup, 'utf8'));
+        let parsed: ReturnType<typeof parseState>;
+        try {
+          parsed = await this.parseStoredState(raw);
+        } catch (error) {
+          if (raw?.version === 2) unreadableImages = true;
+          throw error;
+        }
         const backupAt = (await fs.stat(backup)).mtimeMs;
         this.state = parsed.state;
         this.storage.recovery = {
@@ -141,6 +175,13 @@ export class Store extends EventEmitter {
         return;
       } catch {}
     }
+    if (unreadableImages)
+      this.storage = {
+        ...this.storage,
+        writable: false,
+        problem:
+          '备份引用的草稿图片无法读取或校验，已停止写入以保留原数据。请恢复数据目录中的 draft-images 后重启。',
+      };
   }
   private async backupBeforeUpgrade(contents: string, previous?: string) {
     const version = stableVersion(previous);
@@ -155,7 +196,7 @@ export class Store extends EventEmitter {
     backups.sort((a, b) => b.modified - a.modified);
     for (const backup of backups.slice(3)) await fs.unlink(this.file(backup.name));
   }
-  private async replace(name: string, contents: string) {
+  private async replace(name: string, contents: string | Buffer) {
     const temporary = this.file(name + '.tmp');
     await fs.writeFile(temporary, contents, { mode: 0o600 });
     for (let attempt = 0; ; attempt++) {
@@ -167,6 +208,46 @@ export class Store extends EventEmitter {
         await new Promise((resolve) => setTimeout(resolve, 50 * (attempt + 1)));
       }
     }
+  }
+  private async parseStoredState(raw: any) {
+    if (raw?.version !== 2) return parseState(raw);
+    if (!Array.isArray(raw.sessions)) throw new Error('本地索引格式不受支持');
+    for (const session of raw.sessions) {
+      if (!Array.isArray(session?.images)) continue;
+      if (session.images.length > MAX_IMAGE_COUNT) throw new Error('草稿图片数量无效');
+      for (let index = 0; index < session.images.length; index++) {
+        const { file, ...metadata } = session.images[index];
+        if (typeof file !== 'string' || !/^[a-f0-9]{64}\.bin$/.test(file))
+          throw new Error('草稿图片索引无效，原文件已保留');
+        const imagePath = this.file(path.join('draft-images', file));
+        if ((await fs.stat(imagePath)).size > MAX_IMAGE_BYTES) throw new Error('草稿图片超过大小限制');
+        const bytes = await fs.readFile(imagePath);
+        if (createHash('sha256').update(bytes).digest('hex') + '.bin' !== file)
+          throw new Error('草稿图片校验失败，原文件已保留');
+        const image = { ...metadata, data: bytes.toString('base64') };
+        validateImages([image]);
+        session.images[index] = image;
+        this.imageFiles.set(image, file);
+        this.writtenImages.add(file);
+      }
+      validateImages(session.images);
+    }
+    return parseState({ ...raw, version: 1 });
+  }
+  /** Coalesce typing, while save/flush remain immediate durability barriers. */
+  scheduleSave() {
+    if (!this.deferredSave) {
+      let resolve!: () => void, reject!: (error: unknown) => void;
+      const promise = new Promise<void>((yes, no) => {
+        resolve = yes;
+        reject = no;
+      });
+      const timer = setTimeout(() => {
+        void this.save().catch(() => {});
+      }, 300);
+      this.deferredSave = { timer, promise, resolve, reject };
+    }
+    return this.deferredSave.promise;
   }
   private async backup(contents: string) {
     const latest = await fs.stat(this.file('state.backup-1.json')).catch((error) => {
@@ -188,13 +269,45 @@ export class Store extends EventEmitter {
     await this.replace('state.backup-1.json', contents);
   }
   save() {
+    const deferred = this.deferredSave;
+    this.deferredSave = undefined;
+    if (deferred) clearTimeout(deferred.timer);
     if (this.appVersion && this.storage.writable) this.state.appVersion = this.appVersion;
     // Capture the projection now, before joining the existing atomic-write queue. Current
     // state and backups must describe the same acknowledged save, not later mutations.
-    const contents = JSON.stringify(this.persistentState(), null, 2);
+    const images = new Map<string, string>();
+    const state = this.persistentState();
+    const contents = JSON.stringify(
+      {
+        ...state,
+        version: 2,
+        sessions: state.sessions.map((session) => ({
+          ...session,
+          images: session.images?.map((image) => {
+            let file = this.imageFiles.get(image);
+            if (!file) {
+              file = createHash('sha256').update(Buffer.from(image.data, 'base64')).digest('hex') + '.bin';
+              this.imageFiles.set(image, file);
+            }
+            images.set(file, image.data);
+            const { data: _data, ...metadata } = image;
+            return { ...metadata, file };
+          }),
+        })),
+      },
+      null,
+      2,
+    );
     const write = async () => {
       this.assertWritable();
       try {
+        if (images.size) await fs.mkdir(this.file('draft-images'), { recursive: true });
+        for (const [file, data] of images) {
+          if (this.writtenImages.has(file)) continue;
+          // Immutable content-addressed files keep current and backup indexes consistent.
+          await this.replace(path.join('draft-images', file), Buffer.from(data, 'base64'));
+          this.writtenImages.add(file);
+        }
         await this.replace('state.json', contents);
         await this.backup(contents);
       } catch (error) {
@@ -203,10 +316,11 @@ export class Store extends EventEmitter {
       }
     };
     this.writing = this.writing.catch(() => {}).then(write);
+    if (deferred) void this.writing.then(deferred.resolve, deferred.reject);
     return this.writing;
   }
   flush() {
-    return this.writing;
+    return this.deferredSave ? this.save() : this.writing;
   }
   isTransientSession(id: string) {
     return this.transientSessions.has(id);

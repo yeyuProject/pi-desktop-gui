@@ -140,7 +140,15 @@ export function ToolCard({
         <ChevronDown size={13} />
       </summary>
       <div className="tool-body">
-        {tool.patch ? (
+        {match ? (
+          <pre className="tool-search-content">
+            <SearchHighlight
+              text={match.text}
+              query={match.query}
+              activeStart={match.start}
+            />
+          </pre>
+        ) : tool.patch ? (
           <DiffView
             patch={tool.patch}
             path={typeof tool.args.path === 'string' ? tool.args.path : undefined}
@@ -154,17 +162,7 @@ export function ToolCard({
                 {shell ? String(tool.args.command ?? '') : JSON.stringify(tool.args, null, 2)}
               </pre>
             )}
-            {match ? (
-              <pre>
-                <SearchHighlight
-                  text={stripAnsi(tool.output || '等待输出…')}
-                  query={match.query}
-                  activeStart={match.start - tool.name.length - JSON.stringify(tool.args).length - 2}
-                />
-              </pre>
-            ) : (
-              <AnsiOutput text={tool.output || '等待输出…'} />
-            )}
+            <AnsiOutput text={tool.output || '等待输出…'} />
           </>
         )}
         <div className="tool-actions">

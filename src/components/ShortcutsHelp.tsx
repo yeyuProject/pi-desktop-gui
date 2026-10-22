@@ -1,5 +1,6 @@
 import { modKey, shortcut } from '../lib/platform';
 import { Modal } from './Modal';
+import { workbenchShortcuts } from '../../shared/workbench-actions';
 
 export const shortcutGroups: [string, [string[], string][]][] = [
   [
@@ -11,7 +12,6 @@ export const shortcutGroups: [string, [string[], string][]][] = [
       [['/'], '命令菜单；Tab 补全'],
       [['@'], '引用项目文件；也可把文件拖进输入框'],
       [[modKey, 'V'], '粘贴图片'],
-      [[modKey, 'G'], '在外部编辑器中编辑草稿'],
     ],
   ],
   [
@@ -25,14 +25,10 @@ export const shortcutGroups: [string, [string[], string][]][] = [
   [
     '导航',
     [
-      [[modKey, 'N'], '新建独立对话'],
-      [[modKey, 'K'], '搜索会话标题与内容'],
-      [[modKey, 'F'], '查找当前会话，Enter / Shift+Enter 切换匹配'],
-      [[modKey, 'B'], '收起或展开侧栏'],
-      [[modKey, 'J'], '收起或展开工作区面板'],
-      [['Alt', '1 / 2 / 3'], '切换工作区变更、文件、输出'],
-      [[modKey, ','], '打开设置'],
-      [[modKey, '/'], '显示本页'],
+      ...workbenchShortcuts.map((binding): [string[], string] => [
+        ['mod' in binding ? modKey : 'Alt', binding.key.toUpperCase()],
+        binding.label,
+      ]),
       [['Esc'], '关闭弹窗或工作区面板'],
     ],
   ],

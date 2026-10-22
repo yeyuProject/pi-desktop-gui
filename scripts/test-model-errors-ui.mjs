@@ -96,13 +96,10 @@ const failWith = async (prompt, kind, title) => {
   const before = (await bootstrap()).runtime.startedAt;
   await page.getByRole('textbox', { name: '任务输入' }).fill(prompt);
   await page.getByRole('button', { name: '发送任务', exact: true }).click();
-  await page.waitForFunction(
-    async ({ before, kind }) => {
-      const { runtime } = await window.desktop.invoke('bootstrap');
-      return runtime.startedAt !== before && runtime.status === 'error' && runtime.errorKind === kind;
-    },
-    { before, kind },
-  );
+  await wait(async () => {
+    const { runtime } = await bootstrap();
+    return runtime.startedAt !== before && runtime.status === 'error' && runtime.errorKind === kind;
+  }, `The ${kind} failure did not settle`);
   await page.getByRole('alert', { name: title, exact: true }).waitFor();
   assertSafe(await page.locator('body').innerText(), 'rendered error');
 };
@@ -118,8 +115,9 @@ try {
   await launch();
   await page.getByRole('textbox', { name: '任务输入' }).fill('保留这些上下文用于压缩验收。'.repeat(80));
   await page.getByRole('button', { name: '发送任务', exact: true }).click();
-  await page.waitForFunction(
-    async () => (await window.desktop.invoke('bootstrap')).runtime.status === 'completed',
+  await wait(
+    async () => (await bootstrap()).runtime.status === 'completed',
+    'The initial conversation did not complete',
   );
   await failWith('E2E_401', 'auth', '供应商拒绝了凭据');
   await card().getByText('查看详细信息', { exact: true }).click();
@@ -154,10 +152,10 @@ try {
   const beforeRetry = provider.requests.length;
   await card().getByRole('button', { name: '重新生成', exact: true }).click();
   await wait(() => provider.requests.length > beforeRetry, 'regenerate did not reach the local provider');
-  await page.waitForFunction(async () => {
-    const { runtime } = await window.desktop.invoke('bootstrap');
+  await wait(async () => {
+    const { runtime } = await bootstrap();
     return runtime.status === 'error' && runtime.errorKind === 'busy' && runtime.errorCount === 4;
-  });
+  }, 'The fourth failure did not settle');
   pass('three consecutive rate-limit failures are counted; regenerate performs a fourth real request');
 
   await failWith('E2E_QUOTA', 'quota', '账户额度不足或已欠费');
@@ -195,9 +193,7 @@ try {
   await screenshot('context-actions');
   const beforeCompact = provider.requests.length;
   await card().getByRole('button', { name: '压缩上下文', exact: true }).click();
-  await page.waitForFunction(
-    async () => (await window.desktop.invoke('bootstrap')).runtime.status === 'idle',
-  );
+  await wait(async () => (await bootstrap()).runtime.status === 'idle', 'Compaction did not settle');
   assert.ok(provider.requests.length > beforeCompact, 'compaction must call the local provider');
   const tree = await page.evaluate((id) => window.desktop.invoke('sessionTree', id), sessionId);
   assert.ok(
@@ -206,8 +202,9 @@ try {
   );
   await failWith('E2E_OVERFLOW', 'context', '对话超出模型上下文');
   await card().getByRole('button', { name: '开启自动压缩', exact: true }).click();
-  await page.waitForFunction(
-    async () => (await window.desktop.invoke('bootstrap')).runtime.autoCompaction === true,
+  await wait(
+    async () => (await bootstrap()).runtime.autoCompaction === true,
+    'Automatic compaction was not enabled',
   );
   pass('context actions perform and persist real compaction, and enable automatic compaction');
 
@@ -217,14 +214,14 @@ try {
   await picker.waitFor();
   await screenshot('model-picker');
   await picker.getByRole('option', { name: /本地验收备用模型/ }).click();
-  await page.waitForFunction(async () => {
-    const { runtime, state } = await window.desktop.invoke('bootstrap');
+  await wait(async () => {
+    const { runtime, state } = await bootstrap();
     return (
       runtime.model?.id === 'local-e2e-alternate' &&
       state.sessions.find((session) => session.id === state.selectedSessionId)?.model?.id ===
         'local-e2e-alternate'
     );
-  });
+  }, 'The alternate model was not applied to the conversation');
   await picker.waitFor({ state: 'hidden' });
   const diagnostic = JSON.parse(await page.evaluate(() => window.desktop.invoke('diagnostics')));
   assert.equal(diagnostic.modelErrors.length, 5);

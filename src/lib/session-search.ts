@@ -6,6 +6,7 @@ export interface SessionMatch {
   toolId?: string;
   section: 'text' | 'thinking' | 'attachment' | 'tool';
   snippet: string;
+  text: string;
   query: string;
   start: number;
   occurrence: number;
@@ -18,7 +19,10 @@ export function searchSession(messages: Message[], tools: ToolActivity[], query:
     seen = new Set<string>();
   const byId = new Map(tools.map((t) => [t.id, t]));
   const calls = new Map<string, { name: string; args: Record<string, unknown> }>();
-  const add = (text: string, target: Omit<SessionMatch, 'start' | 'snippet' | 'query' | 'occurrence'>) => {
+  const add = (
+    text: string,
+    target: Omit<SessionMatch, 'text' | 'start' | 'snippet' | 'query' | 'occurrence'>,
+  ) => {
     const lower = text.toLocaleLowerCase();
     let occurrence = 0;
     for (
@@ -28,6 +32,7 @@ export function searchSession(messages: Message[], tools: ToolActivity[], query:
     ) {
       matches.push({
         ...target,
+        text,
         start,
         occurrence: occurrence++,
         query: query.trim(),

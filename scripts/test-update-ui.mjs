@@ -1,4 +1,5 @@
 import { _electron as electron } from 'playwright';
+import { expect } from 'playwright/test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs/promises';
 import os from 'node:os';
@@ -138,14 +139,26 @@ try {
   );
   const auto = panel.getByRole('checkbox', { name: /自动下载更新/ });
   await auto.click();
-  await page.waitForFunction(
-    async () => !(await window.desktop.invoke('bootstrap')).state.settings.autoDownloadUpdates,
-  );
+  await expect
+    .poll(
+      () =>
+        page.evaluate(
+          async () => (await window.desktop.invoke('bootstrap')).state.settings.autoDownloadUpdates,
+        ),
+      { timeout: 30000 },
+    )
+    .toBe(false);
   await page.waitForFunction(() => !document.querySelector('.about-updates input[type=checkbox]').checked);
   await auto.click();
-  await page.waitForFunction(
-    async () => (await window.desktop.invoke('bootstrap')).state.settings.autoDownloadUpdates,
-  );
+  await expect
+    .poll(
+      () =>
+        page.evaluate(
+          async () => (await window.desktop.invoke('bootstrap')).state.settings.autoDownloadUpdates,
+        ),
+      { timeout: 30000 },
+    )
+    .toBe(true);
   await update({ state: 'downloading', version: '0.9.1', progress: 42, error: undefined });
   await panel.getByText('正在下载 42%', { exact: true }).waitFor();
   assert.equal(await panel.getByRole('progressbar').getAttribute('value'), '42');
@@ -197,12 +210,14 @@ try {
   await page.getByRole('textbox', { name: '任务输入' }).fill('重启前最后编辑的草稿');
   await page.getByRole('button', { name: '重启以更新到 v0.9.1', exact: true }).click();
   await restart.click();
-  await page.waitForFunction(async () =>
-    (await window.desktop.invoke('bootstrap')).state.sessions.some(
-      (item) => item.draft === '重启前最后编辑的草稿',
-    ),
+  await expect
+    .poll(() => app.evaluate(() => globalThis.updateUiFixture.installs), { timeout: 30000 })
+    .toBe(1);
+  const savedBeforeRestart = JSON.parse(await fs.readFile(path.join(dir, 'state.json'), 'utf8'));
+  assert.equal(
+    savedBeforeRestart.sessions.find((item) => item.id === session.id)?.draft,
+    '重启前最后编辑的草稿',
   );
-  assert.equal(await app.evaluate(() => globalThis.updateUiFixture.installs), 1);
   assert.deepEqual(await app.evaluate(() => globalThis.updateUiNetwork), []);
   console.log('PASS task/approval block restart, and the restart action saves the latest draft');
   await fs.mkdir('test-results', { recursive: true });
@@ -210,7 +225,7 @@ try {
   await app.close();
   app = undefined;
 
-  const newer = JSON.stringify({ version: 2, appVersion: '0.10.0', futureData: 'must stay intact' });
+  const newer = JSON.stringify({ version: 3, appVersion: '0.10.0', futureData: 'must stay intact' });
   await fs.writeFile(path.join(dir, 'state.json'), newer);
   await launch();
   await page.getByLabel('本地数据状态').waitFor();

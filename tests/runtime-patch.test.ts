@@ -101,3 +101,27 @@ test('scalar and text patches preserve unchanged arrays for cached message rows'
   assert.equal(view().tools, initial.tools);
   assert.notEqual(view().messages, initial.messages);
 });
+
+test('streaming omits unchanged catalogs and diagnostics, and clears removed fields', () => {
+  const { s, view, patches } = service();
+  s.runtime.sessionId = 'catalogs';
+  s.runtime.diagnostic = ['diagnostic'.repeat(400)];
+  s.runtime.commands = [{ name: 'fixture', source: 'extension' } as never];
+  s.runtime.error = 'temporary';
+  s.publish(true);
+  const first = view();
+  s.runtime.messages.push({ role: 'assistant', content: 'stream' });
+  delete s.runtime.error;
+  s.publish(true);
+  const patch = patches.at(-1)!;
+  for (const key of ['diagnostic', 'models', 'commands']) assert.ok(!(key in patch), key);
+  assert.equal(view().commands, first.commands);
+  assert.equal(view().diagnostic, first.diagnostic);
+  assert.ok(!('error' in view()));
+  s.runtime.diagnostic = [...s.runtime.diagnostic, 'next'];
+  s.publish(true);
+  assert.deepEqual(view().diagnostic, s.runtime.diagnostic);
+  s.resync();
+  s.publish(true);
+  assert.deepEqual(patches.at(-1)!.commands, s.runtime.commands);
+});

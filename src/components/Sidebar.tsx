@@ -19,6 +19,7 @@ import { isOlderSession } from '../../shared/usage';
 import '../styles/management.css';
 import { platform, shortcut } from '../lib/platform';
 import { IconButton } from './IconButton';
+import { useLayer } from '../hooks/useLayer';
 const api = window.desktop;
 import type { Workbench } from '../hooks/useWorkbench';
 import type { ReactNode } from 'react';
@@ -28,7 +29,7 @@ export function Sidebar(
   props: Pick<
     Workbench,
     | 'state'
-    | 'runtime'
+    | 'activities'
     | 'environment'
     | 'setNotice'
     | 'sidebar'
@@ -40,7 +41,6 @@ export function Sidebar(
     | 'setMenuId'
     | 'selected'
     | 'project'
-    | 'running'
     | 'attempt'
     | 'addProject'
     | 'selectSession'
@@ -50,7 +50,7 @@ export function Sidebar(
 ) {
   const {
     state,
-    runtime,
+    activities,
     environment,
     setNotice,
     sidebar,
@@ -62,7 +62,6 @@ export function Sidebar(
     setMenuId,
     selected,
     project,
-    running,
     attempt,
     addProject,
     selectSession,
@@ -80,6 +79,7 @@ export function Sidebar(
   });
   const [olderOpen, setOlderOpen] = useState<Set<string>>(new Set());
   const menuRef = useRef<HTMLDivElement>(null);
+  useLayer(menuRef, Boolean(menuId), () => setMenuId(''), { kind: 'menu' });
   const previousProject = useRef(project?.id);
   useLayoutEffect(() => {
     const menu = menuRef.current;
@@ -131,14 +131,14 @@ export function Sidebar(
     });
   const projectStatus = (projectId: string) => {
     const sessions = state.sessions.filter((session) => session.projectId === projectId);
-    const active = sessions.some((session) => session.id === runtime.sessionId);
-    if (active && runtime.dialogs.length)
+    const pending = sessions.reduce((total, session) => total + (activities[session.id]?.pending ?? 0), 0);
+    if (pending)
       return (
-        <em className="project-waiting" aria-label={`待确认 ${runtime.dialogs.length} 项`}>
-          待确认 {runtime.dialogs.length}
+        <em className="project-waiting" aria-label={`待确认 ${pending} 项`}>
+          待确认 {pending}
         </em>
       );
-    if ((active && running) || sessions.some((session) => busy(session.lastStatus)))
+    if (sessions.some((session) => busy(activities[session.id]?.status ?? session.lastStatus)))
       return <LoaderCircle size={13} className="spin project-running" aria-label="正在运行" />;
     if (sessions.some((session) => session.unread))
       return <i className="unread" aria-label="有未读完成会话" />;
@@ -164,7 +164,12 @@ export function Sidebar(
         {s.pinned && <Pin size={14} className="pin-icon" />}
         <span>{s.title}</span>
         {s.unread && <i className="unread" />}
-        {busy(s.id === runtime.sessionId ? runtime.status : s.lastStatus) && (
+        {!!activities[s.id]?.pending && (
+          <span className="project-waiting" aria-label={`待确认 ${activities[s.id].pending} 项`}>
+            待确认
+          </span>
+        )}
+        {!activities[s.id]?.pending && busy(activities[s.id]?.status ?? s.lastStatus) && (
           <LoaderCircle size={12} className="spin" />
         )}
       </button>

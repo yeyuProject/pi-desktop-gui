@@ -79,6 +79,7 @@ try {
   await page.getByRole('button', { name: '深色', exact: true }).click();
   await page.waitForFunction(() => document.documentElement.dataset.theme === 'dark');
   await page.screenshot({ path: path.join(output, 'workspace-settings.png'), animations: 'disabled' });
+  await page.getByRole('button', { name: '保存设置', exact: true }).click();
   await page.getByRole('button', { name: '关闭', exact: true }).last().click();
   await page.screenshot({ path: path.join(output, 'workspace-dark.png'), animations: 'disabled' });
   await page.getByRole('textbox', { name: '任务输入' }).fill('不会自动发送的持久草稿');
@@ -108,6 +109,7 @@ try {
   await page.getByRole('button', { name: '设置', exact: true }).click();
   await page.getByRole('button', { name: '外观与编辑器', exact: true }).click();
   await page.getByLabel('字号比例').fill('2');
+  await page.getByRole('button', { name: '保存设置', exact: true }).click();
   await page.getByRole('button', { name: '关闭', exact: true }).last().click();
   await app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows()[0].setSize(1024, 768));
   await page.waitForFunction(() => !!document.querySelector('.workspace-columns.compact'));

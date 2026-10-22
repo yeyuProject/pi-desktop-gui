@@ -38,7 +38,7 @@ import { WorkspaceWatcher } from './workspace-watch';
 import { projectRules, createAgentRules } from './project-rules';
 import { isEmptySession, hasSessionData, fillSessionUsage } from './session-maintenance';
 import { aggregateUsage } from '../shared/usage';
-import { composeDraftText } from '../shared/draft';
+import { composeDraftText, matchesDraft } from '../shared/draft';
 import { validatePromptTemplate } from '../shared/prompts';
 import {
   readPromptTemplate,
@@ -614,7 +614,6 @@ const handlers: Record<keyof ApiMap, (...args: any[]) => any> = {
   selectSession: async (id) => {
     text(id, 100);
     const s = store.session(id);
-    const agent = service.get(id);
     store.selectSession(s.id);
     if (store.storage.writable) {
       // Browsing only selects and reads history. Sending or an explicit connection
@@ -626,7 +625,6 @@ const handlers: Record<keyof ApiMap, (...args: any[]) => any> = {
         await saving;
       }
     } else send({ type: 'state', state: store.state });
-    return agent.history(id);
   },
   renameSession: async (id, name) => {
     text(id, 100);
@@ -877,13 +875,15 @@ const handlers: Record<keyof ApiMap, (...args: any[]) => any> = {
     s.attachments = attachments;
     if (snippets !== undefined) s.draftSnippets = snippets;
     if (images !== undefined) s.images = images;
-    await save();
+    await store.scheduleSave();
   },
-  consumeDraft: async (id, expected) => {
+  consumeDraft: async (id, expected, attachments, images) => {
     text(id, 100);
     text(expected);
+    strings(attachments);
+    validateImages(images);
     const s = store.session(id);
-    if (composeDraftText(s.draft, s.draftSnippets ?? []) === expected) {
+    if (matchesDraft(s, expected, attachments, images)) {
       if (s.draft || s.attachments.length || s.images?.length || s.draftSnippets?.length)
         store.promoteSession(id);
       s.draft = '';
@@ -1143,6 +1143,17 @@ const handlers: Record<keyof ApiMap, (...args: any[]) => any> = {
     if (source.startsWith('-')) throw new Error('包来源不能是命令参数');
     const s = store.session(id);
     if (local && (!s.projectId || !store.project(s.projectId).trusted)) throw new Error('请先启用项目');
+    if (action === 'remove') {
+      const result = await showAppDialog({
+        type: 'warning',
+        message: `移除资源包“${source}”？`,
+        detail: '移除后，使用此范围配置的会话将无法继续使用其中的扩展、技能或模板。',
+        buttons: ['取消', '移除'],
+        defaultId: 0,
+        cancelId: 0,
+      });
+      if (result.response !== 1) return;
+    }
     await requireSupportedPi(store.state.settings, developmentRoot);
     const pi = await resolvePi(store.state.settings, developmentRoot);
     const args = [
@@ -1176,7 +1187,17 @@ const handlers: Record<keyof ApiMap, (...args: any[]) => any> = {
   logout: async (id, provider) => {
     text(id, 100);
     text(provider, 200);
+    const result = await showAppDialog({
+      type: 'warning',
+      message: `退出供应商“${provider}”的登录？`,
+      detail: '将移除本机保存的登录凭据。之后使用此供应商时需要重新登录或配置密钥。',
+      buttons: ['取消', '退出登录'],
+      defaultId: 0,
+      cancelId: 0,
+    });
+    if (result.response !== 1) return false;
     await service.get(id).admin(id, 'logout', { provider });
+    return true;
   },
   cancelLogin: (id) => {
     text(id, 100);
@@ -1943,12 +1964,7 @@ else {
                       label: '设置…',
                       accelerator: 'Cmd+,',
                       registerAccelerator: false,
-                      click: () =>
-                        window?.webContents.sendInputEvent({
-                          type: 'keyDown',
-                          keyCode: ',',
-                          modifiers: ['meta'],
-                        }),
+                      click: () => send({ type: 'action', action: 'settings' }),
                     },
                     { type: 'separator' as const },
                     { role: 'services' as const, label: '服务' },

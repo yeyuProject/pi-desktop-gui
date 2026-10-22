@@ -384,6 +384,13 @@ try {
   await page.getByRole('textbox', { name: '模板参数：模块名' }).fill('src/hello world');
   await page.getByRole('textbox', { name: '模板参数：关注点' }).fill('errors');
   await page.getByRole('button', { name: '发送任务', exact: true }).click();
+  for (let attempt = 0; attempt < 100; attempt++) {
+    const sent = await app.evaluate(
+      () => globalThis.conversationCalls.filter((call) => call.method === 'send').at(-1)?.args[1],
+    );
+    if (sent === '/check-diff "src/hello world" errors') break;
+    await new Promise((resolve) => setTimeout(resolve, 25));
+  }
   const template = await app.evaluate(() =>
     globalThis.conversationCalls.filter((call) => call.method === 'send').at(-1),
   );
@@ -478,6 +485,9 @@ try {
       ),
     { id: fixture.sessionId, pixel },
   );
+  // This fixture writes through IPC directly; normal composer edits already own their local state.
+  await page.reload();
+  await input.waitFor();
   await page.getByRole('button', { name: '查看图片 第一张' }).click();
   const lightbox = page.getByRole('dialog', { name: '图片查看器' });
   await lightbox.waitFor();

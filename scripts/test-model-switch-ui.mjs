@@ -106,11 +106,14 @@ const observeModelSwitchState = () =>
     window.modelSwitchRuntimes = new Map();
     window.desktop.onEvent((event) => {
       if (event.type === 'state') window.modelSwitchState = event.state;
-      // Runtime patches carry all scalar fields used by readiness checks.
+      // Readiness uses scalar fields; patches only carry fields that changed.
       if (event.type === 'runtime' && event.runtime.sessionId)
         window.modelSwitchRuntimes.set(event.runtime.sessionId, event.runtime);
-      if (event.type === 'runtimePatch' && event.patch.sessionId)
-        window.modelSwitchRuntimes.set(event.patch.sessionId, event.patch);
+      if (event.type === 'runtimePatch' && event.patch.sessionId) {
+        const next = { ...window.modelSwitchRuntimes.get(event.patch.sessionId), ...event.patch };
+        for (const key of event.patch.removed ?? []) delete next[key];
+        window.modelSwitchRuntimes.set(event.patch.sessionId, next);
+      }
       if (event.type === 'runtimeRemoved') window.modelSwitchRuntimes.delete(event.sessionId);
     });
     // Subscribe before one bootstrap; readiness polling must not repeatedly resync Pi.

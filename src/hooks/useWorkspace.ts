@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, type Dispatch, type SetStateAction } from 'react';
+import { useEffect, useMemo, useRef, useState, type Dispatch, type SetStateAction } from 'react';
 import type { AppState, Changes, FileDiff, FilePreview, Project, Runtime, Session } from '../../shared/types';
 import type { CheckpointPreview, CheckpointSummary } from '../../shared/checkpoints';
 import { parseAttachmentSpec } from '../../shared/attachments';
@@ -304,9 +304,20 @@ export function useWorkspace(options: WorkspaceOptions) {
   function saveInspectorSplit(value: number) {
     void attempt(() => api.invoke('saveSettings', { inspectorSplit: Math.max(15, Math.min(70, value)) }));
   }
+  function selectTab(value: typeof tab) {
+    generation.current++;
+    setTab(value);
+    setSelectedFile('');
+    setFilePreview(undefined);
+    setFileDiff(undefined);
+    setPreviewStale(false);
+    setPreviewRange(undefined);
+    setInspector(true);
+  }
   return {
     tab,
     setTab,
+    selectTab,
     changeMode,
     setChangeMode,
     changes,
@@ -336,6 +347,6 @@ export function useWorkspace(options: WorkspaceOptions) {
     closeCheckpoint: () => setCheckpointPreview(undefined),
     returnToCheckpointMessage,
     refreshChanges,
-    diffLines: fileDiff?.patch.split('\n') ?? [],
+    diffLines: useMemo(() => fileDiff?.patch.split('\n') ?? [], [fileDiff]),
   };
 }

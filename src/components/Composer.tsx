@@ -29,6 +29,7 @@ export type ComposerProps = Pick<
   | 'setError'
   | 'setNotice'
   | 'pending'
+  | 'attachmentsPending'
   | 'selectionChanging'
   | 'selectionRevision'
   | 'draft'
@@ -191,6 +192,7 @@ export function Composer(props: ComposerProps) {
     parameterPick.current = null;
   }, [selected?.id, activeCommand?.name]);
   const selectFile = (file: string) => {
+    if (props.attachmentsPending) return;
     if (parameterPick.current) {
       parameterPick.current(file);
       parameterPick.current = null;
@@ -222,6 +224,14 @@ export function Composer(props: ComposerProps) {
     return false;
   };
   const sendComposer = () => {
+    if (
+      props.attachmentsPending ||
+      selectionChanging ||
+      !sessionEnabled ||
+      pending ||
+      runtime.status === 'stopping'
+    )
+      return;
     if (fileQuery !== null) {
       if (fileResults[fileIndex]) selectFile(fileResults[fileIndex]);
       return;
@@ -458,7 +468,7 @@ export function Composer(props: ComposerProps) {
             }
             if (e.key === 'Enter' && !e.shiftKey && !e.nativeEvent.isComposing) {
               e.preventDefault();
-              if (fileQuery !== null && fileResults[0]) void addAttachment(fileResults[0]);
+              if (fileQuery !== null && fileResults[0]) selectFile(fileResults[0]);
               else sendComposer();
             }
           }}
@@ -634,6 +644,7 @@ export function Composer(props: ComposerProps) {
                 Boolean(parameterError) ||
                 !selected ||
                 pending ||
+                props.attachmentsPending ||
                 !sessionEnabled ||
                 (!environment?.supported && !runtime.connected) ||
                 runtime.status === 'stopping'

@@ -5,6 +5,7 @@ import { transformSync } from 'esbuild';
 import * as types from '../shared/types';
 import { defaultSettings } from '../electron/store-state';
 import { readableError } from '../src/lib/format';
+import { RuntimeStore } from '../src/lib/runtime-store';
 
 const { code } = transformSync(readFileSync('src/hooks/useRuntime.ts', 'utf8'), {
   loader: 'ts',
@@ -28,9 +29,15 @@ function fixture(initialPrefs?: types.Settings) {
     resolve = done;
   });
   const hooks = {
+    useCallback(fn: unknown) {
+      return fn;
+    },
+    useSyncExternalStore(_subscribe: unknown, snapshot: () => unknown) {
+      return snapshot();
+    },
     useState(initial: unknown) {
       const index = cursor++;
-      if (!(index in slots)) slots[index] = initial;
+      if (!(index in slots)) slots[index] = typeof initial === 'function' ? initial() : initial;
       return [
         slots[index],
         (value: any) => {
@@ -55,6 +62,7 @@ function fixture(initialPrefs?: types.Settings) {
     react: hooks,
     '../../shared/types': types,
     '../lib/format': { readableError },
+    '../lib/runtime-store': { RuntimeStore },
   };
   const module = { exports: {} };
   const useRuntime = new Function(

@@ -9,7 +9,7 @@ import { agentDirectory, preparePi } from './environment';
 import { Store, readSessionFile } from './store';
 import { Workspace, attachmentPrompt } from './workspace';
 import { CheckpointRecorder, type WorkspaceRequest } from './checkpoint-recorder';
-import { composeDraftText } from '../shared/draft';
+import { matchesDraft } from '../shared/draft';
 import { stripAnsi } from '../shared/ansi';
 import {
   busy,
@@ -203,6 +203,7 @@ export class AgentService extends EventEmitter {
     tools: [] as string[],
   };
   private serialized = new WeakMap<object, string>();
+  private sentFields = new Map<string, { value: unknown; json: string | undefined }>();
   private flush() {
     if (this.listenerCount('runtime')) this.emit('runtime', structuredClone(this.runtime));
     if (!this.listenerCount('runtimePatch')) return;
@@ -231,10 +232,25 @@ export class AgentService extends EventEmitter {
       tools: string[] = [];
     const messagesFrom = changedFrom(r.messages, this.sent.messages, messages, this.serialized);
     const toolsFrom = changedFrom(r.tools, this.sent.tools, tools, this.serialized);
-    this.sent = { sessionId: r.sessionId, messages, tools };
     const { messages: _m, tools: _t, ...rest } = r;
+    const fields: Record<string, unknown> = {};
+    const removed = [...this.sentFields.keys()].filter((key) => !(key in rest));
+    for (const key of removed) this.sentFields.delete(key);
+    for (const [key, value] of Object.entries(rest)) {
+      const before = this.sentFields.get(key);
+      // These collections are replaced when updated. Avoid scanning large diagnostics
+      // and model catalogs on every token; other (mutable) fields are compared by value.
+      const replaced = key === 'diagnostic' || key === 'models' || key === 'commands';
+      if (!reset && before && (replaced || typeof value !== 'object') && before.value === value) continue;
+      const json = JSON.stringify(value);
+      if (reset || !before || before.json !== json) fields[key] = structuredClone(value);
+      this.sentFields.set(key, { value, json });
+    }
+    this.sent = { sessionId: r.sessionId, messages, tools };
     this.emit('runtimePatch', {
-      ...structuredClone(rest),
+      ...fields,
+      sessionId: r.sessionId,
+      ...(removed.length ? { removed } : {}),
       messagesFrom,
       messages: messages.slice(messagesFrom).map((s) => JSON.parse(s)),
       messageCount: messages.length,
@@ -247,6 +263,7 @@ export class AgentService extends EventEmitter {
   resync() {
     this.sent = { sessionId: undefined, messages: [], tools: [] };
     this.serialized = new WeakMap();
+    this.sentFields.clear();
   }
   private save() {
     this.store
@@ -905,7 +922,7 @@ export class AgentService extends EventEmitter {
     if (project && !project.trusted) throw new Error('请先确认此项目可以由 Pi 读取、修改和执行命令');
     if (busy(this.runtime.status) && this.runtime.sessionId !== sessionId)
       throw new Error('另一个会话正在运行，请先停止或等待完成');
-    if (this.rpc && !this.rpc.closed && this.runtime.sessionId === sessionId) {
+    if (this.rpc && !this.rpc.closed && this.runtime.connected && this.runtime.sessionId === sessionId) {
       await this.applyPendingConfiguration();
       await this.syncApprovalMode();
       if (this.shutdown) throw new Error('应用正在关闭，请稍后重新打开');
@@ -924,6 +941,7 @@ export class AgentService extends EventEmitter {
     if (
       this.rpc &&
       !this.rpc.closed &&
+      this.runtime.connected &&
       this.runtime.cwd &&
       samePath(cwd, this.runtime.cwd) &&
       !legacyDirectory
@@ -964,11 +982,7 @@ export class AgentService extends EventEmitter {
       }
     } else if (this.rpc && !this.rpc.closed)
       reason = legacyDirectory ? '新会话使用 Pi 原生目录' : '工作目录不同，重新加载项目环境';
-    if (this.rpc) {
-      const old = this.rpc;
-      this.rpc = undefined;
-      await old.close();
-    }
+    if (this.rpc) await this.closeRpc();
     if (epoch !== this.stopEpoch || this.shutdown) throw new Error('会话切换已取消');
     this.resetSession(sessionId, cwd);
     this.connecting = true;
@@ -1006,9 +1020,7 @@ export class AgentService extends EventEmitter {
       this.setError(errorText(e));
       this.runtime.connected = false;
       this.status(this.stopRequested ? 'stopped' : this.runtime.crash ? 'interrupted' : 'error');
-      const rpc = this.rpc;
-      this.rpc = undefined;
-      await rpc?.close();
+      await this.closeRpc();
       throw e;
     } finally {
       this.connecting = false;
@@ -1258,7 +1270,7 @@ export class AgentService extends EventEmitter {
     await this.ensureConnected(id);
     // A tool continuation or a queued steer/follow-up is still the same user task.
     if (!busy(this.runtime.status)) await this.applyTaskSelection(id);
-    const shellCommand = /^!!?\S/.test(text);
+    const shellCommand = text.startsWith('!') && text.replace(/^!!?/, '').trim().length > 0;
     if (!this.runtime.model && !text.startsWith('/') && !shellCommand) throw new Error('请选择一个可用模型');
     if (images.length && !this.runtime.model?.input?.includes('image'))
       throw new Error('当前模型未声明图片能力，请切换到支持图片的模型');
@@ -1345,7 +1357,7 @@ export class AgentService extends EventEmitter {
         const state = await this.rpc!.request('get_state');
         if (!state.isStreaming && !state.isCompacting && !state.pendingMessageCount) this.status('idle');
       }
-      if (composeDraftText(session.draft, session.draftSnippets ?? []) === text) {
+      if (matchesDraft(session, text, attachments, images)) {
         session.draft = '';
         session.attachments = [];
         session.images = [];
@@ -1976,17 +1988,45 @@ export class AgentService extends EventEmitter {
     this.status('stopped');
     if (wasRunning) this.activity();
   }
+  private async closeRpc() {
+    const rpc = this.rpc;
+    this.rpc = undefined;
+    this.runtime.connected = false;
+    try {
+      await rpc?.close();
+    } catch (error) {
+      if (rpc && !rpc.closed) this.rpc = rpc;
+      this.setError('Pi 进程尚未确认退出，重新连接前会重试关闭。' + errorText(error));
+      this.publish(true);
+      throw error;
+    }
+  }
   async disconnect() {
     await this.crashCleanup;
     this.assertCommandsStopped();
     if (this.connecting || this.pendingOperations > 0)
       throw new Error('正在处理会话操作，请等待完成后再断开或修改运行环境。');
     if (busy(this.runtime.status) || this.probing) throw new Error('请先等待当前任务或连接测试结束');
-    const rpc = this.rpc;
-    this.rpc = undefined;
-    await rpc?.close();
-    this.runtime.connected = false;
+    await this.closeRpc();
     this.publish(true);
+  }
+  /** Serialize idle teardown with sends/connects, so a new request can safely reconnect. */
+  releaseIdleProcess() {
+    if (this.hasPendingWork) return Promise.resolve(false);
+    return this.exclusive(async () => {
+      if (
+        this.pendingOperations > 1 ||
+        this.requiresStopConfirmation ||
+        this.runtime.configurationPending ||
+        this.runtime.auth ||
+        this.runtime.steering.length ||
+        this.runtime.followUp.length
+      )
+        return false;
+      await this.closeRpc();
+      this.publish(true);
+      return true;
+    });
   }
   async testConnection(sessionId: string) {
     const epoch = this.stopEpoch;

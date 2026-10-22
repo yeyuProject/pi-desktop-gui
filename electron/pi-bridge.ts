@@ -332,7 +332,8 @@ export default function desktopBridge(pi: ExtensionAPI) {
                           options,
                         );
                   if (value === undefined) {
-                    authAbort?.abort();
+                    // Providers also close manual input when the browser callback succeeds.
+                    if (!q.signal?.aborted) authAbort?.abort();
                     throw new Error('登录已取消');
                   }
                   return value;
