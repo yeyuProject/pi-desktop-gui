@@ -24,7 +24,16 @@ const protectedFields = [
   { draft: ' ' },
   { attachments: ['输入 文件.txt'] },
   { draftSnippets: [{ id: 'snippet', offset: 0, text: '长草稿' }] },
-  { images: [{ id: 'image', name: 'pixel.png', mimeType: 'image/png', data: 'AA==' }] },
+  {
+    images: [
+      {
+        id: 'image',
+        name: 'icon.png',
+        mimeType: 'image/png',
+        data: (await fs.readFile('build/icon.png')).toString('base64'),
+      },
+    ],
+  },
   { model: { provider: 'local-e2e', id: 'local-e2e' } },
   { thinking: 'off' },
   { approvalMode: 'confirm' },
