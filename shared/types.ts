@@ -203,6 +203,7 @@ export interface ProviderInfo {
   id: string;
   name: string;
   configured: boolean;
+  authSource?: 'stored' | 'runtime' | 'environment' | 'fallback' | 'models_json_key' | 'models_json_command';
   oauth: boolean;
   apiKey: boolean;
 }

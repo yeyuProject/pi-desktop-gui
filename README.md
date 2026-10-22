@@ -98,6 +98,8 @@ The Windows installer, macOS app and Linux AppImage support in-app updates (auto
 2. Open **Pi features → Providers & login** to set up a model provider. If you already configured Pi in the terminal (`~/.pi`), it is picked up automatically.
 3. Pick a model and reasoning level in the composer, then start a chat or open a project folder.
 
+The provider list shows the credential source. Logging out removes saved login credentials; environment variables, `models.json` and extensions can still supply credentials and are labeled separately.
+
 A new, untouched chat is temporary: leaving it hides it, and it is excluded from the saved index and backups. Repeated new-chat requests reuse that temporary chat in the same project or standalone scope. Typing anything, adding attachments, renaming or pinning, choosing session settings, connecting the conversation, or starting a task makes it permanent, even if the content is later cleared or the operation fails. Browsing the model catalog alone stays temporary after it finishes; starting another chat while that read is still active conservatively preserves its original chat. Existing saved empty entries are preserved; clean them up explicitly in **Settings → Diagnostics & Data (诊断与数据) → Clean empty sessions (清理空会话)**, after confirmation.
 
 Deleting a conversation reports whether its transcript was moved to the trash; an empty conversation or an entry whose transcript is already missing is removed from the list without claiming a trash operation. Reading the model catalog can still succeed when a saved transcript is missing, using a disposable probe. Other file access errors remain visible.

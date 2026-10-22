@@ -7,6 +7,8 @@ import { Workspace } from '../electron/workspace';
 import { Configuration } from '../electron/configuration';
 import { messageText, busy } from '../shared/types';
 process.env.PI_OFFLINE = '1';
+process.env.OPENAI_API_KEY = '';
+process.env.MINIMAX_API_KEY = 'local-env-test-only';
 const provider = await createLocalProvider();
 const f = await prepareRealPiFixture(provider.baseUrl, 'features');
 const s = new AgentService(f.store, new Workspace(f.dataDir));
@@ -122,6 +124,9 @@ try {
   console.log('PASS native settings and direct shell with context inclusion/exclusion');
   const providers = await s.admin(f.sessionId, 'providers');
   assert.ok(providers.some((p: any) => p.id === 'openai' && p.apiKey));
+  assert.equal(providers.find((p: any) => p.id === 'openai').authSource, undefined);
+  assert.equal(providers.find((p: any) => p.id === 'minimax').authSource, 'environment');
+  assert.equal(providers.find((p: any) => p.id === 'local-e2e').authSource, 'models_json_key');
   const login = s.admin(f.sessionId, 'login', { provider: 'openai', type: 'api_key' });
   await until(() => s.runtime.dialogs.length > 0);
   assert.ok(s.runtime.dialogs[0].title.startsWith('[密钥]'));
@@ -129,10 +134,37 @@ try {
   await login;
   const authFile = path.join(f.agentDir, 'auth.json');
   assert.ok(JSON.parse(await fs.readFile(authFile, 'utf8')).openai);
+  assert.equal(
+    (await s.admin(f.sessionId, 'providers')).find((p: any) => p.id === 'openai').authSource,
+    'stored',
+  );
   assert.ok(!JSON.stringify(s.runtime).includes('local-test-credential'));
   await s.admin(f.sessionId, 'logout', { provider: 'openai' });
   assert.ok(!JSON.parse(await fs.readFile(authFile, 'utf8')).openai);
+  const afterLogout = (await s.admin(f.sessionId, 'providers')).find((p: any) => p.id === 'openai');
+  assert.equal(afterLogout.configured, false);
+  assert.equal(afterLogout.authSource, undefined);
   console.log('PASS native API key login/logout without credential exposure');
+  const minimaxLogin = s.admin(f.sessionId, 'login', { provider: 'minimax', type: 'api_key' });
+  await until(() => s.runtime.dialogs.length > 0);
+  await s.respond(s.runtime.dialogs[0].id, { value: 'local-minimax-test-key' });
+  await minimaxLogin;
+  assert.equal(
+    (await s.admin(f.sessionId, 'providers')).find((p: any) => p.id === 'minimax').authSource,
+    'stored',
+  );
+  await s.admin(f.sessionId, 'logout', { provider: 'minimax' });
+  assert.ok(!JSON.parse(await fs.readFile(authFile, 'utf8')).minimax);
+  const minimaxAfterLogout = (await s.admin(f.sessionId, 'providers')).find((p: any) => p.id === 'minimax');
+  assert.equal(minimaxAfterLogout.configured, true);
+  assert.equal(minimaxAfterLogout.authSource, 'environment');
+  await s.admin(f.sessionId, 'logout', { provider: 'local-e2e' });
+  assert.equal(
+    (await s.admin(f.sessionId, 'providers')).find((p: any) => p.id === 'local-e2e').authSource,
+    'models_json_key',
+  );
+  assert.ok(!JSON.stringify(minimaxAfterLogout).includes('local-env-test-only'));
+  console.log('PASS logout reports remaining environment/models.json credentials without exposing keys');
   const resources = await s.admin(f.sessionId, 'resources');
   const extension = resources.resources.find((r: any) => r.path.endsWith('gui-e2e.js'));
   assert.ok(extension);
