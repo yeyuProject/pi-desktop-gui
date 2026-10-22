@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import type { AppMenuId } from '../../shared/app-dialogs';
+import { topLayer } from '../hooks/useLayer';
 
 const menus: { id: AppMenuId; label: string; key: string }[] = [
   { id: 'file', label: '文件', key: 'f' },
@@ -20,7 +21,7 @@ export function TitleBar() {
     previousFocus.current = null;
   };
   const open = async (index: number, keyboard = false) => {
-    if (document.querySelector('[role="dialog"]')) return;
+    if (topLayer()?.trap) return;
     const button = buttons()[index];
     if (!button) return;
     // Keep the editor focused while the native Edit menu dispatches its role action.
@@ -46,7 +47,7 @@ export function TitleBar() {
       buttons()[index]?.focus();
     };
     const keydown = (event: KeyboardEvent) => {
-      if (event.isComposing || document.querySelector('[role="dialog"]')) return;
+      if (event.isComposing || topLayer()?.trap) return;
       if (event.key === 'Alt') {
         altOnly = !event.ctrlKey && !event.metaKey;
         return;
@@ -87,7 +88,7 @@ export function TitleBar() {
       }
     };
     const keyup = (event: KeyboardEvent) => {
-      if (event.key === 'Alt' && altOnly && !document.querySelector('[role="dialog"]')) {
+      if (event.key === 'Alt' && altOnly && !topLayer()?.trap) {
         event.preventDefault();
         if (bar.current?.contains(document.activeElement)) restoreFocus();
         else focusMenu();

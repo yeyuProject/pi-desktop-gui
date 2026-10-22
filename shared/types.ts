@@ -349,10 +349,11 @@ export interface FileDiff {
   unavailable?: string;
 }
 /**
- * Incremental runtime update. Scalar fields are always current; `messages` and `tools` replace the
+ * Incremental runtime update. Only changed fields are sent; `messages` and `tools` replace the
  * receiver's arrays from `messagesFrom` / `toolsFrom` onwards (a full resync uses 0).
  */
-export type RuntimePatch = Omit<Runtime, 'messages' | 'tools'> & {
+export type RuntimePatch = Partial<Omit<Runtime, 'messages' | 'tools'>> & {
+  removed?: (keyof Runtime)[];
   messagesFrom: number;
   messages: Message[];
   messageCount: number;
@@ -361,6 +362,7 @@ export type RuntimePatch = Omit<Runtime, 'messages' | 'tools'> & {
   toolCount: number;
 };
 export type AppEvent =
+  | { type: 'action'; action: import('./workbench-actions').WorkbenchAction }
   | { type: 'appDialog'; dialog: AppDialog }
   | { type: 'appDialogsCancelled' }
   | { type: 'workspaceChanged'; projectId: string; changedPaths?: string[] }
@@ -372,18 +374,21 @@ export type AppEvent =
   | { type: 'runtimePatch'; patch: RuntimePatch };
 /** Apply a patch; arrays before the change point keep their identity so the UI can skip them. */
 export function applyRuntimePatch(previous: Runtime, patch: RuntimePatch): Runtime {
-  const { messagesFrom, messages, messageCount, toolsFrom, tools, toolCount, ...rest } = patch;
+  const { messagesFrom, messages, messageCount, toolsFrom, tools, toolCount, removed, ...rest } = patch;
   const sameSession = previous.sessionId === patch.sessionId;
   const applyItems = <T>(before: T[], from: number, changed: T[], count: number) => {
     if (sameSession && from === before.length && changed.length === 0 && count === before.length)
       return before;
     return (sameSession ? before.slice(0, from) : []).concat(changed).slice(0, count);
   };
-  return {
+  const next: Runtime = {
+    ...(sameSession ? previous : emptyRuntime()),
     ...rest,
     messages: applyItems(previous.messages, messagesFrom, messages, messageCount),
     tools: applyItems(previous.tools, toolsFrom, tools, toolCount),
   };
+  for (const key of removed ?? []) delete (next as unknown as Record<string, unknown>)[key];
+  return next;
 }
 export interface Bootstrap extends StateSnapshot {
   runtime: Runtime;
@@ -407,7 +412,7 @@ export interface ApiMap {
   trustProject: { args: [string]; result: void };
   newSession: { args: [projectId?: string]; result: Session };
   importSession: { args: [projectId?: string]; result: Session | null };
-  selectSession: { args: [string]; result: Message[] };
+  selectSession: { args: [string]; result: void };
   renameSession: { args: [string, string]; result: void };
   deleteSession: { args: [string]; result: false | { trashed: boolean } };
   pinSession: { args: [string, boolean]; result: void };

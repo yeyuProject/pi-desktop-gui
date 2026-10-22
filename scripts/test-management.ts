@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import fs from 'node:fs/promises';
 import path from 'node:path';
+import { pathToFileURL } from 'node:url';
 import { createLocalProvider, prepareRealPiFixture } from '../tests/support/local-provider';
 import { AgentService } from '../electron/agent';
 import { Workspace } from '../electron/workspace';
@@ -51,6 +52,44 @@ try {
   console.log(
     'PASS OAuth URL, code prompt, native credential persistence, logout and cancellation (local fixture)',
   );
+  const callbackHelper = pathToFileURL(
+    path.resolve('node_modules/@earendil-works/pi-ai/dist/auth/oauth/callback-server.js'),
+  ).href;
+  await fs.writeFile(
+    path.join(f.agentDir, 'extensions', 'oauth-callback-test.js'),
+    `import { openaiCodexProvider } from '@earendil-works/pi-ai/providers/openai-codex';
+    import { startOAuthCallbackServer, waitForCallbackOrManualInput } from '${callbackHelper}';
+    export default function(pi) {
+      pi.registerProvider({ ...openaiCodexProvider(), id:'desktop-callback-test', name:'Local callback test', auth:{oauth:{
+        name:'Local callback test', async login(interaction) {
+          const callback = await startOAuthCallbackServer({providerName:'Local test',host:'127.0.0.1',port:0,path:'/auth/callback',state:'fixture-state',complete:async code=>code,signal:interaction.signal});
+          interaction.notify({type:'auth_url',url:callback.redirectUri});
+          try {
+            const result=await waitForCallbackOrManualInput(interaction,callback,{message:'Callback manual input',placeholder:callback.redirectUri});
+            if(result.type!=='callback'||result.value!=='fixture-code')throw new Error('Local callback failed');
+            return {type:'oauth',access:'callback-access',refresh:'callback-refresh',expires:Date.now()+3600000};
+          } finally { callback.close(); }
+        }, async refresh(c){return c;}, async toAuth(c){return {apiKey:c.access};}
+      }}});
+    }`,
+  );
+  await s.disconnect();
+  await s.connect(f.sessionId);
+  const callbackLogin = s.admin(f.sessionId, 'login', {
+    provider: 'desktop-callback-test',
+    type: 'oauth',
+  });
+  await until(() => s.runtime.dialogs.some((dialog) => dialog.title === 'Callback manual input'));
+  const callbackResponse = await fetch(`${s.runtime.auth!.url}?code=fixture-code&state=fixture-state`);
+  assert.equal(callbackResponse.status, 200);
+  await callbackLogin;
+  const callbackAuth = JSON.parse(await fs.readFile(path.join(f.agentDir, 'auth.json'), 'utf8'));
+  assert.equal(callbackAuth['desktop-callback-test'].type, 'oauth');
+  assert.equal(s.runtime.auth, undefined);
+  assert.equal(s.runtime.dialogs.length, 0);
+  assert.equal(s.runtime.status, 'idle');
+  assert.ok(!JSON.stringify(s.runtime).includes('callback-access'));
+  console.log('PASS real Pi browser callback, credential persistence and automatic prompt cleanup');
   const config = new Configuration(f.store),
     doc = await config.read(f.sessionId, 'mcp', false);
   await s.disconnect();

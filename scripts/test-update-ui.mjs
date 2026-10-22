@@ -210,7 +210,7 @@ try {
   await app.close();
   app = undefined;
 
-  const newer = JSON.stringify({ version: 2, appVersion: '0.10.0', futureData: 'must stay intact' });
+  const newer = JSON.stringify({ version: 3, appVersion: '0.10.0', futureData: 'must stay intact' });
   await fs.writeFile(path.join(dir, 'state.json'), newer);
   await launch();
   await page.getByLabel('本地数据状态').waitFor();

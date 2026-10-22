@@ -26,10 +26,24 @@ import { PiCompatibilityNotice } from './PiCompatibilityNotice';
 const api = window.desktop;
 import type { Workbench } from '../hooks/useWorkbench';
 import type { ReactNode } from 'react';
+import { useUnsavedChanges } from '../hooks/useUnsavedChanges';
+const draftKeys = [
+  'piPath',
+  'nodePath',
+  'agentDir',
+  'editorPath',
+  'theme',
+  'fontScale',
+  'sidebarWidth',
+  'inspectorWidth',
+  'inspectorSplit',
+  'notifyOnFinish',
+] as const;
 
 export function SettingsModal(
   props: Pick<
     Workbench,
+    | 'state'
     | 'runtime'
     | 'environment'
     | 'error'
@@ -92,16 +106,21 @@ export function SettingsModal(
     setModel,
     setThinking,
   } = props;
+  const dirty = Boolean(
+    settingsOpen &&
+    prefs &&
+    props.state &&
+    draftKeys.some((key) => prefs[key] !== props.state!.settings[key]),
+  );
+  const guard = useUnsavedChanges(dirty);
+  const requestClose = () => {
+    if (!pending) guard.confirmLeave(() => setSettingsOpen(false));
+  };
 
   return (
     <>
       {settingsOpen && prefs && (
-        <Modal
-          wide
-          title="设置"
-          subtitle="连接你的 Pi，保留你的工作方式。"
-          close={() => setSettingsOpen(false)}
-        >
+        <Modal wide title="设置" subtitle="连接你的 Pi，保留你的工作方式。" close={requestClose}>
           <div className="settings-layout">
             <nav>
               {[
@@ -207,8 +226,10 @@ export function SettingsModal(
                     <button
                       disabled={!selected || !sessionEnabled || pending || running}
                       onClick={() => {
-                        setSettingsOpen(false);
-                        setFeatureTab('resources');
+                        guard.confirmLeave(() => {
+                          setSettingsOpen(false);
+                          setFeatureTab('resources');
+                        });
                       }}
                     >
                       管理 Skills、扩展与提示词模板
@@ -324,8 +345,10 @@ export function SettingsModal(
                     <summary>登录或配置模型</summary>
                     <button
                       onClick={() => {
-                        setSettingsOpen(false);
-                        setFeatureTab('providers');
+                        guard.confirmLeave(() => {
+                          setSettingsOpen(false);
+                          setFeatureTab('providers');
+                        });
                       }}
                     >
                       管理供应商与登录
@@ -365,7 +388,6 @@ export function SettingsModal(
                         key={key}
                         onClick={() => {
                           setPrefs({ ...prefs, theme: key });
-                          void attempt(() => api.invoke('saveSettings', { theme: key }));
                         }}
                       >
                         {Icon ? <Icon size={23} /> : <span className="theme-swatch" data-theme={key} />}
@@ -386,7 +408,6 @@ export function SettingsModal(
                     onChange={(e) => {
                       const fontScale = Number(e.target.value);
                       setPrefs({ ...prefs, fontScale });
-                      void api.invoke('saveSettings', { fontScale });
                     }}
                   />
                   <label className="field-label">
@@ -402,7 +423,6 @@ export function SettingsModal(
                     onChange={(e) => {
                       const sidebarWidth = Number(e.target.value);
                       setPrefs({ ...prefs, sidebarWidth });
-                      void api.invoke('saveSettings', { sidebarWidth });
                     }}
                   />
                   <label className="field-label">
@@ -418,7 +438,6 @@ export function SettingsModal(
                     onChange={(e) => {
                       const inspectorWidth = Number(e.target.value);
                       setPrefs({ ...prefs, inspectorWidth });
-                      void api.invoke('saveSettings', { inspectorWidth });
                     }}
                   />
                   <label className="field-label">
@@ -434,7 +453,6 @@ export function SettingsModal(
                     onChange={(e) => {
                       const inspectorSplit = Number(e.target.value);
                       setPrefs({ ...prefs, inspectorSplit });
-                      void attempt(() => api.invoke('saveSettings', { inspectorSplit }));
                     }}
                   />
                   <label className="field-label">
@@ -455,7 +473,6 @@ export function SettingsModal(
                       onChange={(e) => {
                         const notifyOnFinish = e.target.checked;
                         setPrefs({ ...prefs, notifyOnFinish });
-                        void attempt(() => api.invoke('saveSettings', { notifyOnFinish }));
                       }}
                     />
                     <span>
@@ -523,15 +540,20 @@ export function SettingsModal(
           </div>
           <footer>
             <span className="settings-footer-note">
-              运行环境路径在下一次启动对应进程时生效，现有进程继续运行。
+              {dirty
+                ? '有尚未保存的修改。外观为预览，保存后长期生效。'
+                : '设置已保存。运行环境路径在下一次启动对应进程时生效。'}
             </span>
-            <button onClick={() => setSettingsOpen(false)}>关闭</button>
+            <button disabled={pending} onClick={requestClose}>
+              关闭
+            </button>
             <button className="primary" disabled={pending && !running} onClick={saveSettings}>
               {pending ? <LoaderCircle size={14} className="spin" /> : <Check size={14} />}保存设置
             </button>
           </footer>
         </Modal>
       )}
+      {guard.confirmation}
     </>
   );
 }

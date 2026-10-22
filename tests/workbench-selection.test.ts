@@ -144,16 +144,24 @@ function harness(
     commandList: { current: null },
     focusComposer: noOp,
     composeDraft: () => '',
+    flushDraft: async () => {},
+    isReadingAttachments: () => false,
     snippets: [],
   };
-  const workspace = { checkpoints: [], setTab: noOp, inspectFile: noOp, openCheckpoint: noOp };
+  const workspace = {
+    checkpoints: [],
+    setTab: noOp,
+    selectTab: noOp,
+    inspectFile: noOp,
+    openCheckpoint: noOp,
+  };
   const dependencies: Record<string, unknown> = {
     react: hooks,
     './useRuntime': { useRuntime: () => view },
     './useDraft': { useDraft: () => draft },
     './useWorkspace': { useWorkspace: () => workspace },
-    './useShortcuts': { useShortcuts: noOp },
-    './useFocusScope': { useFocusScope: noOp },
+    './useShortcuts': { useShortcuts: () => ({ stopArmed: false, runAction: noOp }) },
+    './useLayer': { useLayer: noOp },
     '../lib/commands': { builtinCommands: [] },
     '../../shared/types': types,
     '../lib/format': { readableError },
@@ -164,6 +172,20 @@ function harness(
     assert.ok(id in dependencies, `Unexpected hook dependency: ${id}`);
     return dependencies[id];
   };
+  for (const name of ['useHistory', 'useStableCallbacks']) {
+    const compiled = transformSync(readFileSync(`src/hooks/${name}.ts`, 'utf8'), {
+      loader: 'ts',
+      format: 'cjs',
+    }).code;
+    const hookModule = { exports: {} };
+    dependencies['./' + name] = new Function(
+      'require',
+      'module',
+      'exports',
+      'window',
+      `${compiled}; return module.exports;`,
+    )(require, hookModule, hookModule.exports, { desktop: { invoke: invokeApi } });
+  }
   const timeout = (run: () => void, delay: number, interval = false) => {
     const id = ++timerId;
     timers.set(id, { run, delay, interval });
@@ -670,7 +692,7 @@ test('a history read resolving after connection cannot repopulate an empty live 
 });
 
 for (const outcome of ['success', 'failure'] as const) {
-  test(`B to C to B discards obsolete history ${outcome} and scroll timers`, async () => {
+  test(`B to C to B discards obsolete history ${outcome} without scroll timers`, async () => {
     const first = deferred<types.Message[]>(),
       c = deferred<types.Message[]>(),
       last = deferred<types.Message[]>();
@@ -684,7 +706,7 @@ for (const outcome of ['success', 'failure'] as const) {
     f.flush();
     f.select('B');
     f.flush();
-    assert.equal([...f.timers.values()].filter((timer) => timer.delay === 80).length, 1);
+    assert.equal([...f.timers.values()].filter((timer) => timer.delay === 80).length, 0);
     last.resolve(messages('latest B'));
     await f.settle();
     if (outcome === 'success') first.resolve(messages('obsolete B'));
@@ -716,14 +738,33 @@ test('only the current session restores its saved scroll position', async () => 
   f.select('C');
   f.flush();
   await f.settle();
-  positions.length = 0;
   f.fireTimers(80);
-  assert.deepEqual(positions, [120]);
+  assert.equal(positions.at(-1), 120);
+  assert.ok(!positions.includes(45), 'an obsolete history must not restore its position');
   f.unmount();
 });
 
+for (const top of [0, 700]) {
+  test(`history completion restores saved position ${top} after an arbitrarily delayed read`, async () => {
+    const history = deferred<types.Message[]>();
+    const f = harness(() => history.promise);
+    f.view.state.sessions = f.view.state.sessions.map((s) => ({ ...s, scrollTop: top }));
+    const element = { scrollTop: -1, scrollHeight: 2000 } as HTMLDivElement;
+    f.current.thread.current = element;
+    f.select('B');
+    f.flush();
+    f.fireTimers(80);
+    assert.equal(element.scrollTop, -1);
+    history.resolve(messages('loaded after the old timeout'));
+    await f.settle();
+    assert.equal(element.scrollTop, top);
+    assert.equal(f.current.autoScroll.current, false);
+    f.unmount();
+  });
+}
+
 for (const outcome of ['success', 'failure'] as const) {
-  test(`unmount cancels history ${outcome} and the 80ms scroll restoration`, async () => {
+  test(`unmount cancels history ${outcome} and pending scroll restoration`, async () => {
     const history = deferred<types.Message[]>();
     const f = harness(() => history.promise);
     f.unmount();

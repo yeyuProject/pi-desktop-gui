@@ -1,6 +1,6 @@
 {
   "name": "pi-desktop-gui",
-  "version": "0.14.32",
+  "version": "0.14.33",
   "private": true,
   "description": "A local desktop workspace for the Pi coding agent",
   "author": "yeyuProject",
@@ -19,7 +19,7 @@
     "test:scroll-ui": "node --import tsx scripts/test-scroll-ui.mjs",
     "test:features": "node --import tsx scripts/test-features.ts && node --import tsx scripts/test-management.ts && node --import tsx scripts/test-workflow.ts && node --import tsx scripts/test-session-context.ts && node --import tsx scripts/test-model-errors.ts && node --import tsx scripts/test-coding.ts && node --import tsx scripts/test-approval.ts && node --import tsx scripts/test-recovery.ts && node --import tsx scripts/test-checkpoints.ts && node --import tsx scripts/test-retry.ts",
     "test:features-ui": "node --import tsx scripts/test-features-ui.mjs && node --import tsx scripts/test-coding-ui.mjs && node --import tsx scripts/test-approval-ui.mjs && node --import tsx scripts/test-recovery-ui.mjs && node --import tsx scripts/test-compatibility-ui.mjs && node --import tsx scripts/test-update-ui.mjs && node --import tsx scripts/test-model-errors-ui.mjs && node --import tsx scripts/test-model-switch-ui.mjs && npm run test:v014-ui && node --import tsx scripts/test-retry-ui.mjs",
-    "test:v014-ui": "node --import tsx scripts/test-management-v014-ui.mjs && node --import tsx scripts/test-conversation-v014-ui.mjs && node --import tsx scripts/test-workspace-v014-ui.mjs && node --import tsx scripts/test-polish-ui.mjs",
+    "test:v014-ui": "node --import tsx scripts/test-management-v014-ui.mjs && node --import tsx scripts/test-conversation-v014-ui.mjs && node --import tsx scripts/test-workspace-v014-ui.mjs && node --import tsx scripts/test-polish-ui.mjs && node --import tsx scripts/test-interaction-performance-ui.mjs",
     "test:session-ui": "node --import tsx scripts/test-session-ui.mjs",
     "test:concurrency": "node --import tsx scripts/test-concurrency-settings.ts && node --import tsx scripts/test-model-switch-ui.mjs",
     "test:update": "node --import tsx scripts/test-update.ts",

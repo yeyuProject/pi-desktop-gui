@@ -1,23 +1,47 @@
 import { useWorkbench } from './hooks/useWorkbench';
 import { LoaderCircle } from 'lucide-react';
-import { Conversation } from './components/Conversation';
-import { Sidebar } from './components/Sidebar';
-import { WorkspaceHeader } from './components/WorkspaceHeader';
-import { Inspector } from './components/Inspector';
-import { Toasts } from './components/Toasts';
-import { WorkbenchDialogs } from './components/WorkbenchDialogs';
-import { Composer } from './components/Composer';
-import { SettingsModal } from './components/SettingsModal';
+import { Conversation as ConversationView } from './components/Conversation';
+import { Sidebar as SidebarView } from './components/Sidebar';
+import { WorkspaceHeader as WorkspaceHeaderView } from './components/WorkspaceHeader';
+import { Inspector as InspectorView } from './components/Inspector';
+import { Toasts as ToastsView } from './components/Toasts';
+import { WorkbenchDialogs as WorkbenchDialogsView } from './components/WorkbenchDialogs';
+import { Composer as ComposerView } from './components/Composer';
+import { SettingsModal as SettingsModalView } from './components/SettingsModal';
 import { StorageBanner } from './components/StorageBanner';
 import { CrashCard } from './components/CrashCard';
-import { useState } from 'react';
+import { memo, useMemo, useState } from 'react';
 import { AboutUpdates, UpdateBadge, UpdateDialog } from './components/Updates';
 import { ResizeHandle } from './components/ResizeHandle';
 import { CheckpointDialog } from './components/CheckpointDialog';
+const Sidebar = memo(SidebarView);
+const WorkspaceHeader = memo(WorkspaceHeaderView);
+const Inspector = memo(
+  InspectorView,
+  (before, after) =>
+    before.runtime.sessionId === after.runtime.sessionId &&
+    before.runtime.status === after.runtime.status &&
+    before.runtime.tools === after.runtime.tools &&
+    (Object.keys(before) as (keyof typeof before)[]).every(
+      (key) => key === 'runtime' || Object.is(before[key], after[key]),
+    ),
+);
+const Toasts = memo(ToastsView);
+const WorkbenchDialogs = memo(WorkbenchDialogsView);
+const Composer = memo(ComposerView);
+const SettingsModal = memo(SettingsModalView);
+const Conversation = memo(ConversationView);
+function pick<T, K extends keyof T>(model: T, keys: readonly K[]): Pick<T, K> {
+  return Object.fromEntries(keys.map((key) => [key, model[key]])) as Pick<T, K>;
+}
 export default function App() {
   const model = useWorkbench();
   const [updateOpen, setUpdateOpen] = useState(false);
   const { state, compact, columns, error } = model;
+  const updateBadge = useMemo(
+    () => <UpdateBadge update={model.update} open={() => setUpdateOpen(true)} />,
+    [model.update],
+  );
   if (!state)
     return (
       <main className="loading-screen">
@@ -65,9 +89,27 @@ export default function App() {
   return (
     <div className="app-shell">
       <Sidebar
-        {...model}
+        {...pick(model, [
+          'activities',
+          'environment',
+          'setNotice',
+          'sidebar',
+          'compact',
+          'inspector',
+          'setSearchOpen',
+          'setRename',
+          'menuId',
+          'setMenuId',
+          'selected',
+          'project',
+          'attempt',
+          'addProject',
+          'selectSession',
+          'createSession',
+          'openSettings',
+        ])}
         state={state}
-        updateBadge={<UpdateBadge update={model.update} open={() => setUpdateOpen(true)} />}
+        updateBadge={updateBadge}
       />
       {model.sidebar && !compact && (
         <ResizeHandle
@@ -86,10 +128,58 @@ export default function App() {
           storage={model.storage}
           openDirectory={() => void model.attempt(() => window.desktop.invoke('revealData'))}
         />
-        <WorkspaceHeader {...model} />
+        <WorkspaceHeader
+          {...pick(model, [
+            'setFeatureTab',
+            'sidebar',
+            'setSidebar',
+            'compact',
+            'inspector',
+            'setInspector',
+            'changes',
+            'selected',
+            'project',
+            'ownRuntime',
+            'running',
+          ])}
+        />
         <div ref={columns} className={'workspace-columns' + (compact ? ' compact' : '')}>
           <Conversation
-            {...model}
+            {...pick(model, [
+              'storage',
+              'runtime',
+              'environment',
+              'pending',
+              'setFeatureTab',
+              'compact',
+              'inspector',
+              'expanded',
+              'messageLimit',
+              'setMessageLimit',
+              'newContent',
+              'setNewContent',
+              'thread',
+              'input',
+              'autoScroll',
+              'selected',
+              'project',
+              'sessionEnabled',
+              'ownRuntime',
+              'running',
+              'messages',
+              'approvals',
+              'lastAssistant',
+              'visibleMessages',
+              'attempt',
+              'persistDraft',
+              'focusComposer',
+              'selectSession',
+              'openSettings',
+              'connect',
+              'inspectFile',
+              'toggleTool',
+              'messageContext',
+            ])}
             state={state}
             recovery={
               model.ownRuntime && model.runtime.crash && model.selected ? (
@@ -113,7 +203,76 @@ export default function App() {
               ) : null
             }
           >
-            <Composer {...model} state={state} />
+            <Composer
+              {...pick(model, [
+                'storage',
+                'environment',
+                'runtime',
+                'error',
+                'setError',
+                'setNotice',
+                'pending',
+                'attachmentsPending',
+                'selectionChanging',
+                'selectionRevision',
+                'draft',
+                'attachments',
+                'sendMode',
+                'setSendMode',
+                'images',
+                'setFeatureTab',
+                'commandIndex',
+                'setCommandIndex',
+                'setHideCommands',
+                'fileQuery',
+                'setFileQuery',
+                'fileResults',
+                'fileIndex',
+                'setFileIndex',
+                'fileList',
+                'snippets',
+                'pasteText',
+                'expandSnippet',
+                'removeSnippet',
+                'attachmentInfo',
+                'attachmentBytes',
+                'inputMaxHeight',
+                'setInputMaxHeight',
+                'elapsed',
+                'setShortcutsOpen',
+                'stopArmed',
+                'dragging',
+                'setDragging',
+                'recall',
+                'input',
+                'commandList',
+                'selected',
+                'project',
+                'sessionEnabled',
+                'ownRuntime',
+                'running',
+                'modelLocked',
+                'ownRunning',
+                'sentPrompts',
+                'commandOptions',
+                'activeCommand',
+                'completeCommand',
+                'attempt',
+                'persistDraft',
+                'onDraft',
+                'addAttachment',
+                'send',
+                'chooseImages',
+                'acceptDrop',
+                'openSettings',
+                'connect',
+                'readModels',
+                'setModel',
+                'setThinking',
+                'inspectFile',
+              ])}
+              state={state}
+            />
           </Conversation>
           {model.inspector && !compact && (
             <ResizeHandle
@@ -127,15 +286,124 @@ export default function App() {
               save={(width) => saveWidth('inspectorWidth', width)}
             />
           )}
-          <Inspector {...model} state={state} />
+          <Inspector
+            {...pick(model, [
+              'runtime',
+              'pending',
+              'compact',
+              'inspector',
+              'setInspector',
+              'tab',
+              'setTab',
+              'selectTab',
+              'changeMode',
+              'setChangeMode',
+              'changes',
+              'setChanges',
+              'selectedFile',
+              'setSelectedFile',
+              'filePreview',
+              'setFilePreview',
+              'fileDiff',
+              'setFileDiff',
+              'split',
+              'setSplit',
+              'inspectorPanel',
+              'project',
+              'ownRunning',
+              'diffLines',
+              'attempt',
+              'persistDraft',
+              'focusComposer',
+              'addAttachment',
+              'copy',
+              'revert',
+              'inspectFile',
+              'checkpoints',
+              'checkpointId',
+              'setCheckpointId',
+              'previewStale',
+              'refreshPreview',
+              'workspaceRevision',
+              'previewRange',
+              'askHunk',
+              'rerunCommand',
+              'saveInspectorSplit',
+            ])}
+            state={state}
+          />
         </div>
       </main>
-      <Toasts {...model} />
-      <WorkbenchDialogs
-        {...model}
-        state={state}
-        settings={<SettingsModal {...model} updatePanel={updatePanel} />}
-      />
+      <Toasts {...pick(model, ['notice', 'setDismissed', 'toasts'])} />
+      {(model.searchOpen ||
+        model.shortcutsOpen ||
+        model.rename ||
+        model.settingsOpen ||
+        model.featureTab ||
+        model.runtime.auth ||
+        model.prompts.length > 0) && (
+        <WorkbenchDialogs
+          {...pick(model, [
+            'runtime',
+            'environment',
+            'storage',
+            'featureTab',
+            'setFeatureTab',
+            'searchOpen',
+            'setSearchOpen',
+            'searchQuery',
+            'setSearchQuery',
+            'rename',
+            'setRename',
+            'shortcutsOpen',
+            'setShortcutsOpen',
+            'selected',
+            'prompts',
+            'attempt',
+            'selectSession',
+          ])}
+          state={state}
+          settings={
+            model.settingsOpen ? (
+              <SettingsModal
+                {...pick(model, [
+                  'state',
+                  'runtime',
+                  'environment',
+                  'error',
+                  'setError',
+                  'setNotice',
+                  'settingsOpen',
+                  'setSettingsOpen',
+                  'settingsTab',
+                  'setSettingsTab',
+                  'prefs',
+                  'setPrefs',
+                  'pending',
+                  'setFeatureTab',
+                  'testResult',
+                  'setTestResult',
+                  'diagnostic',
+                  'setDiagnostic',
+                  'selected',
+                  'sessionEnabled',
+                  'running',
+                  'modelLocked',
+                  'attempt',
+                  'action',
+                  'detect',
+                  'saveSettings',
+                  'connect',
+                  'chooseSettingPath',
+                  'setModel',
+                  'setThinking',
+                ])}
+                updatePanel={updatePanel}
+              />
+            ) : null
+          }
+        />
+      )}
       {model.checkpointPreview && (
         <CheckpointDialog
           key={model.checkpointPreview.id + model.checkpointPreview.revision}

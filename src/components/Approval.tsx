@@ -10,6 +10,7 @@ import {
 } from '../../shared/approval';
 import { type ExtensionDialog, type ApprovalMode } from '../../shared/types';
 import '../styles/management.css';
+import { useLayer } from '../hooks/useLayer';
 
 export const approvalModes: [ApprovalMode, string, string][] = [
   ['auto', '全自动', 'Pi 直接修改文件、执行命令'],
@@ -31,20 +32,13 @@ export function ApprovalSwitch({
 }) {
   const [open, setOpen] = useState(false);
   const ref = useRef<HTMLDivElement>(null);
+  useLayer(ref, open, () => setOpen(false), { kind: 'menu' });
   useEffect(() => {
     if (!open) return;
     const outside = (e: MouseEvent) => !ref.current?.contains(e.target as Node) && setOpen(false);
-    const escape = (e: KeyboardEvent) => {
-      if (e.key !== 'Escape') return;
-      e.preventDefault();
-      e.stopPropagation();
-      setOpen(false);
-    };
     document.addEventListener('mousedown', outside);
-    document.addEventListener('keydown', escape);
     return () => {
       document.removeEventListener('mousedown', outside);
-      document.removeEventListener('keydown', escape);
     };
   }, [open]);
   const Icon = mode === 'readonly' ? Eye : mode === 'confirm' ? ShieldCheck : Zap;

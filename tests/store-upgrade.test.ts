@@ -28,7 +28,7 @@ test('upgrading saves the exact previous index before changing its writer versio
 test('an unknown newer index opens read-only without renaming, backing up or overwriting it', async (t) => {
   const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'pi-downgrade-'));
   t.after(() => fs.rm(dir, { recursive: true, force: true }));
-  const original = JSON.stringify({ version: 2, appVersion: '0.10.0', changedSchema: 'keep all bytes' });
+  const original = JSON.stringify({ version: 3, appVersion: '0.10.0', changedSchema: 'keep all bytes' });
   await fs.writeFile(path.join(dir, 'state.json'), original);
   const store = new Store(dir, '0.9.0');
   await store.load();

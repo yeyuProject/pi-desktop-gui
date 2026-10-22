@@ -35,6 +35,7 @@ function Directory({
     [open, setOpen] = useState<string[]>([]),
     [error, setError] = useState('');
   const selected = useRef<HTMLButtonElement>(null);
+  const located = useRef(0);
   useEffect(() => {
     let alive = true;
     api
@@ -53,7 +54,8 @@ function Directory({
     };
   }, [project.id, directory, revision]);
   useEffect(() => {
-    if (!locate || !selectedFile) return;
+    if (!locate || !selectedFile || !items.length || located.current === locate) return;
+    located.current = locate;
     setOpen((old) => [
       ...new Set([
         ...old,

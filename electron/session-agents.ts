@@ -16,6 +16,10 @@ export class SessionAgents extends EventEmitter {
   private resourceMaintenance?: { directory: string; cwd?: string };
   private terminalHandoffs = new Set<string>();
   private reloadSuspended = false;
+  private touched = new Map<string, { at: number; version: number }>();
+  private collecting = false;
+  private releasing = new Set<string>();
+  private readonly idleTimer: NodeJS.Timeout;
 
   constructor(
     private store: Store,
@@ -23,13 +27,19 @@ export class SessionAgents extends EventEmitter {
     private developmentRoot?: string,
     private bridgeSource?: string,
     private terminalOpen?: (id: string) => Promise<boolean>,
+    private idleMs = 5 * 60 * 1000,
   ) {
     super();
+    this.idleTimer = setInterval(() => {
+      void this.collectIdle().catch(() => {});
+    }, 60_000);
+    this.idleTimer.unref();
   }
 
   get(id: string): AgentService {
     if (this.closing) throw new Error('应用正在关闭，请稍后重新打开');
     this.store.session(id);
+    this.touched.set(id, { at: Date.now(), version: (this.touched.get(id)?.version ?? 0) + 1 });
     const existing = this.agents.get(id);
     if (existing) return existing;
     const agent = new AgentService(
@@ -56,6 +66,10 @@ export class SessionAgents extends EventEmitter {
     agent.suspendReload(this.reloadSuspended);
     this.agents.set(id, agent);
     agent.on('runtimePatch', (patch: RuntimePatch) => {
+      if (agent.hasPendingWork) {
+        const touched = this.touched.get(id);
+        if (touched) touched.at = Date.now();
+      }
       this.emit('runtimePatch', patch);
       this.emit('attention', agent.runtime);
     });
@@ -259,10 +273,55 @@ export class SessionAgents extends EventEmitter {
     const agent = this.agents.get(id);
     if (!agent) return;
     if (agent.hasPendingWork) throw new Error('请先等待这个会话的操作结束或停止任务');
-    await agent.disconnect();
-    await agent.dispose();
-    this.agents.delete(id);
-    this.emit('runtimeRemoved', id);
+    this.releasing.add(id);
+    try {
+      await agent.disconnect();
+      await agent.dispose();
+      if (this.agents.get(id) !== agent) return;
+      this.agents.delete(id);
+      this.touched.delete(id);
+      this.emit('runtimeRemoved', id);
+    } finally {
+      this.releasing.delete(id);
+    }
+  }
+  async collectIdle(now = Date.now()) {
+    if (this.closing || this.collecting || this.resourceMaintenance || this.workspaceOperations.size) return;
+    this.collecting = true;
+    try {
+      for (const [id, agent] of this.agents) {
+        const touched = this.touched.get(id);
+        if (!touched || this.releasing.has(id)) continue;
+        if (
+          id === this.store.state.selectedSessionId ||
+          agent.hasPendingWork ||
+          this.terminalHandoffs.has(id)
+        ) {
+          touched.at = now;
+          continue;
+        }
+        if (now - touched.at < this.idleMs) continue;
+        const version = touched.version;
+        if (!(await agent.releaseIdleProcess())) continue;
+        if (
+          this.closing ||
+          this.releasing.has(id) ||
+          this.agents.get(id) !== agent ||
+          id === this.store.state.selectedSessionId ||
+          agent.hasPendingWork ||
+          this.touched.get(id)?.version !== version
+        )
+          continue;
+        // No await between the final ownership check and detaching the idle instance.
+        this.agents.delete(id);
+        this.touched.delete(id);
+        agent.removeAllListeners();
+        this.emit('runtimeRemoved', id);
+        await agent.dispose();
+      }
+    } finally {
+      this.collecting = false;
+    }
   }
 
   async disconnect() {
@@ -287,6 +346,7 @@ export class SessionAgents extends EventEmitter {
 
   async dispose() {
     this.closing = true;
+    clearInterval(this.idleTimer);
     // Start cancellation first. A workspace operation may be waiting for a Pi
     // reader/dialog which only AgentService.dispose can close.
     const disposing = [...this.agents.values()].map((agent) => agent.dispose());
@@ -295,5 +355,6 @@ export class SessionAgents extends EventEmitter {
       ...[...this.workspaceOperations.values()].map((operation) => operation.finished),
     ]);
     this.agents.clear();
+    this.touched.clear();
   }
 }

@@ -347,13 +347,12 @@ export function SettingsForm({
                       placeholder={String(f.fallback)}
                       value={typeof v === 'number' ? v : ''}
                       onChange={(e) =>
-                        edit(
-                          f.key,
-                          e.target.value === ''
-                            ? undefined
-                            : Math.max(f.min, Math.min(f.max, Number(e.target.value))),
-                        )
+                        edit(f.key, e.target.value === '' ? undefined : Number(e.target.value))
                       }
+                      onBlur={(e) => {
+                        if (e.target.value !== '')
+                          edit(f.key, Math.max(f.min, Math.min(f.max, Number(e.target.value))));
+                      }}
                     />
                   )}
                   {f.kind === 'choice' && (

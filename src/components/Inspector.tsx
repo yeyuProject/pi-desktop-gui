@@ -41,6 +41,7 @@ export function Inspector(
     | 'setInspector'
     | 'tab'
     | 'setTab'
+    | 'selectTab'
     | 'changeMode'
     | 'setChangeMode'
     | 'changes'
@@ -84,6 +85,7 @@ export function Inspector(
     setInspector,
     tab,
     setTab,
+    selectTab,
     changeMode,
     setChangeMode,
     changes,
@@ -301,12 +303,7 @@ export function Inspector(
                   key={key}
                   aria-pressed={tab === key}
                   className={tab === key ? 'active' : ''}
-                  onClick={() => {
-                    setTab(key);
-                    setSelectedFile('');
-                    setFilePreview(undefined);
-                    setFileDiff(undefined);
-                  }}
+                  onClick={() => selectTab(key)}
                 >
                   <Icon size={15} />
                   {label}

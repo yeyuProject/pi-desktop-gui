@@ -57,7 +57,7 @@ const createHandler = new Function(`${code}\nreturn createHandler;`)() as (
   store: Store,
   service: SessionAgents,
   send: (event: AppEvent) => void,
-) => (id: string) => Promise<Message[]>;
+) => (id: string) => Promise<void>;
 
 function deferred() {
   let resolve!: () => void;
@@ -125,7 +125,12 @@ async function fixture(t: TestContext) {
     b,
     c,
     events,
-    select: createHandler(store, agents, send),
+    selectOnly: createHandler(store, agents, send),
+    // Navigation and the selected-session view now have separate responsibilities.
+    select: async (id: string) => {
+      await createHandler(store, agents, send)(id);
+      return agents.get(id).history(id);
+    },
     selectedEvents: () => events.filter((event) => event.type === 'state').map((event) => event.state),
     persisted: async () => JSON.parse(await fs.readFile(path.join(dir, 'state.json'), 'utf8')),
   };
@@ -165,6 +170,17 @@ test('cold selection restores saved history and draft without starting Pi', asyn
   assert.equal(terminal.mock.callCount(), 0);
   assert.equal(f.service.runtime.connected, false);
   assert.equal(f.service.lastSwitch, undefined);
+});
+
+test('selection alone does not read history or allocate an agent', async (t) => {
+  const f = await fixture(t);
+  const get = t.mock.method(f.agents, 'get');
+  const history = t.mock.method(f.service, 'history');
+  assert.equal(await f.selectOnly(f.b.id), undefined);
+  assert.equal(get.mock.callCount(), 0);
+  assert.equal(history.mock.callCount(), 0);
+  assert.deepEqual(await f.service.history(f.b.id), [{ role: 'user', content: 'history-1' }]);
+  assert.equal(history.mock.callCount(), 1);
 });
 
 test('selection is visible before its save, and completion still waits for persistence', async (t) => {
