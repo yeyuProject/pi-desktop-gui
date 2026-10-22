@@ -23,7 +23,9 @@ export function matchesDraft(
         image.id === other.id &&
         image.name === other.name &&
         image.mimeType === other.mimeType &&
-        image.data === other.data
+        (image.data !== undefined
+          ? image.data === other.data
+          : image.file === (other as ImageAttachment & { file?: string }).file)
       );
     })
   );

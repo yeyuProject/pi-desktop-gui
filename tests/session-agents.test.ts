@@ -340,6 +340,49 @@ test('application shutdown stops without restarting Pi to load deferred configur
   await until(() => agent.runtime.connected && agent.lastSwitch?.pid !== pid);
 });
 
+test('stopping a detached startup RPC waits for its confirmed exit before completing', async (t) => {
+  const { agents, a } = await fixture(t);
+  const agent = agents.get(a.id),
+    internal = agent as any;
+  agent.runtime = { ...emptyRuntime(), sessionId: a.id, status: 'starting' };
+  internal.connecting = true;
+  let finish!: () => void,
+    closing = false,
+    stopped = false;
+  const exit = new Promise<void>((resolve) => {
+    finish = resolve;
+  });
+  const rpc = {
+    closed: false,
+    async request(method: string) {
+      if (method === 'clear_queue') return {};
+      assert.equal(method, 'abort_bash');
+      internal.rpc = undefined; // ensureConnected/closeRpc detaches before the child exits.
+      throw new Error('Pi 未连接');
+    },
+    async close() {
+      closing = true;
+      await exit;
+      this.closed = true;
+    },
+  };
+  internal.rpc = rpc;
+  const result = agent.stop().then(() => {
+    stopped = true;
+  });
+  try {
+    await until(() => closing);
+    assert.equal(stopped, false);
+    finish();
+    await result;
+    assert.equal(agent.runtime.status, 'stopped');
+    assert.equal(rpc.closed, true);
+  } finally {
+    finish();
+    internal.connecting = false;
+  }
+});
+
 test('shutdown refuses new conversations before waiting for existing processes to close', async (t) => {
   const { agents, a, b } = await fixture(t);
   const first = agents.get(a.id);

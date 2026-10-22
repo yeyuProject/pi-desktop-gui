@@ -2,6 +2,7 @@ import fs from 'node:fs/promises';
 import { createReadStream } from 'node:fs';
 import path from 'node:path';
 import { createInterface } from 'node:readline';
+import { setImmediate as yieldToEvents } from 'node:timers/promises';
 import type { PiSessionInfo, Session, SessionMatch } from '../shared/types';
 import { pathKey } from './platform';
 
@@ -78,22 +79,69 @@ export async function listPiSessions(roots: string[], known: Set<string>): Promi
   return result.sort((a, b) => b.updatedAt - a.updatedAt).slice(0, 200);
 }
 
-export async function searchSessionContents(sessions: Session[], query: string): Promise<SessionMatch[]> {
+const searchCache = new Map<string, { stamp: string; texts: string[]; bytes: number }>();
+async function searchableText(file: string, signal?: AbortSignal) {
+  signal?.throwIfAborted();
+  const stat = await fs.stat(file);
+  if (stat.size > SEARCH_LIMIT) return [];
+  const key = pathKey(file),
+    stamp = `${stat.ino}:${stat.size}:${stat.mtimeMs}:${stat.ctimeMs}`;
+  const cached = searchCache.get(key);
+  searchCache.delete(key);
+  if (cached?.stamp === stamp) {
+    searchCache.set(key, cached);
+    return cached.texts;
+  }
+  const raw = await fs.readFile(file, { encoding: 'utf8', signal });
+  const texts: string[] = [];
+  let yielded = performance.now();
+  for (const line of raw.split('\n')) {
+    signal?.throwIfAborted();
+    if (performance.now() - yielded >= 4) {
+      await yieldToEvents();
+      signal?.throwIfAborted();
+      yielded = performance.now();
+    }
+    try {
+      const entry = JSON.parse(line);
+      if (entry.type === 'message' && ['user', 'assistant'].includes(entry.message?.role)) {
+        const text = textOf(entry.message.content);
+        if (text) texts.push(text);
+      }
+    } catch {}
+  }
+  const after = await fs.stat(file);
+  const bytes = texts.reduce((sum, text) => sum + text.length * 2, 0);
+  if (bytes <= SEARCH_LIMIT && `${after.ino}:${after.size}:${after.mtimeMs}:${after.ctimeMs}` === stamp) {
+    searchCache.set(key, { stamp, texts, bytes });
+    let total = [...searchCache.values()].reduce((sum, entry) => sum + entry.bytes, 0);
+    for (const [id, entry] of searchCache) {
+      if (total <= SEARCH_LIMIT && searchCache.size <= 200) break;
+      searchCache.delete(id);
+      total -= entry.bytes;
+    }
+  }
+  return texts;
+}
+export async function searchSessionContents(
+  sessions: Session[],
+  query: string,
+  signal?: AbortSignal,
+): Promise<SessionMatch[]> {
   const needle = query.trim().toLowerCase();
   if (needle.length < 2) return [];
   const matches: SessionMatch[] = [];
   for (const s of sessions) {
+    signal?.throwIfAborted();
     if (!s.file) continue;
     try {
-      if ((await fs.stat(s.file)).size > SEARCH_LIMIT) continue;
-      const raw = await fs.readFile(s.file, 'utf8');
-      for (const line of raw.split('\n')) {
-        let text = '';
-        try {
-          const e = JSON.parse(line);
-          if (e.type === 'message' && ['user', 'assistant'].includes(e.message?.role))
-            text = textOf(e.message.content);
-        } catch {}
+      let yielded = performance.now();
+      for (const text of await searchableText(s.file, signal)) {
+        if (performance.now() - yielded >= 4) {
+          await yieldToEvents();
+          signal?.throwIfAborted();
+          yielded = performance.now();
+        }
         const at = text.toLowerCase().indexOf(needle);
         if (at < 0) continue;
         const start = Math.max(0, at - 30);
@@ -108,7 +156,9 @@ export async function searchSessionContents(sessions: Session[], query: string):
         });
         break;
       }
-    } catch {}
+    } catch (error) {
+      if (signal?.aborted) throw error;
+    }
     if (matches.length >= 30) break;
   }
   return matches;

@@ -238,6 +238,9 @@ mark,
 .turn-outline button > span {
   display: none;
   max-width: 280px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 .turn-outline small {
   margin-left: 8px;

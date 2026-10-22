@@ -41,6 +41,7 @@ export function useRuntime(
       if (event.type === 'state') receiveState(event.state, event.revision);
       else if (event.type === 'storage') setStorage(event.storage);
       else if (event.type === 'update') setUpdate(event.update);
+      else if (event.type === 'environment') setEnvironment(event.environment);
       else if (event.type === 'runtimeRemoved') {
         runtimes.remove(event.sessionId);
       } else if (event.type === 'runtimePatch' && event.patch.sessionId) {
@@ -57,7 +58,7 @@ export function useRuntime(
         if (v.runtime.sessionId) {
           if (!runtimes.has(v.runtime.sessionId)) runtimes.set(v.runtime);
         }
-        setEnvironment(v.environment);
+        setEnvironment((previous) => previous ?? v.environment);
         setPrefs((previous) => previous ?? receivedState.current.state?.settings ?? v.state.settings);
         setStorage(v.storage);
         setUpdate(v.update);

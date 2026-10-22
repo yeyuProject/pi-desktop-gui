@@ -2,16 +2,25 @@ import fs from 'node:fs/promises';
 import path from 'node:path';
 import { createHash, randomUUID } from 'node:crypto';
 import { EventEmitter } from 'node:events';
+import { setImmediate as yieldToEvents } from 'node:timers/promises';
 import type {
   AppState,
   ImageAttachment,
+  DraftImage,
   IndexRecovery,
   Message,
   Session,
   StorageStatus,
 } from '../shared/types';
 import { validateImages } from './images';
-import { MAX_IMAGE_BYTES, MAX_IMAGE_COUNT } from '../shared/images';
+import {
+  detectImageMimeType,
+  imageDataBytes,
+  MAX_IMAGE_BYTES,
+  MAX_IMAGE_COUNT,
+  MAX_IMAGES_BYTES,
+} from '../shared/images';
+import { matchesDraft } from '../shared/draft';
 import { emptyState, parseState } from './store-state';
 import { compareAppVersions, stableVersion } from '../shared/app-update';
 import { sessionUsage } from './pi/session-usage';
@@ -30,7 +39,7 @@ export class Store extends EventEmitter {
     resolve: () => void;
     reject: (error: unknown) => void;
   };
-  private imageFiles = new WeakMap<ImageAttachment, string>();
+  private imageFiles = new WeakMap<DraftImage, string>();
   private writtenImages = new Set<string>();
   // Keep stable IDs for late draft IPC, but never infer this status from loaded blank rows.
   private transientSessions = new Set<string>();
@@ -215,6 +224,7 @@ export class Store extends EventEmitter {
     for (const session of raw.sessions) {
       if (!Array.isArray(session?.images)) continue;
       if (session.images.length > MAX_IMAGE_COUNT) throw new Error('草稿图片数量无效');
+      let total = 0;
       for (let index = 0; index < session.images.length; index++) {
         const { file, ...metadata } = session.images[index];
         if (typeof file !== 'string' || !/^[a-f0-9]{64}\.bin$/.test(file))
@@ -224,15 +234,80 @@ export class Store extends EventEmitter {
         const bytes = await fs.readFile(imagePath);
         if (createHash('sha256').update(bytes).digest('hex') + '.bin' !== file)
           throw new Error('草稿图片校验失败，原文件已保留');
-        const image = { ...metadata, data: bytes.toString('base64') };
-        validateImages([image]);
+        if (
+          typeof metadata.id !== 'string' ||
+          typeof metadata.name !== 'string' ||
+          metadata.name.length > 512 ||
+          !['image/png', 'image/jpeg', 'image/webp', 'image/gif'].includes(metadata.mimeType) ||
+          bytes.length > MAX_IMAGE_BYTES ||
+          detectImageMimeType(bytes) !== metadata.mimeType
+        )
+          throw new Error('草稿图片格式无效');
+        total += bytes.length;
+        const image = {
+          id: metadata.id,
+          name: metadata.name,
+          mimeType: metadata.mimeType,
+          file,
+          bytes: bytes.length,
+        };
         session.images[index] = image;
         this.imageFiles.set(image, file);
         this.writtenImages.add(file);
       }
-      validateImages(session.images);
+      if (total > MAX_IMAGES_BYTES) throw new Error('草稿图片超过总大小限制');
     }
     return parseState({ ...raw, version: 1 });
+  }
+  async draftImages(id: string): Promise<ImageAttachment[]> {
+    const images = this.session(id).images ?? [];
+    const result: ImageAttachment[] = [];
+    for (const image of images) {
+      if (image.data !== undefined) result.push({ ...image, data: image.data });
+      else {
+        if (!image.file || !/^[a-f0-9]{64}\.bin$/.test(image.file)) throw new Error('草稿图片索引无效');
+        const file = this.file(path.join('draft-images', image.file));
+        if ((await fs.stat(file)).size > MAX_IMAGE_BYTES) throw new Error('草稿图片超过大小限制');
+        const bytes = await fs.readFile(file);
+        if (createHash('sha256').update(bytes).digest('hex') + '.bin' !== image.file)
+          throw new Error('草稿图片校验失败，原文件已保留');
+        result.push({
+          id: image.id,
+          name: image.name,
+          mimeType: image.mimeType,
+          data: bytes.toString('base64'),
+        });
+      }
+    }
+    validateImages(result);
+    return result;
+  }
+  matchesDraft(session: Session, text: string, attachments: string[], images: ImageAttachment[]) {
+    // Recompute, never trust a renderer-supplied file/hash when consuming a saved draft.
+    return matchesDraft(
+      session,
+      text,
+      attachments,
+      images.map((image) => ({
+        ...image,
+        file: createHash('sha256').update(Buffer.from(image.data, 'base64')).digest('hex') + '.bin',
+      })),
+    );
+  }
+  appendDraftImages(session: Session, images: ImageAttachment[]) {
+    validateImages(images);
+    const current = session.images ?? [];
+    const bytes = [...current, ...images].reduce(
+      (sum, image) =>
+        sum +
+        (image.data !== undefined
+          ? imageDataBytes(image.data)
+          : ((image as DraftImage).bytes ?? MAX_IMAGE_BYTES)),
+      0,
+    );
+    if (current.length + images.length > MAX_IMAGE_COUNT || bytes > MAX_IMAGES_BYTES)
+      throw new Error('恢复的图片超过附件限制');
+    session.images = [...current, ...images];
   }
   /** Coalesce typing, while save/flush remain immediate durability barriers. */
   scheduleSave() {
@@ -284,12 +359,13 @@ export class Store extends EventEmitter {
         sessions: state.sessions.map((session) => ({
           ...session,
           images: session.images?.map((image) => {
-            let file = this.imageFiles.get(image);
+            let file = image.data === undefined ? image.file : this.imageFiles.get(image);
             if (!file) {
+              if (image.data === undefined) throw new Error('草稿图片索引无效');
               file = createHash('sha256').update(Buffer.from(image.data, 'base64')).digest('hex') + '.bin';
               this.imageFiles.set(image, file);
             }
-            images.set(file, image.data);
+            if (image.data !== undefined) images.set(file, image.data);
             const { data: _data, ...metadata } = image;
             return { ...metadata, file };
           }),
@@ -310,6 +386,23 @@ export class Store extends EventEmitter {
         }
         await this.replace('state.json', contents);
         await this.backup(contents);
+        // Release bodies only after durable image files exist. Late draft edits
+        // keep their own identities and cannot be replaced by this older save.
+        for (const session of this.state.sessions) {
+          if (!session.images?.some((image) => image.data !== undefined)) continue;
+          session.images = session.images.map((image) => {
+            const file = this.imageFiles.get(image);
+            return image.data !== undefined && file && this.writtenImages.has(file)
+              ? {
+                  id: image.id,
+                  name: image.name,
+                  mimeType: image.mimeType,
+                  file,
+                  bytes: imageDataBytes(image.data),
+                }
+              : image;
+          });
+        }
       } catch (error) {
         this.writeFailure(error);
         throw new Error(this.storage.problem, { cause: error });
@@ -365,7 +458,15 @@ export class Store extends EventEmitter {
     return this.projectState(this.state, false);
   }
   visibleState(state = this.state) {
-    return this.projectState(state, true);
+    const visible = this.projectState(state, true);
+    return {
+      ...visible,
+      sessions: visible.sessions.map((session) =>
+        session.images?.length
+          ? { ...session, images: session.images.map(({ data: _data, ...image }) => image) }
+          : session,
+      ),
+    };
   }
   createPlaceholder(projectId?: string, unavailable: (id: string) => boolean = () => false) {
     if (projectId !== undefined) this.project(projectId);
@@ -432,7 +533,53 @@ export class Store extends EventEmitter {
   }
 }
 
-export async function readSessionFile(
+type Transcript = { cwd: string; name?: string; messages: Message[]; stats: SessionUsage };
+const transcriptCache = new Map<string, { stamp: string; bytes: number; value: Transcript }>();
+const transcriptReads = new Map<string, Promise<Transcript>>();
+const transcriptBudget = 32 * 1024 * 1024;
+const transcriptStamp = (stat: NonNullable<Awaited<ReturnType<typeof fs.stat>>>) =>
+  `${stat.ino}:${stat.size}:${stat.mtimeMs}:${stat.ctimeMs}`;
+export async function readSessionFile(file: string): Promise<Transcript> {
+  const key = path.resolve(file);
+  const stat = await fs.stat(key);
+  if (stat.size > 64 * 1024 * 1024) throw new Error('会话文件超过 64 MiB，请在 Pi 中压缩或导出后再导入');
+  const stamp = transcriptStamp(stat);
+  const cached = transcriptCache.get(key);
+  transcriptCache.delete(key);
+  if (cached?.stamp === stamp) {
+    transcriptCache.set(key, cached);
+    return structuredClone(cached.value);
+  }
+  const request = key + '\0' + stamp;
+  if (stat.size * 2 > transcriptBudget) return readSessionFileUncached(key);
+  let pending = transcriptReads.get(request);
+  if (!pending) {
+    pending = (async () => {
+      const value = await readSessionFileUncached(key);
+      // Files can be appended/replaced during a read. Never cache that observation.
+      if (stat.size * 2 <= transcriptBudget && transcriptStamp(await fs.stat(key)) === stamp) {
+        transcriptCache.delete(key);
+        transcriptCache.set(key, { stamp, bytes: stat.size * 2, value });
+        let total = [...transcriptCache.values()].reduce((sum, entry) => sum + entry.bytes, 0);
+        for (const [id, entry] of transcriptCache) {
+          if (total <= transcriptBudget && transcriptCache.size <= 200) break;
+          transcriptCache.delete(id);
+          total -= entry.bytes;
+        }
+      }
+      return value;
+    })();
+    transcriptReads.set(request, pending);
+    void pending
+      .finally(() => {
+        if (transcriptReads.get(request) === pending) transcriptReads.delete(request);
+      })
+      .catch(() => {});
+  }
+  // Agents mutate live replies; no reader may mutate the shared cache/in-flight result.
+  return structuredClone(await pending);
+}
+async function readSessionFileUncached(
   file: string,
 ): Promise<{ cwd: string; name?: string; messages: Message[]; stats: SessionUsage }> {
   const stat = await fs.stat(file);
@@ -440,7 +587,12 @@ export async function readSessionFile(
   const raw = await fs.readFile(file, 'utf8');
   const entries: any[] = [];
   const lines = raw.split('\n');
+  let yielded = performance.now();
   for (let i = 0; i < lines.length; i++) {
+    if (performance.now() - yielded >= 4) {
+      await yieldToEvents();
+      yielded = performance.now();
+    }
     if (!lines[i].trim()) continue;
     try {
       entries.push(JSON.parse(lines[i]));

@@ -1,6 +1,6 @@
 {
   "name": "pi-desktop-gui",
-  "version": "0.14.33",
+  "version": "0.14.34",
   "private": true,
   "description": "A local desktop workspace for the Pi coding agent",
   "author": "yeyuProject",
@@ -33,6 +33,7 @@
     "test:retry": "node --import tsx scripts/test-retry.ts",
     "test:retry-ui": "node --import tsx scripts/test-retry-ui.mjs",
     "test:images-ui": "node --import tsx scripts/test-image-input-ui.mjs",
+    "test:performance-ui": "node --import tsx scripts/test-performance-ui.mjs",
     "test:transcript-ui": "node --import tsx scripts/test-transcript-ui.mjs"
   },
   "build": {
@@ -159,6 +160,9 @@
     "ignore": "7.0.12",
     "js-yaml": "4.3.2",
     "lucide-react": "1.55.0",
+    "mdast-util-from-markdown": "2.1.0",
+    "mdast-util-gfm": "3.1.0",
+    "micromark-extension-gfm": "3.0.0",
     "playwright": "1.64.0",
     "prettier": "3.9.10",
     "proper-lockfile": "4.1.2",

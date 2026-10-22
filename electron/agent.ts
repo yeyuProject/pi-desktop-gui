@@ -9,7 +9,6 @@ import { agentDirectory, preparePi } from './environment';
 import { Store, readSessionFile } from './store';
 import { Workspace, attachmentPrompt } from './workspace';
 import { CheckpointRecorder, type WorkspaceRequest } from './checkpoint-recorder';
-import { matchesDraft } from '../shared/draft';
 import { stripAnsi } from '../shared/ansi';
 import {
   busy,
@@ -27,6 +26,7 @@ import {
   type RuntimeNotification,
   type ApprovalMode,
   type ApprovalRequest,
+  type ToolActivity,
 } from '../shared/types';
 import { APPROVAL_DENY, APPROVAL_PREFIX } from '../shared/approval';
 import { validateImages } from './images';
@@ -216,13 +216,14 @@ export class AgentService extends EventEmitter {
       previous: string[],
       next: string[],
       seen: WeakMap<object, string>,
+      mutable: (item: object, index: number) => boolean,
     ) => {
       let from = reset ? 0 : Math.min(previous.length, items.length);
       for (let i = 0; i < items.length; i++) {
-        const mutable = i >= items.length - 8 || (items[i] as { status?: string }).status === 'running';
-        const frozen = !mutable && seen.get(items[i]);
+        const changing = mutable(items[i], i);
+        const frozen = !changing && seen.get(items[i]);
         next[i] = frozen || JSON.stringify(items[i]);
-        if (mutable) seen.delete(items[i]);
+        if (changing) seen.delete(items[i]);
         else if (!frozen) seen.set(items[i], next[i]);
         if (i < from && next[i] !== previous[i]) from = i;
       }
@@ -230,8 +231,22 @@ export class AgentService extends EventEmitter {
     };
     const messages: string[] = [],
       tools: string[] = [];
-    const messagesFrom = changedFrom(r.messages, this.sent.messages, messages, this.serialized);
-    const toolsFrom = changedFrom(r.tools, this.sent.tools, tools, this.serialized);
+    const messagesFrom = changedFrom(
+      r.messages,
+      this.sent.messages,
+      messages,
+      this.serialized,
+      (item, index) => index === r.messages.length - 1 && (item as Message).role === 'assistant',
+    );
+    // Preserve late updates to recent tools and the final transition of older
+    // concurrent tools, which must remain uncached while running.
+    const toolsFrom = changedFrom(
+      r.tools,
+      this.sent.tools,
+      tools,
+      this.serialized,
+      (item, index) => index >= r.tools.length - 8 || (item as ToolActivity).status === 'running',
+    );
     const { messages: _m, tools: _t, ...rest } = r;
     const fields: Record<string, unknown> = {};
     const removed = [...this.sentFields.keys()].filter((key) => !(key in rest));
@@ -1357,7 +1372,7 @@ export class AgentService extends EventEmitter {
         const state = await this.rpc!.request('get_state');
         if (!state.isStreaming && !state.isCompacting && !state.pendingMessageCount) this.status('idle');
       }
-      if (matchesDraft(session, text, attachments, images)) {
+      if (this.store.matchesDraft(session, text, attachments, images)) {
         session.draft = '';
         session.attachments = [];
         session.images = [];
@@ -1613,8 +1628,7 @@ export class AgentService extends EventEmitter {
       const restored = [...returned];
       for (const q of queuedImages.filter((q) => returned.includes(q.text))) {
         try {
-          validateImages([...(s.images ?? []), ...q.images]);
-          s.images = [...(s.images ?? []), ...q.images];
+          this.store.appendDraftImages(s, q.images);
         } catch {
           const recovered = this.store.createSession(s.projectId);
           if (!s.projectId) recovered.cwd = this.runtime.cwd;
@@ -1944,6 +1958,9 @@ export class AgentService extends EventEmitter {
         if (!rpc.closed) await rpc.request('abort', {}, 60000);
       } catch (error) {
         // A cancelled startup/reload can close this process while stop is awaiting its response.
+        // closeRpc detaches it before the exit event: finish that close before
+        // interpreting a rejected abort as a failure to stop.
+        if (wasConnecting && this.rpc !== rpc && !rpc.closed) await rpc.close();
         if (!rpc.closed) throw error;
         await this.crashCleanup;
         this.assertCommandsStopped();

@@ -108,3 +108,37 @@ test('Pi history keeps complete image records and sessions without a text previe
   const known = new Set(sessions.map((session) => pathKey(session.file)));
   assert.deepEqual(await listPiSessions([dir], known), []);
 });
+
+test('cached transcripts are isolated between readers and invalidated after append and replacement', async () => {
+  const dir = await sandbox(),
+    file = path.join(dir, 'cached.jsonl');
+  const record = (id: string, content: string, parentId: string | null = null) =>
+    JSON.stringify({ type: 'message', id, parentId, message: { role: 'user', content } }) + '\n';
+  const header = JSON.stringify({ type: 'session', cwd: dir }) + '\n';
+  await fs.writeFile(file, header + record('a', 'first'));
+  const [first, concurrent] = await Promise.all([readSessionFile(file), readSessionFile(file)]);
+  first.messages[0].content = 'mutated by live stream';
+  assert.equal(concurrent.messages[0].content, 'first');
+  assert.equal((await readSessionFile(file)).messages[0].content, 'first');
+  await fs.appendFile(file, record('b', 'appended', 'a'));
+  assert.equal((await readSessionFile(file)).messages.at(-1)?.content, 'appended');
+  await fs.writeFile(file + '.new', header + record('a', 'other'));
+  await fs.rename(file + '.new', file);
+  assert.equal((await readSessionFile(file)).messages[0].content, 'other');
+});
+
+test('search cache refreshes edited contents and cancelled searches do no more work', async () => {
+  const dir = await sandbox(),
+    file = path.join(dir, 'search-cache.jsonl');
+  const session = { id: 'cache', file } as Session;
+  const record = (text: string) =>
+    JSON.stringify({ type: 'message', message: { role: 'user', content: text } });
+  await fs.writeFile(file, record('original needle'));
+  assert.equal((await searchSessionContents([session], 'needle')).length, 1);
+  await fs.writeFile(file, record('replacement text'));
+  assert.equal((await searchSessionContents([session], 'needle')).length, 0);
+  assert.equal((await searchSessionContents([session], 'replacement')).length, 1);
+  const controller = new AbortController();
+  controller.abort();
+  await assert.rejects(searchSessionContents([session], 'needle', controller.signal), { name: 'AbortError' });
+});

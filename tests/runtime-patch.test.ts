@@ -125,3 +125,31 @@ test('streaming omits unchanged catalogs and diagnostics, and clears removed fie
   s.publish(true);
   assert.deepEqual(patches.at(-1)!.commands, s.runtime.commands);
 });
+
+test('unchanged user image bodies are encoded once while the reply streams', () => {
+  const { s, view } = service();
+  s.runtime.sessionId = 'images';
+  let reads = 0;
+  const image = {
+    type: 'image',
+    mimeType: 'image/png',
+    get data() {
+      reads++;
+      return 'opaque-image';
+    },
+  };
+  s.runtime.messages = [
+    { role: 'user', content: [image] },
+    { role: 'assistant', content: 'reply' },
+  ];
+  s.publish(true);
+  const firstReads = reads;
+  for (let i = 0; i < 10; i++) {
+    s.runtime.messages[1].content += ' more';
+    s.publish(true);
+  }
+  assert.equal(reads, firstReads, 'stable image data must not be re-read/serialized for each token');
+  assert.deepEqual(view().messages[0].content, [
+    { type: 'image', mimeType: 'image/png', data: 'opaque-image' },
+  ]);
+});

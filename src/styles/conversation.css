@@ -628,3 +628,7 @@
   font-size: calc(12px * var(--font-scale));
   margin-bottom: 8px;
 }
+.streaming-markdown-text {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}

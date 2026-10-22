@@ -17,6 +17,7 @@ import {
   turnThinking,
 } from '../lib/conversation-layout';
 import { ToolGroupCard } from './conversation/ToolGroupCard';
+import { TurnOutline } from './conversation/TurnOutline';
 import { RetryErrorGroup } from './conversation/RetryErrorGroup';
 import { SearchHighlight } from './conversation/SearchHighlight';
 import { sessionModelState } from '../lib/session-model';
@@ -525,33 +526,7 @@ export function Conversation(
           )}
         </div>
       </div>
-      {turns.length >= 3 && (
-        <nav className="turn-outline" aria-label="对话轮次">
-          {turns.map((turn) => (
-            <button
-              key={turn.turn}
-              title={`第 ${turn.turn} 轮：${turn.title}`}
-              className={[
-                turn.failed ? 'failed' : turn.modified ? 'modified' : '',
-                activeTurn === turn.turn ? 'current' : '',
-              ].join(' ')}
-              aria-current={activeTurn === turn.turn ? 'step' : undefined}
-              onClick={() => {
-                setActiveTurn(turn.turn);
-                jump(turn.index);
-              }}
-            >
-              <i />
-              <span>
-                #{turn.turn} {turn.title}
-                <small>
-                  +{turn.added} / −{turn.removed}
-                </small>
-              </span>
-            </button>
-          ))}
-        </nav>
-      )}
+      {turns.length >= 3 && <TurnOutline key={selected?.id} turns={turns} active={activeTurn} jump={jump} />}
       {newContent && (
         <button
           className="new-content"

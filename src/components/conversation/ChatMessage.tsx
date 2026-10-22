@@ -162,7 +162,7 @@ export const ChatMessage = memo(
             m.role === 'user' ? (
               <UserMessage text={content} match={match} />
             ) : (
-              <RichText text={content} />
+              <RichText text={content} streaming={ctx.running && last} />
             )
           ) : m.role === 'assistant' && ctx.running ? (
             <span className="stream-cursor" />

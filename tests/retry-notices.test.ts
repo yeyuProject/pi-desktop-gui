@@ -1,6 +1,7 @@
 import test, { type TestContext } from 'node:test';
 import assert from 'node:assert/strict';
 import { AgentService } from '../electron/agent';
+import { Store } from '../electron/store';
 import { applyRuntimePatch, emptyRuntime, type RuntimePatch, type RunStatus } from '../shared/types';
 
 function fixture(t: TestContext) {
@@ -23,6 +24,7 @@ function fixture(t: TestContext) {
       return session;
     },
     assertWritable() {},
+    matchesDraft: Store.prototype.matchesDraft,
     async save() {},
     async flush() {},
   };

@@ -43,6 +43,7 @@ export function QuickSwitch({
     return () => {
       alive = false;
       clearTimeout(timer);
+      void api.invoke('searchSessions', '').catch(() => {});
     };
   }, [q, scope]);
   useEffect(() => {

@@ -182,6 +182,45 @@ try {
   assert.equal((await saved()).draft, '选择期间修改后的草稿');
   console.log('PASS delayed image selection preserves new draft text and intervening removals');
 
+  stage = 'lazy image restore during typing and attachment selection';
+  await app.evaluate(({ ipcMain, dialog }, file) => {
+    const original = ipcMain._invokeHandlers.get('desktop:invoke');
+    globalThis.restorePickerCalls = 0;
+    dialog.showOpenDialog = async () => {
+      globalThis.restorePickerCalls++;
+      return { canceled: false, filePaths: [file] };
+    };
+    ipcMain.removeHandler('desktop:invoke');
+    ipcMain.handle('desktop:invoke', async (event, method, args) => {
+      const value = await original(event, method, args);
+      if (method === 'readDraftImages')
+        await new Promise((resolve) => {
+          globalThis.finishDraftImageRead = resolve;
+        });
+      return value;
+    });
+  }, unknown);
+  await page.reload();
+  await input.waitFor();
+  await wait(() => app.evaluate(() => typeof globalThis.finishDraftImageRead === 'function'));
+  const send = page.getByRole('button', { name: '发送任务', exact: true });
+  assert.equal(await send.isDisabled(), true);
+  await input.fill('恢复图片期间继续编辑');
+  await page.evaluate(async (id) => {
+    await window.desktop.invoke('flushDraft');
+    await window.desktop.invoke('selectSession', id);
+  }, f.sessionId);
+  await page.getByRole('button', { name: '添加图片', exact: true }).click();
+  assert.equal(await app.evaluate(() => globalThis.restorePickerCalls), 0);
+  await app.evaluate(() => globalThis.finishDraftImageRead());
+  await imageCount(6);
+  assert.equal(await input.inputValue(), '恢复图片期间继续编辑');
+  assert.equal((await saved()).draft, '恢复图片期间继续编辑');
+  assert.equal(await app.evaluate(() => globalThis.restorePickerCalls), 1);
+  await page.getByRole('button', { name: '移除图片 image-payload', exact: true }).first().click();
+  await imageCount(5);
+  console.log('PASS lazy image restore survives typing/state broadcasts and serializes added attachments');
+
   stage = 'real Pi image delivery';
   await input.fill('IMAGE_INPUT_E2E');
   await page.getByRole('button', { name: '发送任务', exact: true }).click();

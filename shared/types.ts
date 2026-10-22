@@ -40,7 +40,7 @@ export interface Session {
   file?: string;
   draft: string;
   attachments: string[];
-  images?: ImageAttachment[];
+  images?: DraftImage[];
   draftSnippets?: DraftSnippet[];
   stats?: { tokens?: number; cost?: number };
   cwd?: string;
@@ -156,6 +156,12 @@ export interface ImageAttachment {
   name: string;
   data: string;
   mimeType: string;
+}
+/** Draft indexes and state broadcasts carry references, never image bodies. */
+export interface DraftImage extends Omit<ImageAttachment, 'data'> {
+  data?: string;
+  file?: string;
+  bytes?: number;
 }
 export interface PiCommand {
   name: string;
@@ -370,6 +376,7 @@ export type AppEvent =
   | { type: 'storage'; storage: StorageStatus }
   | { type: 'update'; update: UpdateState }
   | { type: 'runtime'; runtime: Runtime }
+  | { type: 'environment'; environment: Environment }
   | { type: 'runtimeRemoved'; sessionId: string }
   | { type: 'runtimePatch'; patch: RuntimePatch };
 /** Apply a patch; arrays before the change point keep their identity so the UI can skip them. */
@@ -392,7 +399,7 @@ export function applyRuntimePatch(previous: Runtime, patch: RuntimePatch): Runti
 }
 export interface Bootstrap extends StateSnapshot {
   runtime: Runtime;
-  environment: Environment;
+  environment?: Environment;
   dataDir: string;
   storage: StorageStatus;
   update: UpdateState;
@@ -434,9 +441,11 @@ export interface ApiMap {
   };
   setEntryLabel: { args: [string, string, string]; result: void };
   saveDraft: { args: [string, string, string[], ImageAttachment[]?, DraftSnippet[]?]; result: void };
+  flushDraft: { args: []; result: void };
   consumeDraft: { args: [string, string, string[], ImageAttachment[]]; result: void };
   saveView: { args: [string, number, string[]]; result: void };
   readHistory: { args: [string]; result: Message[] };
+  readDraftImages: { args: [string]; result: ImageAttachment[] };
   detect: { args: []; result: Environment };
   choosePath: { args: ['pi' | 'node' | 'agent' | 'editor']; result: string | null };
   saveSettings: { args: [Partial<Settings>]; result: void };

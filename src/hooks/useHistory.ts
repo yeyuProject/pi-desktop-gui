@@ -15,13 +15,24 @@ export function useHistory(
   const [history, setHistory] = useState<{ sessionId: string; messages: Message[]; ready: boolean }>();
   const restore = useRef<{ id: string; top?: number } | undefined>(undefined);
   const report = useRef(setError);
+  const restoredSession = useRef<string | undefined>(undefined);
   report.current = setError;
+  const hasLiveHistory = runtime.sessionId === selected?.id && runtime.messages.length > 0;
   useEffect(() => {
     if (!selected) return;
     let active = true;
-    restore.current = { id: selected.id, top: selected.scrollTop };
-    autoScroll.current = selected.scrollTop === undefined;
+    if (restoredSession.current !== selected.id) {
+      restoredSession.current = selected.id;
+      restore.current = { id: selected.id, top: selected.scrollTop };
+      autoScroll.current = selected.scrollTop === undefined;
+    }
     setHistory({ sessionId: selected.id, messages: [], ready: false });
+    // The live runtime already owns a complete transcript. Reading it over IPC
+    // again would retain a second copy of every message (including images).
+    if (hasLiveHistory) {
+      setHistory({ sessionId: selected.id, messages: [], ready: true });
+      return;
+    }
     void window.desktop
       .invoke('readHistory', selected.id)
       .then((messages) => {
@@ -33,7 +44,7 @@ export function useHistory(
     return () => {
       active = false;
     };
-  }, [selected?.id]);
+  }, [selected?.id, hasLiveHistory]);
   const own = runtime.sessionId === selected?.id;
   const messages = useMemo(
     () =>

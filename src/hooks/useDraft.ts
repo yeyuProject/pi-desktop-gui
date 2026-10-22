@@ -63,15 +63,34 @@ export function useDraft({
   const savingDraft = useRef(Promise.resolve<unknown>(undefined));
   const pendingDrafts = useRef(0);
   const loadedDraft = useRef<string | undefined>(undefined);
+  const imageRequest = useRef(0);
+  const imageSession = useRef<string | undefined>(undefined);
+  const loadingImages = useRef<{ id: string; promise: Promise<void> } | undefined>(undefined);
+  const [imagesLoading, setImagesLoading] = useState<string>();
   const attachmentJobs = useRef<Record<string, number>>({});
   const [, updateAttachmentJobs] = useState(0);
-  const isReadingAttachments = () => Boolean(selected && attachmentJobs.current[selected.id]);
+  const isReadingAttachments = () =>
+    Boolean(
+      selected &&
+      (loadedDraft.current !== selected.id ||
+        imagesLoading === selected.id ||
+        attachmentJobs.current[selected.id]),
+    );
   const withAttachments = async (operation: () => Promise<void>) => {
     const id = selected?.id;
     if (!id) return;
     attachmentJobs.current[id] = (attachmentJobs.current[id] ?? 0) + 1;
     updateAttachmentJobs((value) => value + 1);
     try {
+      if (loadingImages.current?.id === id) {
+        const request = imageRequest.current;
+        try {
+          await loadingImages.current.promise;
+        } catch {
+          return;
+        }
+        if (stateRef.current?.selectedSessionId !== id || request !== imageRequest.current) return;
+      }
       await operation();
     } finally {
       if (--attachmentJobs.current[id] === 0) delete attachmentJobs.current[id];
@@ -127,6 +146,11 @@ export function useDraft({
     if (!selected || stateRef.current?.selectedSessionId !== selected.id) return;
     draftRevision.current++;
     const picturesChanged = pictures !== composerDraft.current.images;
+    if (picturesChanged) {
+      imageRequest.current++;
+      loadingImages.current = undefined;
+      setImagesLoading(undefined);
+    }
     composerDraft.current = { draft: value, attachments: files, images: pictures, snippets: pieces };
     setDraft(value);
     setAttachments(files);
@@ -140,6 +164,9 @@ export function useDraft({
     });
   };
   const flushDraft = async () => {
+    // invoke calls from this renderer are ordered. Flush the accepted save now,
+    // before waiting for its acknowledgment, rather than waiting out the debounce.
+    if (pendingDrafts.current) await api.invoke('flushDraft');
     await savingDraft.current;
   };
   const composeDraft = () => composeDraftText(composerDraft.current.draft, composerDraft.current.snippets);
@@ -311,22 +338,64 @@ export function useDraft({
     if (pendingDrafts.current && selected.id === loadedDraft.current) return;
     loadedDraft.current = selected.id;
     composerDraft.current = {
+      ...composerDraft.current,
       draft: selected.draft,
       attachments: selected.attachments,
-      images: selected.images ?? [],
       snippets: selected.draftSnippets ?? [],
     };
     setDraft(selected.draft);
     setAttachments(selected.attachments);
-    setImages(selected.images ?? []);
     setSnippets(selected.draftSnippets ?? []);
-  }, [
-    selected?.id,
-    selected?.draft,
-    selected?.attachments.join('|'),
-    selected?.images?.map((i) => i.id).join('|'),
-    selected?.draftSnippets,
-  ]);
+  }, [selected?.id, selected?.draft, selected?.attachments.join('|'), selected?.draftSnippets]);
+  // Text/state broadcasts must not cancel an in-flight image read. A separate
+  // effect owns image identity; its result merges into the latest typed draft.
+  useEffect(() => {
+    if (!selected) return;
+    if (pendingDrafts.current && selected.id === imageSession.current) return;
+    const currentImages = composerDraft.current.images;
+    const sameImages =
+      imageSession.current === selected.id &&
+      currentImages.length === (selected.images?.length ?? 0) &&
+      currentImages.every((image, index) => image.id === selected.images?.[index].id);
+    imageSession.current = selected.id;
+    const request = ++imageRequest.current;
+    const inline = (selected.images ?? []).every((image) => typeof image.data === 'string');
+    const pictures = sameImages
+      ? currentImages
+      : inline
+        ? ((selected.images ?? []) as ImageAttachment[])
+        : [];
+    composerDraft.current = { ...composerDraft.current, images: pictures };
+    setImages(pictures);
+    setImagesLoading(inline || sameImages ? undefined : selected.id);
+    loadingImages.current = undefined;
+    if (!inline && !sameImages) {
+      let active = true;
+      const promise = api
+        .invoke('readDraftImages', selected.id)
+        .then((loaded) => {
+          if (
+            !active ||
+            request !== imageRequest.current ||
+            stateRef.current?.selectedSessionId !== selected.id
+          )
+            return;
+          composerDraft.current = { ...composerDraft.current, images: loaded };
+          setImages(loaded);
+          setImagesLoading(undefined);
+          loadingImages.current = undefined;
+        })
+        .catch((error) => {
+          if (active && request === imageRequest.current) setError(readableError(error));
+          throw error;
+        });
+      loadingImages.current = { id: selected.id, promise };
+      void promise.catch(() => {});
+      return () => {
+        active = false;
+      };
+    }
+  }, [selected?.id, selected?.images?.map((i) => i.id).join('|')]);
   useEffect(() => {
     setFileResults([]);
     setFileIndex(0);

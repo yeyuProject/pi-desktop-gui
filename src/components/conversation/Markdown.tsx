@@ -8,6 +8,7 @@ import { tokenizeCode } from '../../lib/code-tokens';
 import { splitUserContent } from '../../lib/message-content';
 import { SearchHighlight } from './SearchHighlight';
 import type { SessionMatch } from '../../lib/session-search';
+import { streamingMarkdown, type MarkdownParts } from '../../lib/streaming-markdown';
 const api = window.desktop;
 function codeText(children: ReactNode): string {
   return Children.toArray(children)
@@ -85,11 +86,38 @@ export const markdownComponents = {
   img: ({ src, alt }: { src?: string; alt?: string }) => <MarkdownImage src={src} alt={alt} />,
 };
 export const remarkPlugins = [remarkGfm];
-export const RichText = memo(function RichText({ text }: { text: string }) {
+const MarkdownBlock = memo(function MarkdownBlock({ text }: { text: string }) {
   return (
     <Markdown remarkPlugins={remarkPlugins} skipHtml components={markdownComponents}>
       {text}
     </Markdown>
+  );
+});
+export const RichText = memo(function RichText({
+  text,
+  streaming = false,
+}: {
+  text: string;
+  streaming?: boolean;
+}) {
+  const previous = useRef<MarkdownParts | undefined>(undefined);
+  if (!streaming) {
+    previous.current = undefined;
+    return <MarkdownBlock text={text} />;
+  }
+  const parts = streamingMarkdown(text, previous.current);
+  previous.current = parts;
+  return (
+    <>
+      {parts.blocks.map((block, index) => (
+        <MarkdownBlock key={index} text={block} />
+      ))}
+      {parts.plain ? (
+        <div className="streaming-markdown-text">{parts.tail}</div>
+      ) : (
+        <MarkdownBlock text={parts.tail} />
+      )}
+    </>
   );
 });
 export function MarkdownImage({ src, alt }: { src?: string; alt?: string }) {

@@ -38,7 +38,7 @@ import { WorkspaceWatcher } from './workspace-watch';
 import { projectRules, createAgentRules } from './project-rules';
 import { isEmptySession, hasSessionData, fillSessionUsage } from './session-maintenance';
 import { aggregateUsage } from '../shared/usage';
-import { composeDraftText, matchesDraft } from '../shared/draft';
+import { composeDraftText } from '../shared/draft';
 import { validatePromptTemplate } from '../shared/prompts';
 import {
   readPromptTemplate,
@@ -76,6 +76,7 @@ import {
   type Runtime,
   type Session,
   type StateSnapshot,
+  type Settings,
 } from '../shared/types';
 
 let window: BrowserWindow | undefined, store: Store, service: SessionAgents, workspace: Workspace;
@@ -102,6 +103,32 @@ if (process.env.PI_DESKTOP_DATA_DIR) app.setPath('userData', path.resolve(proces
 const developmentRoot = app.isPackaged ? undefined : app.getAppPath();
 const appUserModelId = app.isPackaged ? 'io.yeyuproject.pi-desktop' : 'io.yeyuproject.pi-desktop.dev';
 let stateRevision = 0;
+let environmentRevision = 0;
+const environmentSettingsKey = (settings: Settings) =>
+  JSON.stringify([settings.piPath, settings.nodePath, agentDirectory(settings)]);
+let environmentSnapshot: { key: string; value: Awaited<ReturnType<typeof detectEnvironment>> } | undefined;
+async function refreshEnvironment(): Promise<Awaited<ReturnType<typeof detectEnvironment>>> {
+  const revision = ++environmentRevision;
+  const settings = store.state.settings;
+  const key = environmentSettingsKey(settings);
+  const environment = await detectEnvironment(settings, developmentRoot).catch((error) => ({
+    piPath: '',
+    supported: false,
+    compatibility: 'unknown' as const,
+    agentDir: agentDirectory(settings),
+    authExists: false,
+    modelsExist: false,
+    errors: [(error as Error).message],
+  }));
+  if (revision === environmentRevision) {
+    // Layout/theme saves replace settings too; only Pi paths invalidate a probe.
+    if (key !== environmentSettingsKey(store.state.settings)) return refreshEnvironment();
+    environmentSnapshot = { key, value: environment };
+    send({ type: 'environment', environment });
+  }
+  return environment;
+}
+let searchController: AbortController | undefined;
 // Broadcasts, bootstrap and completion reads share one non-persistent sequence.
 const stateSnapshot = (state = store.state): StateSnapshot => ({
   state: structuredClone(store.visibleState(state)),
@@ -507,12 +534,15 @@ const handlers: Record<keyof ApiMap, (...args: any[]) => any> = {
     );
   },
   bootstrap: async () => {
-    const environment = await detectEnvironment(store.state.settings, developmentRoot);
+    void refreshEnvironment().catch(() => {});
     service.resync();
     return {
       ...stateSnapshot(),
       runtime: service.runtime,
-      environment,
+      environment:
+        environmentSnapshot?.key === environmentSettingsKey(store.state.settings)
+          ? environmentSnapshot.value
+          : undefined,
       dataDir: store.dir,
       storage: store.storage,
       update: updates.state,
@@ -743,7 +773,15 @@ const handlers: Record<keyof ApiMap, (...args: any[]) => any> = {
   },
   searchSessions: async (query) => {
     text(query, 200);
-    return searchSessionContents(store.durableSessions(), query);
+    searchController?.abort();
+    const controller = new AbortController();
+    searchController = controller;
+    try {
+      return await searchSessionContents(store.durableSessions(), query, controller.signal);
+    } catch (error) {
+      if (controller.signal.aborted) return [];
+      throw error;
+    }
   },
   piSessions: async () => {
     const known = new Set(store.state.sessions.filter((s) => s.file).map((s) => pathKey(s.file!)));
@@ -877,13 +915,14 @@ const handlers: Record<keyof ApiMap, (...args: any[]) => any> = {
     if (images !== undefined) s.images = images;
     await store.scheduleSave();
   },
+  flushDraft: () => store.flush(),
   consumeDraft: async (id, expected, attachments, images) => {
     text(id, 100);
     text(expected);
     strings(attachments);
     validateImages(images);
     const s = store.session(id);
-    if (matchesDraft(s, expected, attachments, images)) {
+    if (store.matchesDraft(s, expected, attachments, images)) {
       if (s.draft || s.attachments.length || s.images?.length || s.draftSnippets?.length)
         store.promoteSession(id);
       s.draft = '';
@@ -906,7 +945,11 @@ const handlers: Record<keyof ApiMap, (...args: any[]) => any> = {
     text(id, 100);
     return service.get(id).history(id);
   },
-  detect: () => detectEnvironment(store.state.settings, developmentRoot),
+  readDraftImages: (id) => {
+    text(id, 100);
+    return store.draftImages(id);
+  },
+  detect: refreshEnvironment,
   choosePath: async (kind) => {
     if (kind === 'agent') {
       const p = await dialog.showOpenDialog(window!, {
@@ -1756,6 +1799,7 @@ else {
             'installUpdate',
             'selectSession',
             'readHistory',
+            'readDraftImages',
             'searchSessions',
             'piSessions',
             'detect',
@@ -1810,8 +1854,10 @@ else {
               'copy',
               'copyImage',
               'saveDraft',
+              'flushDraft',
               'saveView',
               'readHistory',
+              'readDraftImages',
               'stop',
               'stopAll',
               'forceStop',

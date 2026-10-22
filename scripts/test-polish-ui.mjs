@@ -137,7 +137,15 @@ try {
   for (let index = 0; index < protectedSessions.length; index++) {
     const saved = concurrent.state.sessions.find((s) => s.id === protectedSessions[index].id);
     assert.ok(saved);
-    for (const [key, value] of Object.entries(protectedFields[index])) assert.deepEqual(saved[key], value);
+    for (const [key, value] of Object.entries(protectedFields[index])) {
+      if (key === 'images') {
+        assert.ok(saved.images.every((image) => image.data === undefined && image.file));
+        assert.deepEqual(
+          await page.evaluate((id) => window.desktop.invoke('readDraftImages', id), saved.id),
+          value,
+        );
+      } else assert.deepEqual(saved[key], value);
+    }
   }
   const raceId = cleanupRace.id;
   assert.ok(concurrent.state.sessions.some((s) => s.id === raceId));
@@ -162,7 +170,15 @@ try {
   for (let index = 0; index < protectedSessions.length; index++) {
     const saved = afterCleanup.sessions.find((s) => s.id === protectedSessions[index].id);
     assert.ok(saved);
-    for (const [key, value] of Object.entries(protectedFields[index])) assert.deepEqual(saved[key], value);
+    for (const [key, value] of Object.entries(protectedFields[index])) {
+      if (key === 'images') {
+        assert.ok(saved.images.every((image) => image.data === undefined && image.file));
+        assert.deepEqual(
+          await page.evaluate((id) => window.desktop.invoke('readDraftImages', id), saved.id),
+          value,
+        );
+      } else assert.deepEqual(saved[key], value);
+    }
   }
   console.log('PASS confirmed cleanup rechecks an arriving draft and preserves every protected record');
   await page.evaluate((id) => window.desktop.invoke('selectSession', id), result.third.id);

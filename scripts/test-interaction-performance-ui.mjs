@@ -121,12 +121,13 @@ try {
   ]) {
     await page.evaluate(
       ({ method, args }) => {
-        void window.desktop.invoke(method, ...args);
+        window.interactionConfirmation = window.desktop.invoke(method, ...args);
       },
       { method, args },
     );
     const confirmation = page.getByRole('dialog').filter({ hasText: title });
     await confirmation.getByRole('button', { name: '取消', exact: true }).click();
+    await page.evaluate(() => window.interactionConfirmation);
   }
   assert.deepEqual(errors, []);
   console.log('PASS provider logout and package removal require explicit confirmation');
@@ -135,6 +136,23 @@ try {
     await page.screenshot({ path: 'test-results/interaction-performance-failed.png' });
   throw error;
 } finally {
-  await app?.close();
+  // A Pi settings session can still be settling when the assertions finish.
+  // Close only this isolated fixture, including its normal stop confirmation.
+  await app
+    ?.evaluate(({ BrowserWindow }) =>
+      BrowserWindow.getAllWindows()[0]?.webContents.executeJavaScript(
+        `void window.desktop.onEvent(event => {
+      if (event.type === 'appDialog') void window.desktop.invoke('respondAppDialog', event.dialog.id,
+        event.dialog.message === 'Pi 仍在执行任务' ? 1 : event.dialog.cancelId);
+    })`,
+      ),
+    )
+    .catch(() => {});
+  if (app) {
+    // Keep the renderer connection alive while the app answers its exit dialog.
+    const closed = app.waitForEvent('close', { timeout: 60000 });
+    await app.evaluate(({ app }) => app.quit());
+    await closed;
+  }
   await provider.close();
 }

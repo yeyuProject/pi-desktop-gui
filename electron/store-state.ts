@@ -122,7 +122,8 @@ export function parseState(value: unknown) {
               !object(image) ||
               typeof image.id !== 'string' ||
               typeof image.name !== 'string' ||
-              typeof image.data !== 'string' ||
+              (typeof image.data !== 'string' &&
+                !(typeof image.file === 'string' && /^[a-f0-9]{64}\.bin$/.test(image.file))) ||
               typeof image.mimeType !== 'string',
           ))) ||
       (row.approvalMode !== undefined && !['auto', 'confirm', 'readonly'].includes(String(row.approvalMode)))

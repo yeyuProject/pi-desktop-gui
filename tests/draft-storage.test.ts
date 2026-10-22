@@ -43,6 +43,8 @@ test('typing is coalesced, flush saves immediately, and images survive a restart
   await restarted.load();
   assert.equal(restarted.session(session.id).draft, 'abc');
   assert.deepEqual(restarted.session(session.id).images, session.images);
+  assert.equal(restarted.session(session.id).images?.[0].data, undefined);
+  assert.equal((await restarted.draftImages(session.id))[0].data, png);
   session.draft = 'next';
   await store.scheduleSave();
   assert.equal(stateWrites, 2);
@@ -64,7 +66,7 @@ test('legacy inline images migrate only after a successful save and backup remai
   const restored = new Store(dir);
   await restored.load();
   assert.ok(restored.storage.recovery?.recoveredFrom);
-  assert.deepEqual(restored.session(session.id).images, session.images);
+  assert.deepEqual(await restored.draftImages(session.id), session.images);
 });
 
 for (const currentIndex of ['present', 'missing', 'corrupt'] as const) {
@@ -89,3 +91,27 @@ for (const currentIndex of ['present', 'missing', 'corrupt'] as const) {
     assert.equal(await fs.readFile(path.join(dir, 'state.backup-1.json'), 'utf8'), backup);
   });
 }
+
+test('state snapshots omit image bodies, persisted references consume only the same image bytes', async (t) => {
+  const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'pi-draft-references-'));
+  const store = new Store(dir);
+  t.after(() => fs.rm(dir, { recursive: true, force: true }));
+  await store.load();
+  const session = store.createSession();
+  const image = { id: 'same-id', name: 'picture.png', mimeType: 'image/png', data: png };
+  session.images = [image];
+  assert.equal('data' in store.visibleState().sessions[0].images![0], false);
+  await store.save();
+  assert.equal(session.images[0].data, undefined);
+  assert.deepEqual(await store.draftImages(session.id), [image]);
+  assert.equal(store.matchesDraft(session, '', [], [image]), true);
+  const changed = Buffer.concat([Buffer.from(png, 'base64'), Buffer.from('changed')]).toString('base64');
+  assert.equal(store.matchesDraft(session, '', [], [{ ...image, data: changed }]), false);
+  assert.equal(store.matchesDraft(session, '', [], []), false);
+  const restarted = new Store(dir);
+  await restarted.load();
+  assert.equal(restarted.state.sessions[0].images?.[0].data, undefined);
+  assert.deepEqual(await restarted.draftImages(session.id), [image]);
+  await fs.writeFile(path.join(dir, 'draft-images', session.images[0].file!), 'tampered');
+  await assert.rejects(restarted.draftImages(session.id), /校验失败/);
+});
