@@ -39,7 +39,13 @@ try {
   await page.keyboard.press('Escape');
   await expect(page.locator('.context-menu')).toHaveCount(0);
   await expect(inspector).toBeVisible();
+  await page.keyboard.press(mod + '+,');
+  const settingsOnTop = page.getByRole('dialog', { name: '设置', exact: true });
+  await expect(settingsOnTop.getByRole('textbox', { name: 'Pi 入口', exact: true })).toBeFocused();
   await app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows()[0].setSize(1050, 800));
+  await expect(settingsOnTop.getByRole('textbox', { name: 'Pi 入口', exact: true })).toBeFocused();
+  await page.keyboard.press('Escape');
+  await expect(settingsOnTop).toHaveCount(0);
   await expect(page.getByRole('dialog', { name: '工作区检查' })).toBeVisible();
   await page.keyboard.press(mod + '+j');
   await expect(inspector).toHaveCount(0);

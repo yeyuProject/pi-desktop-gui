@@ -1,7 +1,32 @@
+import type { ImageAttachment, Session } from './types';
 export interface DraftSnippet {
   id: string;
   text: string;
   offset: number;
+}
+/** A sent snapshot may consume only the exact draft, including attachments. */
+export function matchesDraft(
+  session: Session,
+  text: string,
+  attachments: string[],
+  images: ImageAttachment[],
+) {
+  const current = session.images ?? [];
+  return (
+    composeDraftText(session.draft, session.draftSnippets ?? []) === text &&
+    session.attachments.length === attachments.length &&
+    session.attachments.every((file, index) => file === attachments[index]) &&
+    current.length === images.length &&
+    current.every((image, index) => {
+      const other = images[index];
+      return (
+        image.id === other.id &&
+        image.name === other.name &&
+        image.mimeType === other.mimeType &&
+        image.data === other.data
+      );
+    })
+  );
 }
 export function composeDraftText(draft: string, snippets: DraftSnippet[]): string {
   let result = '',

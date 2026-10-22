@@ -38,7 +38,7 @@ import { WorkspaceWatcher } from './workspace-watch';
 import { projectRules, createAgentRules } from './project-rules';
 import { isEmptySession, hasSessionData, fillSessionUsage } from './session-maintenance';
 import { aggregateUsage } from '../shared/usage';
-import { composeDraftText } from '../shared/draft';
+import { composeDraftText, matchesDraft } from '../shared/draft';
 import { validatePromptTemplate } from '../shared/prompts';
 import {
   readPromptTemplate,
@@ -877,11 +877,13 @@ const handlers: Record<keyof ApiMap, (...args: any[]) => any> = {
     if (images !== undefined) s.images = images;
     await store.scheduleSave();
   },
-  consumeDraft: async (id, expected) => {
+  consumeDraft: async (id, expected, attachments, images) => {
     text(id, 100);
     text(expected);
+    strings(attachments);
+    validateImages(images);
     const s = store.session(id);
-    if (composeDraftText(s.draft, s.draftSnippets ?? []) === expected) {
+    if (matchesDraft(s, expected, attachments, images)) {
       if (s.draft || s.attachments.length || s.images?.length || s.draftSnippets?.length)
         store.promoteSession(id);
       s.draft = '';
@@ -1193,8 +1195,9 @@ const handlers: Record<keyof ApiMap, (...args: any[]) => any> = {
       defaultId: 0,
       cancelId: 0,
     });
-    if (result.response !== 1) return;
+    if (result.response !== 1) return false;
     await service.get(id).admin(id, 'logout', { provider });
+    return true;
   },
   cancelLogin: (id) => {
     text(id, 100);

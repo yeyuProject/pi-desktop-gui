@@ -52,7 +52,7 @@ export function useLayer(
     const backdrop = element.closest<HTMLElement>('.modal-backdrop');
     const oldZ = backdrop?.style.zIndex;
     if (backdrop) backdrop.style.zIndex = String(1000 + layers.length);
-    if (trap)
+    if (trap && topLayer() === layer)
       (
         element.querySelector<HTMLElement>('[data-autofocus],input:not(:disabled),textarea:not(:disabled)') ??
         element.querySelector<HTMLElement>(focusable)

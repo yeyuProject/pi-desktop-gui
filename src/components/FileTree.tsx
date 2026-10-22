@@ -175,7 +175,7 @@ export function FileTree(props: FileTreeProps) {
         </IconButton>
       </div>
       <div className="file-browser-tree" hidden={!!query.trim()}>
-        <Directory {...props} locate={locate} />
+        <Directory key={props.project.id} {...props} locate={locate} />
       </div>
       {!!query.trim() && (
         <div className="file-search-results">

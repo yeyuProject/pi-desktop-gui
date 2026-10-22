@@ -9,7 +9,7 @@ import { agentDirectory, preparePi } from './environment';
 import { Store, readSessionFile } from './store';
 import { Workspace, attachmentPrompt } from './workspace';
 import { CheckpointRecorder, type WorkspaceRequest } from './checkpoint-recorder';
-import { composeDraftText } from '../shared/draft';
+import { matchesDraft } from '../shared/draft';
 import { stripAnsi } from '../shared/ansi';
 import {
   busy,
@@ -1357,7 +1357,7 @@ export class AgentService extends EventEmitter {
         const state = await this.rpc!.request('get_state');
         if (!state.isStreaming && !state.isCompacting && !state.pendingMessageCount) this.status('idle');
       }
-      if (composeDraftText(session.draft, session.draftSnippets ?? []) === text) {
+      if (matchesDraft(session, text, attachments, images)) {
         session.draft = '';
         session.attachments = [];
         session.images = [];

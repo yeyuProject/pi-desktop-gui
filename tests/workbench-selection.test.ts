@@ -146,6 +146,7 @@ function harness(
     composeDraft: () => '',
     flushDraft: async () => {},
     isReadingAttachments: () => false,
+    getDraftRevision: () => 0,
     snippets: [],
   };
   const workspace = {
@@ -741,6 +742,34 @@ test('only the current session restores its saved scroll position', async () => 
   f.fireTimers(80);
   assert.equal(positions.at(-1), 120);
   assert.ok(!positions.includes(45), 'an obsolete history must not restore its position');
+  f.unmount();
+});
+
+test('edits during the draft save barrier cancel the old send snapshot', async () => {
+  const calls: string[] = [];
+  const saving = deferred();
+  const f = harness(async (method) => {
+    calls.push(method);
+    return [];
+  });
+  let revision = 0;
+  f.draft.composeDraft = () => 'same prompt';
+  f.draft.getDraftRevision = () => revision;
+  f.draft.flushDraft = () => saving.promise;
+  f.view.environment.supported = true;
+  f.select('A');
+  f.flush();
+  const sending = f.current.send();
+  f.flush();
+  revision++;
+  f.draft.attachments = ['added-during-save.txt'] as never[];
+  f.render();
+  saving.resolve();
+  await sending;
+  await f.settle();
+  assert.ok(!calls.includes('send'));
+  assert.deepEqual(f.current.attachments, ['added-during-save.txt']);
+  assert.match(f.current.notice, /草稿.*变化/);
   f.unmount();
 });
 

@@ -59,6 +59,7 @@ export function useDraft({
   );
   const recall = useRef(-1);
   const composerDraft = useRef({ draft, attachments, images, snippets });
+  const draftRevision = useRef(0);
   const savingDraft = useRef(Promise.resolve<unknown>(undefined));
   const pendingDrafts = useRef(0);
   const loadedDraft = useRef<string | undefined>(undefined);
@@ -124,6 +125,7 @@ export function useDraft({
     pieces = moveSnippetOffsets(composerDraft.current.draft, value, composerDraft.current.snippets),
   ) => {
     if (!selected || stateRef.current?.selectedSessionId !== selected.id) return;
+    draftRevision.current++;
     const picturesChanged = pictures !== composerDraft.current.images;
     composerDraft.current = { draft: value, attachments: files, images: pictures, snippets: pieces };
     setDraft(value);
@@ -404,6 +406,7 @@ export function useDraft({
     completeCommand,
     persistDraft,
     flushDraft,
+    getDraftRevision: () => draftRevision.current,
     onDraft,
     focusComposer,
     attachmentsPending: isReadingAttachments(),

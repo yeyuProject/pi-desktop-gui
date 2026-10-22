@@ -146,7 +146,7 @@ export function ProvidersTab({
           title={idleReason || (!provider ? '请先选择要退出的供应商' : '')}
           onClick={() =>
             void run(async () => {
-              await api.invoke('logout', session.id, provider);
+              if (!(await api.invoke('logout', session.id, provider))) return;
               await refresh();
               setNotice('已移除保存的登录凭据；其他来源的凭据仍独立生效，当前来源显示在供应商名称后。');
             })

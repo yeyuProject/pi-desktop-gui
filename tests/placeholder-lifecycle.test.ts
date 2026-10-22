@@ -12,7 +12,7 @@ import { SessionAgents } from '../electron/session-agents';
 import { Workspace } from '../electron/workspace';
 import { validateImages } from '../electron/images';
 import { PiRpc } from '../electron/rpc';
-import { composeDraftText } from '../shared/draft';
+import { composeDraftText, matchesDraft } from '../shared/draft';
 import type { AppEvent, StateSnapshot } from '../shared/types';
 
 // Compile the production IPC handlers/boundaries, rather than copying their behavior.
@@ -100,6 +100,7 @@ async function fixture(t: TestContext, dependencies: Record<string, unknown> = {
       send,
       validateImages,
       composeDraftText,
+      matchesDraft,
       fs,
       path,
       assertTerminalClosed: async () => {},
@@ -120,6 +121,19 @@ async function fixture(t: TestContext, dependencies: Record<string, unknown> = {
   });
   return { store, agents, events, ...operations };
 }
+
+test('consuming a sent draft preserves attachments added while the request was pending', async (t) => {
+  const f = await fixture(t);
+  const session = f.store.createSession();
+  session.draft = 'same text';
+  session.attachments = ['later.txt'];
+  await f.handlers.consumeDraft(session.id, 'same text', [], []);
+  assert.equal(session.draft, 'same text');
+  assert.deepEqual(session.attachments, ['later.txt']);
+  await f.handlers.consumeDraft(session.id, 'same text', ['later.txt'], []);
+  assert.equal(session.draft, '');
+  assert.deepEqual(session.attachments, []);
+});
 function holdWriter(t: TestContext, store: Store, failure?: Error) {
   const entered = deferred(),
     release = deferred();

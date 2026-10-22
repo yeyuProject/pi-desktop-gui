@@ -434,7 +434,7 @@ export interface ApiMap {
   };
   setEntryLabel: { args: [string, string, string]; result: void };
   saveDraft: { args: [string, string, string[], ImageAttachment[]?, DraftSnippet[]?]; result: void };
-  consumeDraft: { args: [string, string]; result: void };
+  consumeDraft: { args: [string, string, string[], ImageAttachment[]]; result: void };
   saveView: { args: [string, number, string[]]; result: void };
   readHistory: { args: [string]; result: Message[] };
   detect: { args: []; result: Environment };
@@ -473,7 +473,7 @@ export interface ApiMap {
   packageAction: { args: [string, 'install' | 'remove' | 'update', string, boolean]; result: void };
   providers: { args: [string]; result: ProviderInfo[] };
   login: { args: [string, string, 'oauth' | 'api_key']; result: void };
-  logout: { args: [string, string]; result: void };
+  logout: { args: [string, string]; result: boolean };
   cancelLogin: { args: [sessionId: string]; result: void };
   configRead: { args: [string, ConfigKind, boolean]; result: ConfigDocument };
   configSave: { args: [string, ConfigKind, boolean, ConfigDocument]; result: ConfigSaveResult };

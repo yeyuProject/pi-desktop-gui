@@ -178,6 +178,7 @@ export function useWorkbench() {
     composeDraft,
     flushDraft,
     isReadingAttachments,
+    getDraftRevision,
     snippets,
   } = draftState;
   const workspace = useWorkspace({
@@ -318,6 +319,7 @@ export function useWorkbench() {
 
   async function send() {
     if (isReadingAttachments()) return;
+    const draftRevision = getDraftRevision();
     const target = selected?.id;
     if (
       !target ||
@@ -342,6 +344,10 @@ export function useWorkbench() {
     setPending(true);
     await attempt(async () => {
       await flushDraft();
+      if (getDraftRevision() !== draftRevision) {
+        setNotice('草稿在准备发送时发生变化，请确认后重新发送');
+        return;
+      }
       if (isReadingAttachments()) return;
       if (
         target !== receivedState.current.state?.selectedSessionId ||
@@ -350,11 +356,11 @@ export function useWorkbench() {
       )
         return;
       if (await handleBuiltin(sent)) {
-        await api.invoke('consumeDraft', selected.id, sent);
+        await api.invoke('consumeDraft', selected.id, sent, attachments, images);
         setHideCommands(true);
       } else if (/^\/\/\S/.test(sent)) {
         await api.invoke('send', selected.id, sent.slice(1), attachments, sendMode, images);
-        await api.invoke('consumeDraft', selected.id, sent);
+        await api.invoke('consumeDraft', selected.id, sent, attachments, images);
       } else await api.invoke('send', selected.id, sent, attachments, sendMode, images);
     });
     setPending(false);
