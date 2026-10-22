@@ -87,6 +87,11 @@ try {
   await modal.locator('.feature-notice').filter({ hasText: '凭据已保存' }).waitFor({ timeout: 30000 });
   assert.ok(!(await modal.innerText().then((t) => t.includes('local-ui-test-key'))));
   await modal.getByRole('button', { name: '退出登录', exact: true }).click();
+  await page
+    .getByRole('dialog')
+    .filter({ hasText: '退出供应商' })
+    .getByRole('button', { name: '退出登录', exact: true })
+    .click();
   await modal.locator('.feature-notice').filter({ hasText: '已移除' }).waitFor();
   await modal.getByText('添加自定义供应商', { exact: true }).click();
   await modal.getByRole('textbox', { name: '新供应商标识' }).fill('ui-provider');
@@ -163,6 +168,11 @@ try {
   await waitForState((b) => b.runtime.commands.some((c) => c.name === 'desktop-test-prompt'));
   await modal.getByRole('button', { name: '更新资源包', exact: true }).click();
   await modal.getByRole('button', { name: '移除', exact: true }).click();
+  await page
+    .getByRole('dialog')
+    .filter({ hasText: '移除资源包' })
+    .getByRole('button', { name: '移除', exact: true })
+    .click();
   await waitForState((b) => !b.runtime.commands.some((c) => c.name === 'desktop-test-prompt'));
   await modal.getByRole('button', { name: '更新资源包', exact: true }).waitFor();
   await page.waitForFunction(() =>

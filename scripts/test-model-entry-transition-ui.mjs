@@ -89,11 +89,15 @@ try {
         });
       }
       const runtime = event.runtime ?? event.patch;
-      if (runtime?.sessionId)
-        window.entryRuntimes.set(runtime.sessionId, {
+      if (runtime?.sessionId) {
+        const next = {
           ...window.entryRuntimes.get(runtime.sessionId),
           ...runtime,
-        });
+        };
+        for (const key of event.patch?.removed ?? []) delete next[key];
+        window.entryRuntimes.set(runtime.sessionId, next);
+      }
+      if (event.type === 'runtimeRemoved') window.entryRuntimes.delete(event.sessionId);
     });
     const { state, runtime } = await window.desktop.invoke('bootstrap');
     window.entryState = state;
@@ -203,10 +207,13 @@ try {
     // next New Chat action exercise navigation to a different chat.
     const draft = `Navigation fixture ${id}`;
     await page.getByRole('textbox', { name: '任务输入' }).fill(draft);
-    await page.waitForFunction(
-      ({ id, draft }) => window.entryState.sessions.find((session) => session.id === id)?.draft === draft,
-      { id, draft },
-    );
+    // Typing no longer broadcasts the full state; observe the saved draft directly.
+    await expect
+      .poll(async () => {
+        const state = JSON.parse(await fs.readFile(path.join(f.dataDir, 'state.json'), 'utf8'));
+        return state.sessions.find((session) => session.id === id)?.draft;
+      })
+      .toBe(draft);
   };
   const select = (id) => page.locator(`[data-session-id="${id}"] > button`).first().click();
   const nativeNewChat = () =>
