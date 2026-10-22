@@ -7,7 +7,6 @@ import {
   LoaderCircle,
   Download,
   MoreHorizontal,
-  MessageSquare,
   Pencil,
   Trash2,
   Import,
@@ -162,7 +161,7 @@ export function Sidebar(
         aria-current={s.id === selected?.id ? 'page' : undefined}
         onClick={() => void selectSession(s)}
       >
-        {s.pinned ? <Pin size={14} className="pin-icon" /> : <MessageSquare size={14} />}
+        {s.pinned && <Pin size={14} className="pin-icon" />}
         <span>{s.title}</span>
         {s.unread && <i className="unread" />}
         {busy(s.id === runtime.sessionId ? runtime.status : s.lastStatus) && (
