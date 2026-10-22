@@ -451,6 +451,7 @@ export class AgentService extends EventEmitter {
       case 'tool_execution_start':
         r.tools.push({
           id: record.toolCallId,
+          parentToolCallId: record.parentToolCallId,
           name: record.toolName,
           args: record.args ?? {},
           status: 'running',
@@ -473,6 +474,7 @@ export class AgentService extends EventEmitter {
         if (!t) {
           t = {
             id: record.toolCallId,
+            parentToolCallId: record.parentToolCallId,
             name: record.toolName,
             args: {},
             status: 'running',

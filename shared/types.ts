@@ -10,6 +10,7 @@ import type { PiCompatibility } from './pi-version';
 import type { UpdateState } from './app-update';
 import type { ModelErrorKind } from './errors';
 import type { DraftSnippet } from './draft';
+import type { NestedToolCalls } from '@earendil-works/pi-ai';
 export type { DraftSnippet } from './draft';
 export type { ApprovalMode, ApprovalRequest } from './approval';
 export type RunStatus =
@@ -113,6 +114,7 @@ export interface Message {
   timestamp?: number;
   toolCallId?: string;
   toolName?: string;
+  nestedCalls?: NestedToolCalls;
   isError?: boolean;
   stopReason?: string;
   errorMessage?: string;
@@ -120,6 +122,7 @@ export interface Message {
 }
 export interface ToolActivity {
   id: string;
+  parentToolCallId?: string;
   name: string;
   args: Record<string, unknown>;
   status: 'running' | 'done' | 'error';

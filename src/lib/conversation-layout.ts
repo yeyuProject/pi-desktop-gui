@@ -1,6 +1,42 @@
 import { messageText, type Message, type ToolActivity } from '../../shared/types';
 import { splitUserContent } from './message-content';
 const readOnly = new Set(['read', 'grep', 'find', 'ls', 'tool_search']);
+
+/** Nested calls have live tool events but no separate transcript message. */
+export function placeRuntimeTools(messages: Message[], tools: ToolActivity[]) {
+  const results = new Set<string>();
+  const messageForTool = new Map<string, number>();
+  messages.forEach((message, index) => {
+    if (message.role !== 'toolResult') return;
+    if (message.toolCallId) {
+      results.add(message.toolCallId);
+      messageForTool.set(message.toolCallId, index);
+    }
+    for (const call of message.nestedCalls?.calls ?? []) messageForTool.set(call.id, index);
+  });
+  const byId = new Map(tools.map((tool) => [tool.id, tool]));
+  const afterMessage = new Map<number, ToolActivity[]>();
+  const trailing: ToolActivity[] = [];
+  for (const tool of tools) {
+    if (results.has(tool.id)) continue;
+    let id: string | undefined = tool.id;
+    const seen = new Set<string>();
+    while (id && !messageForTool.has(id) && !seen.has(id)) {
+      seen.add(id);
+      id = byId.get(id)?.parentToolCallId;
+    }
+    const index = id ? messageForTool.get(id) : undefined;
+    if (index === undefined) trailing.push(tool);
+    else {
+      messageForTool.set(tool.id, index);
+      const siblings = afterMessage.get(index) ?? [];
+      siblings.push(tool);
+      afterMessage.set(index, siblings);
+    }
+  }
+  return { afterMessage, trailing, messageForTool };
+}
+
 export function hideRecoveredErrors(messages: Message[]): Message[] {
   const result: Message[] = [];
   let recovered = false;

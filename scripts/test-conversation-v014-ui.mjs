@@ -122,16 +122,17 @@ try {
   await page.getByRole('textbox', { name: '任务输入' }).waitFor();
   await app.evaluate(({ ipcMain }, runtime) => {
     globalThis.conversationCalls = [];
+    globalThis.conversationRuntime = runtime;
     const handler = ipcMain._invokeHandlers.get('desktop:invoke');
     ipcMain.removeHandler('desktop:invoke');
     ipcMain.handle('desktop:invoke', async (event, method, args) => {
-      if (method === 'readHistory') return runtime.messages;
+      if (method === 'readHistory') return globalThis.conversationRuntime.messages;
       if (['send', 'copy', 'copyImage', 'compact', 'branchSession'].includes(method)) {
         globalThis.conversationCalls.push({ method, args });
         return method === 'compact' ? { tokensBefore: 8000 } : undefined;
       }
       const result = await handler(event, method, args);
-      return method === 'bootstrap' ? { ...result, runtime } : result;
+      return method === 'bootstrap' ? { ...result, runtime: globalThis.conversationRuntime } : result;
     });
   }, runtime);
   await page.reload();
@@ -490,6 +491,105 @@ try {
   assert.deepEqual(errors, []);
   await page.screenshot({ path: path.join(output, 'conversation-v014.png'), animations: 'disabled' });
   console.log('PASS image lightbox zoom, navigation, clipboard IPC and Escape');
+
+  // Codemode children emit live tool events, but only their parent has a transcript result.
+  const nestedTools = ['script', 'script/1', 'script/2'].map((id, index) => ({
+    id,
+    ...(index ? { parentToolCallId: 'script' } : {}),
+    name: index ? 'bash' : 'codemode',
+    args: index ? { command: `echo NESTED_COMMAND_${index}` } : { code: 'local fixture' },
+    status: 'done',
+    output: index ? `NESTED_OUTPUT_${index}` : 'Script completed',
+    startedAt: index + 1,
+    durationMs: 100,
+  }));
+  const ordered = {
+    ...runtime,
+    messages: [
+      { role: 'user', content: 'Check both sources' },
+      {
+        role: 'assistant',
+        content: [{ type: 'toolCall', id: 'script', name: 'codemode', arguments: nestedTools[0].args }],
+      },
+      {
+        role: 'toolResult',
+        toolCallId: 'script',
+        toolName: 'codemode',
+        content: 'Script completed',
+        nestedCalls: {
+          complete: true,
+          calls: nestedTools.slice(1).map((tool) => ({
+            id: tool.id,
+            name: tool.name,
+            arguments: tool.args,
+            status: 'ok',
+          })),
+        },
+      },
+      { role: 'assistant', content: 'TOOL_ORDER_FINAL' },
+      { role: 'user', content: 'Next question' },
+      { role: 'assistant', content: 'TOOL_ORDER_FOLLOWUP' },
+    ],
+    tools: nestedTools,
+  };
+  const showRuntime = (runtime) =>
+    app.evaluate(({ BrowserWindow }, runtime) => {
+      globalThis.conversationRuntime = runtime;
+      BrowserWindow.getAllWindows()[0].webContents.send('desktop:event', { type: 'runtime', runtime });
+    }, runtime);
+  const assertToolOrder = async () => {
+    await page.getByText('TOOL_ORDER_FINAL', { exact: true }).waitFor();
+    assert.equal(await page.locator('.tool-card').count(), 3, 'each tool appears exactly once');
+    const displayed = await page
+      .locator('.thread .tool-card > summary, .thread .message-content')
+      .allTextContents();
+    const positions = [
+      'codemode',
+      'NESTED_COMMAND_1',
+      'NESTED_COMMAND_2',
+      'TOOL_ORDER_FINAL',
+      'TOOL_ORDER_FOLLOWUP',
+    ].map((text) => displayed.findIndex((value) => value.includes(text)));
+    assert.ok(
+      positions.every((index, position) => index >= 0 && (!position || index > positions[position - 1])),
+      `Commands must precede answers: ${JSON.stringify(displayed)}`,
+    );
+  };
+  await showRuntime({
+    ...ordered,
+    status: 'running',
+    messages: ordered.messages.slice(0, 2),
+    tools: nestedTools.map((tool) => ({ ...tool, status: 'running' })),
+  });
+  await page.locator('.tool-card.running').nth(2).waitFor();
+  assert.equal(await page.getByText('TOOL_ORDER_FINAL', { exact: true }).count(), 0);
+  await showRuntime(ordered);
+  await assertToolOrder();
+  await page.reload();
+  await input.waitFor();
+  await assertToolOrder();
+  await page.screenshot({ path: path.join(output, 'nested-tool-order.png'), animations: 'disabled' });
+  console.log('PASS nested commands stay before final answers and later turns through completion and reload');
+
+  await showRuntime({
+    ...ordered,
+    messages: ordered.messages.concat(
+      Array.from({ length: 100 }, (_, index) => ({
+        role: 'assistant',
+        content: `Later history ${index}`,
+      })),
+    ),
+  });
+  await page.reload();
+  await input.waitFor();
+  assert.equal(await page.locator('[data-message-index="2"]').count(), 0);
+  await input.press(modifier + '+f');
+  await page.getByRole('textbox', { name: '查找当前会话' }).fill('NESTED_COMMAND_1');
+  await page.locator('[data-message-index="2"] .search-active > .tool-card[open]').waitFor();
+  assert.match(await page.locator('.search-active > .tool-card > summary').textContent(), /NESTED_COMMAND_1/);
+  assert.equal(await page.locator('.tool-card').count(), 3);
+  assert.deepEqual(errors, []);
+  console.log('PASS search loads the owning history page and highlights only the matching nested command');
 } catch (error) {
   if (page && !page.isClosed()) {
     await page.screenshot({ path: path.join(output, 'failed.png'), animations: 'disabled' });

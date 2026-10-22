@@ -6,11 +6,16 @@ import { ChatMessage } from './conversation/ChatMessage';
 import { ReadinessChecklist } from './ReadinessChecklist';
 const api = window.desktop;
 import type { Workbench } from '../hooks/useWorkbench';
-import type { AppState } from '../../shared/types';
+import type { AppState, ToolActivity } from '../../shared/types';
 import type { ReactNode } from 'react';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { limitForMessage, searchSession } from '../lib/session-search';
-import { conversationTurns, groupConversation, turnThinking } from '../lib/conversation-layout';
+import {
+  conversationTurns,
+  groupConversation,
+  placeRuntimeTools,
+  turnThinking,
+} from '../lib/conversation-layout';
 import { ToolGroupCard } from './conversation/ToolGroupCard';
 import { RetryErrorGroup } from './conversation/RetryErrorGroup';
 import { SearchHighlight } from './conversation/SearchHighlight';
@@ -100,10 +105,19 @@ export function Conversation(
   const threadContent = useRef<HTMLDivElement>(null);
   const threadViewport = useRef({ width: 0, height: 0 });
   const tools = ownRuntime ? runtime.tools : [];
+  const placedTools = useMemo(
+    () => placeRuntimeTools(messages, tools),
+    [messages, runtime.tools, ownRuntime],
+  );
   const modelState = sessionModelState(runtime, selected, state.settings);
   const matches = useMemo(
-    () => searchSession(messages, tools, findOpen ? query : ''),
-    [messages, runtime.tools, ownRuntime, findOpen, query],
+    () =>
+      searchSession(messages, tools, findOpen ? query : '').map((match) =>
+        match.messageIndex === undefined && match.toolId
+          ? { ...match, messageIndex: placedTools.messageForTool.get(match.toolId) }
+          : match,
+      ),
+    [messages, runtime.tools, ownRuntime, placedTools, findOpen, query],
   );
   const activeMatch = matches.length ? matches[matchIndex % matches.length] : undefined;
   const [collapseThinking, setCollapseThinking] = useState(0);
@@ -251,34 +265,52 @@ export function Conversation(
       </div>
     );
   };
-  const renderMessage = (index: number) => (
-    <div
-      key={`${selected?.id}-${index}`}
-      data-message-index={index}
-      data-turn={
-        messages[index].role === 'user' ? turns.find((turn) => turn.index === index)?.turn : undefined
-      }
-      className={
-        activeMatch?.messageIndex === index && activeMatch.section !== 'thinking'
-          ? 'search-active'
-          : undefined
-      }
-    >
-      {activeMatch?.messageIndex === index && activeMatch.section !== 'thinking' && (
-        <div className="search-snippet">
-          <SearchHighlight text={activeMatch.snippet} query={activeMatch.query} />
-        </div>
-      )}
-      {thinkingGroups.filter((group) => group.owner === index).map(renderThinking)}
-      <ChatMessage
-        hideThinking
-        m={messages[index]}
-        last={messages[index] === lastAssistant}
-        ctx={messageContext}
-        match={activeMatch?.messageIndex === index ? activeMatch : undefined}
+  const renderTool = (tool: ToolActivity) => (
+    <div key={tool.id} className={activeMatch?.toolId === tool.id ? 'search-active' : undefined}>
+      <ToolCard
+        tool={tool}
+        expanded={expanded.includes(tool.id)}
+        onToggle={(v) => toggleTool(tool.id, v)}
+        openFile={(p) => void inspectFile(p, 'files')}
+        match={activeMatch?.toolId === tool.id ? activeMatch : undefined}
+        askHunk={messageContext.askHunk}
+        rerun={messageContext.rerun}
+        canRerun={messageContext.canRerun}
       />
     </div>
   );
+  const renderMessage = (index: number) => {
+    const match =
+      activeMatch?.messageIndex === index &&
+      (!activeMatch.toolId || activeMatch.toolId === messages[index].toolCallId)
+        ? activeMatch
+        : undefined;
+    return (
+      <div
+        key={`${selected?.id}-${index}`}
+        data-message-index={index}
+        data-turn={
+          messages[index].role === 'user' ? turns.find((turn) => turn.index === index)?.turn : undefined
+        }
+        className={match && match.section !== 'thinking' ? 'search-active' : undefined}
+      >
+        {match && match.section !== 'thinking' && (
+          <div className="search-snippet">
+            <SearchHighlight text={match.snippet} query={match.query} />
+          </div>
+        )}
+        {thinkingGroups.filter((group) => group.owner === index).map(renderThinking)}
+        <ChatMessage
+          hideThinking
+          m={messages[index]}
+          last={messages[index] === lastAssistant}
+          ctx={messageContext}
+          match={match}
+        />
+        {placedTools.afterMessage.get(index)?.map(renderTool)}
+      </div>
+    );
+  };
 
   return (
     <section className="conversation" inert={inspector && compact}>
@@ -465,23 +497,7 @@ export function Conversation(
                     </ToolGroupCard>
                   ),
           )}
-          {ownRuntime &&
-            runtime.tools
-              .filter((t) => !messages.some((m) => m.role === 'toolResult' && m.toolCallId === t.id))
-              .map((tool) => (
-                <div key={tool.id} className={activeMatch?.toolId === tool.id ? 'search-active' : undefined}>
-                  <ToolCard
-                    tool={tool}
-                    expanded={expanded.includes(tool.id)}
-                    onToggle={(v) => toggleTool(tool.id, v)}
-                    openFile={(p) => void inspectFile(p, 'files')}
-                    match={activeMatch?.toolId === tool.id ? activeMatch : undefined}
-                    askHunk={messageContext.askHunk}
-                    rerun={messageContext.rerun}
-                    canRerun={messageContext.canRerun}
-                  />
-                </div>
-              ))}
+          {placedTools.trailing.map(renderTool)}
           {ownRuntime &&
             approvals.map((d, i) => (
               <ApprovalCard
