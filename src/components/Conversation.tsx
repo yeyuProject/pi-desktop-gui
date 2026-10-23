@@ -9,7 +9,8 @@ import type { Workbench } from '../hooks/useWorkbench';
 import type { AppState, ToolActivity } from '../../shared/types';
 import type { ReactNode } from 'react';
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { limitForMessage, searchSession } from '../lib/session-search';
+import { SessionSearch } from '../lib/session-search';
+import { messagePageSize, messageWindow, windowConversation } from '../lib/message-window';
 import {
   conversationTurns,
   groupConversation,
@@ -101,7 +102,8 @@ export function Conversation(
     [query, setQuery] = useState(''),
     [matchIndex, setMatchIndex] = useState(0);
   const [activeTurn, setActiveTurn] = useState(1),
-    [jumpIndex, setJumpIndex] = useState<number | null>(null);
+    [jumpIndex, setJumpIndex] = useState<{ index: number } | null>(null);
+  const [historyWindow, setHistoryWindow] = useState<{ sessionId?: string; start: number }>();
   const findInput = useRef<HTMLInputElement>(null);
   const threadContent = useRef<HTMLDivElement>(null);
   const threadViewport = useRef({ width: 0, height: 0 });
@@ -111,19 +113,30 @@ export function Conversation(
     [messages, runtime.tools, ownRuntime],
   );
   const modelState = sessionModelState(runtime, selected, state.settings);
+  const search = useMemo(() => new SessionSearch(), [selected?.id, findOpen]);
   const matches = useMemo(
-    () =>
-      searchSession(messages, tools, findOpen ? query : '').map((match) =>
-        match.messageIndex === undefined && match.toolId
-          ? { ...match, messageIndex: placedTools.messageForTool.get(match.toolId) }
-          : match,
-      ),
-    [messages, runtime.tools, ownRuntime, placedTools, findOpen, query],
+    () => search.search(messages, tools, findOpen ? query : ''),
+    [search, messages, runtime.tools, ownRuntime, findOpen, query],
   );
-  const activeMatch = matches.length ? matches[matchIndex % matches.length] : undefined;
+  const match = matches.at(matchIndex % matches.length);
+  const matchedMessage =
+    match?.messageIndex ?? (match?.toolId ? placedTools.messageForTool.get(match.toolId) : undefined);
+  const activeMatch = useMemo(
+    () =>
+      match && matchedMessage !== match.messageIndex ? { ...match, messageIndex: matchedMessage } : match,
+    [match, matchedMessage],
+  );
   const [collapseThinking, setCollapseThinking] = useState(0);
-  const startIndex = messages.length - visibleMessages.length;
-  const thinkingGroups = useMemo(() => turnThinking(messages, startIndex), [messages, startIndex]);
+  const range =
+    historyWindow && historyWindow.sessionId === selected?.id
+      ? messageWindow(messages.length, historyWindow.start)
+      : { start: messages.length - visibleMessages.length, end: messages.length };
+  const startIndex = range.start,
+    endIndex = range.end;
+  const thinkingGroups = useMemo(
+    () => turnThinking(messages, startIndex, endIndex),
+    [messages, startIndex, endIndex],
+  );
   const items = useMemo(
     () => groupConversation(messages, messageContext.toolFor, expanded),
     [messages, messageContext.toolFor, expanded],
@@ -132,10 +145,25 @@ export function Conversation(
     () => conversationTurns(messages, messageContext.toolFor),
     [messages, messageContext.toolFor],
   );
+  const visibleItems = useMemo(
+    () => windowConversation(items, startIndex, endIndex),
+    [items, startIndex, endIndex],
+  );
   const jump = (index: number) => {
     autoScroll.current = false;
-    setMessageLimit((limit) => limitForMessage(messages.length, index, limit));
-    setJumpIndex(index);
+    const target = messageWindow(messages.length, index);
+    setHistoryWindow(
+      target.end < messages.length ? { sessionId: selected?.id, start: target.start } : undefined,
+    );
+    setMessageLimit(messagePageSize);
+    setJumpIndex({ index });
+  };
+  const showLatest = () => {
+    setHistoryWindow(undefined);
+    setJumpIndex(null);
+    autoScroll.current = true;
+    requestAnimationFrame(() => thread.current?.scrollTo({ top: thread.current.scrollHeight }));
+    setNewContent(false);
   };
   const nextMatch = (direction: number) => {
     if (matches.length) setMatchIndex((index) => (index + direction + matches.length) % matches.length);
@@ -156,7 +184,13 @@ export function Conversation(
     setQuery('');
     setMatchIndex(0);
     setJumpIndex(null);
+    setHistoryWindow(undefined);
   }, [selected?.id]);
+  useEffect(() => {
+    // A branch change or history rewrite can remove the page being inspected.
+    if (historyWindow && historyWindow.start >= messages.length - messagePageSize)
+      setHistoryWindow(undefined);
+  }, [historyWindow, messages.length]);
   useEffect(() => {
     const container = thread.current,
       content = threadContent.current;
@@ -174,13 +208,7 @@ export function Conversation(
   }, [selected?.id]);
   useEffect(() => {
     if (!activeMatch) return;
-    if (activeMatch.messageIndex !== undefined) {
-      const group =
-        activeMatch.section === 'thinking'
-          ? thinkingGroups.find((g) => g.parts.some((p) => p.index === activeMatch.messageIndex))
-          : undefined;
-      jump(group?.owner ?? activeMatch.messageIndex);
-    } else autoScroll.current = false;
+    jump(activeMatch.messageIndex ?? Math.max(0, messages.length - 1));
     const timer = requestAnimationFrame(() =>
       thread.current?.querySelector('.search-active')?.scrollIntoView({ block: 'center' }),
     );
@@ -189,13 +217,13 @@ export function Conversation(
   useEffect(() => {
     if (jumpIndex === null) return;
     const timer = requestAnimationFrame(() =>
-      thread.current?.querySelector(`[data-message-index="${jumpIndex}"]`)?.scrollIntoView({
+      thread.current?.querySelector(`[data-message-index="${jumpIndex.index}"]`)?.scrollIntoView({
         block: activeMatch ? 'center' : 'start',
         behavior: activeMatch ? 'instant' : 'smooth',
       }),
     );
     return () => cancelAnimationFrame(timer);
-  }, [jumpIndex, messageLimit, activeMatch]);
+  }, [jumpIndex, startIndex, endIndex, activeMatch]);
   useEffect(() => {
     if (!CSS.highlights) return;
     CSS.highlights.delete('session-find');
@@ -212,9 +240,11 @@ export function Conversation(
         target.querySelector('.message-content') ?? target,
         NodeFilter.SHOW_TEXT,
       );
-      const ranges: Range[] = [],
-        needle = activeMatch.query.toLocaleLowerCase();
-      while (walker.nextNode()) {
+      const needle = activeMatch.query.toLocaleLowerCase();
+      const wanted = activeMatch.section === 'text' ? activeMatch.occurrence : 0;
+      let occurrence = 0,
+        range: Range | undefined;
+      while (!range && walker.nextNode()) {
         const node = walker.currentNode;
         if (node.parentElement?.closest('.search-snippet,button,mark')) continue;
         const text = (node.textContent ?? '').toLocaleLowerCase();
@@ -223,13 +253,13 @@ export function Conversation(
           offset >= 0;
           offset = text.indexOf(needle, offset + needle.length)
         ) {
-          const range = document.createRange();
+          if (occurrence++ !== wanted) continue;
+          range = document.createRange();
           range.setStart(node, offset);
           range.setEnd(node, offset + needle.length);
-          ranges.push(range);
+          break;
         }
       }
-      const range = ranges[activeMatch.section === 'text' ? activeMatch.occurrence : 0];
       if (range && thread.current) {
         CSS.highlights.set('session-find', new Highlight(range));
         const pre = range.startContainer.parentElement?.closest('pre');
@@ -246,7 +276,7 @@ export function Conversation(
       cancelAnimationFrame(timer);
       CSS.highlights.delete('session-find');
     };
-  }, [activeMatch, messageLimit]);
+  }, [activeMatch, startIndex, endIndex]);
   const renderThinking = (group: ReturnType<typeof turnThinking>[number]) => {
     const part =
       activeMatch?.section === 'thinking'
@@ -370,7 +400,8 @@ export function Conversation(
         onScroll={() => {
           const el = thread.current;
           if (!el) return;
-          const atBottom = el.scrollHeight - el.scrollTop - el.clientHeight < 24;
+          const atBottom =
+            endIndex === messages.length && el.scrollHeight - el.scrollTop - el.clientHeight < 24;
           // Resizing can emit a scroll event before the ResizeObserver catches up.
           const sameViewport =
             el.clientWidth === threadViewport.current.width &&
@@ -460,45 +491,57 @@ export function Conversation(
               收起所有思考过程
             </button>
           )}
-          {messages.length > messageLimit && (
-            <button className="load-history" onClick={() => setMessageLimit((v) => v + 80)}>
-              加载更早的 {Math.min(80, messages.length - messageLimit)} 条消息
+          {startIndex > 0 && (
+            <button
+              className="load-history"
+              onClick={() =>
+                endIndex < messages.length
+                  ? jump(Math.max(0, startIndex - messagePageSize))
+                  : setMessageLimit((v) => v + messagePageSize)
+              }
+            >
+              加载更早的 {Math.min(messagePageSize, startIndex)} 条消息
             </button>
           )}
           {thinkingGroups.filter((group) => group.owner < startIndex).map(renderThinking)}
-          {items.map((item) =>
-            item.kind === 'message'
-              ? item.index >= startIndex && renderMessage(item.index)
-              : item.kind === 'errors'
-                ? item.indices.at(-1)! >= startIndex && (
-                    <RetryErrorGroup
-                      key={`${selected?.id}:${item.id}`}
-                      messages={messages}
-                      indices={item.indices}
-                      activeIndex={activeMatch?.messageIndex}
-                      renderMessage={renderMessage}
-                    />
+          {visibleItems.map((item) =>
+            item.kind === 'message' ? (
+              renderMessage(item.index)
+            ) : item.kind === 'errors' ? (
+              <RetryErrorGroup
+                key={`${selected?.id}:${item.id}`}
+                messages={messages}
+                indices={item.indices}
+                visibleIndices={item.visibleIndices}
+                activeIndex={activeMatch?.messageIndex}
+                renderMessage={renderMessage}
+              />
+            ) : (
+              <ToolGroupCard
+                key={item.id}
+                tools={item.indices.map((index) => messageContext.toolFor(messages[index]))}
+                visibleCount={item.visibleIndices.length}
+                expanded={
+                  expanded.includes(item.id) || item.indices.includes(activeMatch?.messageIndex ?? -1)
+                }
+                onToggle={(open) => {
+                  if (
+                    !item.indices.includes(activeMatch?.messageIndex ?? -1) &&
+                    open !== expanded.includes(item.id)
                   )
-                : item.indices.at(-1)! >= startIndex && (
-                    <ToolGroupCard
-                      key={item.id}
-                      tools={item.indices.map((index) => messageContext.toolFor(messages[index]))}
-                      expanded={
-                        expanded.includes(item.id) || item.indices.includes(activeMatch?.messageIndex ?? -1)
-                      }
-                      onToggle={(open) => {
-                        if (
-                          !item.indices.includes(activeMatch?.messageIndex ?? -1) &&
-                          open !== expanded.includes(item.id)
-                        )
-                          toggleTool(item.id, open);
-                      }}
-                    >
-                      {item.indices.map(renderMessage)}
-                    </ToolGroupCard>
-                  ),
+                    toggleTool(item.id, open);
+                }}
+              >
+                {item.visibleIndices.map(renderMessage)}
+              </ToolGroupCard>
+            ),
           )}
-          {placedTools.trailing.map(renderTool)}
+          {endIndex < messages.length && (
+            <button className="load-history load-newer" onClick={() => jump(endIndex)}>
+              加载更新的 {Math.min(messagePageSize, messages.length - endIndex)} 条消息
+            </button>
+          )}
+          {endIndex === messages.length && placedTools.trailing.map(renderTool)}
           {ownRuntime &&
             approvals.map((d, i) => (
               <ApprovalCard
@@ -527,16 +570,8 @@ export function Conversation(
         </div>
       </div>
       {turns.length >= 3 && <TurnOutline key={selected?.id} turns={turns} active={activeTurn} jump={jump} />}
-      {newContent && (
-        <button
-          className="new-content"
-          title="滚到底部并继续跟随输出"
-          onClick={() => {
-            autoScroll.current = true;
-            thread.current?.scrollTo({ top: thread.current.scrollHeight });
-            setNewContent(false);
-          }}
-        >
+      {(newContent || endIndex < messages.length) && (
+        <button className="new-content" title="滚到底部并继续跟随输出" onClick={showLatest}>
           <ArrowDown size={14} />
           回到最新
         </button>

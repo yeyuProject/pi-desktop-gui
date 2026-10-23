@@ -5,17 +5,19 @@ import type { Message } from '../../../shared/types';
 export function RetryErrorGroup({
   messages,
   indices,
+  visibleIndices,
   activeIndex,
   renderMessage,
 }: {
   messages: Message[];
   indices: number[];
+  visibleIndices: number[];
   activeIndex?: number;
   renderMessage: (index: number) => ReactNode;
 }) {
   const [expanded, setExpanded] = useState(false);
-  const latest = indices.at(-1)!;
-  const previous = indices.slice(0, -1);
+  const latest = visibleIndices.at(-1)!;
+  const previous = visibleIndices.slice(0, -1);
   const searchExpanded = previous.includes(activeIndex ?? -1);
   const open = expanded || searchExpanded;
   const identical = indices.every((index) => messages[index].errorMessage === messages[latest].errorMessage);
@@ -37,7 +39,11 @@ export function RetryErrorGroup({
           }}
         >
           {identical ? `相同错误 ×${indices.length}` : `请求失败记录 · ${indices.length} 次`}
-          <span> · 前 {previous.length} 条</span>
+          <span>
+            {visibleIndices.length < indices.length
+              ? ` · 本页 ${visibleIndices.length} 条`
+              : ` · 前 ${previous.length} 条`}
+          </span>
         </summary>
         {open && <div className="retry-error-history-content">{previous.map(renderMessage)}</div>}
       </details>

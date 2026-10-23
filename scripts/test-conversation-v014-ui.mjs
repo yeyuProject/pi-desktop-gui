@@ -212,12 +212,15 @@ try {
   await page.waitForFunction(
     () => document.querySelector('.search-active .search-current')?.parentElement?.scrollTop > 0,
   );
+  // Both timed hits share the first page; observe an unrelated row on that page.
+  await find.fill('EARLY_NEEDLE');
+  await page.locator('[data-message-index="9"].search-active').waitFor();
   const searchTiming = await page.evaluate(async () => {
     const input = document.querySelector('[aria-label="查找当前会话"]');
     const set = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value').set;
     const durations = [];
     let unrelatedMutations = 0;
-    const history = document.querySelector('[data-message-index="100"]');
+    const history = document.querySelector('[data-message-index="40"]');
     const historyObserver = new MutationObserver((records) => {
       unrelatedMutations += records.length;
     });
@@ -258,6 +261,8 @@ try {
   assert.equal(await find.count(), 0);
   console.log('PASS search across 500 messages, thinking, attachments and grouped tools');
 
+  await page.getByRole('button', { name: '回到最新', exact: true }).click();
+  await page.locator('.tool-group').waitFor();
   const groups = page.locator('.tool-group');
   assert.equal(await groups.count(), 1);
   assert.match(await groups.locator('summary').first().textContent(), /已探索 5 项/);
@@ -275,7 +280,9 @@ try {
   );
   console.log('PASS tool groups, turn navigation and both explicit command reruns');
 
+  await page.getByRole('button', { name: '回到最新', exact: true }).click();
   const code = page.locator('.code-block').last();
+  await code.waitFor();
   assert.match(await code.locator('.code-header').textContent(), /ts · 2 行/);
   assert.equal(await code.locator('.syntax-keyword').count(), 1);
   await code.getByRole('button', { name: '自动换行' }).click();
@@ -600,6 +607,44 @@ try {
   assert.equal(await page.locator('.tool-card').count(), 3);
   assert.deepEqual(errors, []);
   console.log('PASS search loads the owning history page and highlights only the matching nested command');
+  const pagedTools = Array.from({ length: 100 }, (_, i) => ({
+    id: `page-tool-${i}`,
+    name: 'read',
+    args: { path: `file-${i}.ts` },
+    status: 'done',
+    output: i === 0 ? 'EARLY_GROUP_RESULT' : `File ${i}`,
+    startedAt: i,
+    durationMs: 1,
+  }));
+  await showRuntime({
+    ...ordered,
+    tools: pagedTools,
+    messages: [
+      { role: 'user', content: 'Read many files' },
+      ...pagedTools.flatMap((tool) => [
+        {
+          role: 'assistant',
+          content: [{ type: 'toolCall', id: tool.id, name: tool.name, arguments: tool.args }],
+        },
+        { role: 'toolResult', toolCallId: tool.id, toolName: tool.name, content: tool.output },
+      ]),
+      { role: 'assistant', content: 'GROUP_COMPLETE' },
+    ],
+  });
+  await page.reload();
+  await input.waitFor();
+  await page.locator('.tool-group > summary').waitFor();
+  assert.match(await page.locator('.tool-group > summary').textContent(), /已探索 100 项/);
+  await page.locator('.tool-group > summary').click();
+  await page.locator('.tool-card').first().waitFor();
+  assert.equal(await page.locator('.tool-card').count(), 40);
+  await input.press(modifier + '+f');
+  await page.getByRole('textbox', { name: '查找当前会话' }).fill('EARLY_GROUP_RESULT');
+  await page.locator('[data-message-index="2"].search-active').waitFor();
+  assert.match(await page.locator('.tool-group > summary').textContent(), /已探索 100 项.*本页 39 项/);
+  assert.equal(await page.locator('.tool-card').count(), 39);
+  assert.deepEqual(errors, []);
+  console.log('PASS large tool groups retain total counts and render only the current history page');
 } catch (error) {
   if (page && !page.isClosed()) {
     await page.screenshot({ path: path.join(output, 'failed.png'), animations: 'disabled' });

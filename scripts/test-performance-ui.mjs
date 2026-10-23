@@ -52,6 +52,7 @@ try {
     { messages: 5000, activeChars: 100, expand: false },
     { messages: 500, activeChars: 100, expand: true },
     { messages: 500, activeChars: 50000, expand: false },
+    { messages: 5000, activeChars: 100, expand: false, patchLines: 500 },
   ]) {
     const runtime = { ...emptyRuntime(), sessionId: fixture.sessionId, connected: true, status: 'running' };
     for (let i = 0; i < spec.messages; i++)
@@ -63,6 +64,26 @@ try {
             : `Check module ${i}.`,
         timestamp: 1700000000000 + i,
       });
+    if (spec.patchLines) {
+      const patch = Array.from(
+        { length: spec.patchLines },
+        (_, i) => (i % 2 ? '+' : '-') + 'const item = { value: 12345678, label: "fixture" };',
+      ).join('\n');
+      for (let i = 0; i < runtime.messages.length; i += 4) {
+        runtime.messages[i] = { role: 'user', content: `Check module ${i}.` };
+        runtime.messages[i + 1] = {
+          role: 'assistant',
+          content: [{ type: 'toolCall', id: `tool-${i}`, name: 'edit', arguments: { path: `file-${i}.ts` } }],
+        };
+        runtime.messages[i + 2] = {
+          role: 'toolResult',
+          toolCallId: `tool-${i}`,
+          toolName: 'edit',
+          content: 'Edited',
+          details: { patch },
+        };
+      }
+    }
     const block =
       'A **formatted** paragraph with [a link](https://example.invalid).\n\n- first item\n- second item\n\n';
     runtime.messages.at(-1).content =
@@ -148,9 +169,9 @@ try {
     result.cases.push(item);
     console.log(JSON.stringify(item));
     assert.ok(observation.outlineButtons <= 60, 'outline DOM must stay bounded');
-    assert.equal(observation.renderedMessages, spec.expand ? spec.messages : 80);
+    assert.equal(observation.renderedMessages, spec.patchLines ? 40 : spec.expand ? spec.messages : 80);
     if (item.p95Ms > 100) console.warn('Slow streaming update; inspect performance-ui.json on this host');
-    if (spec.messages === 5000) {
+    if (spec.messages === 5000 && !spec.patchLines) {
       const outline = page.getByRole('navigation', { name: '对话轮次' });
       await outline.locator('button').first().focus();
       await page.keyboard.press('End');
@@ -160,6 +181,49 @@ try {
       await page.keyboard.press('Enter');
       await expect(page.locator('.message').filter({ hasText: 'Check module 0.' })).toBeVisible();
       assert.ok((await outline.locator('button').count()) <= 60);
+      await expect(page.locator('.message')).toHaveCount(80);
+      await page.getByRole('button', { name: '加载更新的 80 条消息', exact: true }).click();
+      await expect(page.locator('[data-message-index="80"]')).toBeVisible();
+      await expect(page.locator('.message')).toHaveCount(80);
+      await page.getByRole('button', { name: '加载更早的 80 条消息', exact: true }).click();
+      await expect(page.locator('[data-message-index="0"]')).toBeVisible();
+      await page.getByRole('button', { name: '回到最新', exact: true }).click();
+      await expect(page.locator('.message').last()).toContainText('AUDIT_UPDATE_34_END');
+      await expect(page.locator('.message')).toHaveCount(80);
+      await page
+        .getByRole('textbox', { name: '任务输入' })
+        .press(process.platform === 'darwin' ? 'Meta+f' : 'Control+f');
+      const find = page.getByRole('textbox', { name: '查找当前会话' });
+      await find.fill('Check module');
+      await expect(page.locator('.session-find [aria-live]')).toHaveText('1 / 2500');
+      await expect(page.locator('[data-message-index="0"]')).toBeVisible();
+      await expect(page.locator('.message')).toHaveCount(80);
+      await find.press('Shift+Enter');
+      await expect(page.locator('.session-find [aria-live]')).toHaveText('2500 / 2500');
+      await expect(page.locator('[data-message-index="4998"]')).toBeVisible();
+      await expect(page.locator('.message')).toHaveCount(80);
+      await find.press('Enter');
+      await expect(page.locator('[data-message-index="0"]')).toBeVisible();
+      await find.fill('Check module 4000.');
+      await expect(page.locator('[data-message-index="4000"]')).toBeVisible();
+      await find.press('Escape');
+      // Rewriting history while inspecting an old page must not leave an empty/stale window.
+      await app.evaluate(({ BrowserWindow }) => {
+        globalThis.auditRuntime.messages = globalThis.auditRuntime.messages.slice(-100);
+        BrowserWindow.getAllWindows()[0].webContents.send('desktop:event', {
+          type: 'runtime',
+          runtime: globalThis.auditRuntime,
+        });
+      });
+      await expect(page.locator('.message')).toHaveCount(80);
+      await expect(page.locator('.load-newer')).toHaveCount(0);
+      await page.getByRole('button', { name: '加载更早的 20 条消息', exact: true }).click();
+      await expect(page.locator('.message')).toHaveCount(100);
+      // A fresh session view resets the temporary jump window to the latest page.
+      await page.reload();
+      await expect(page.locator('.message').last()).toContainText('AUDIT_UPDATE_34_END');
+      await expect(page.locator('.message')).toHaveCount(80);
+      await expect(page.locator('.load-newer')).toHaveCount(0);
     }
     if (spec.activeChars === 50000) {
       await app.evaluate(({ BrowserWindow }) => {

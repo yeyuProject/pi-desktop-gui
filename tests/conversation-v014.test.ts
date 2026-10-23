@@ -4,7 +4,7 @@ import { performance } from 'node:perf_hooks';
 import { parseAnsi, stripAnsi } from '../shared/ansi';
 import { composeDraftText, moveSnippetOffsets, shouldCollapsePaste, textBytes } from '../shared/draft';
 import { groupConversation, conversationTurns, hideRecoveredErrors } from '../src/lib/conversation-layout';
-import { searchSession, limitForMessage } from '../src/lib/session-search';
+import { SessionSearch } from '../src/lib/session-search';
 import { parseArgumentHint, parsePromptArguments, formatPromptArguments } from '../src/lib/prompt-arguments';
 import { tokenizeCode } from '../src/lib/code-tokens';
 import { splitUserContent } from '../src/lib/message-content';
@@ -81,16 +81,16 @@ test('search covers early pages, thinking, reference ranges and tool arguments/o
     toolName: 'read',
     content: '\x1b[31mneedle failure\x1b[0m',
   };
-  const matches = searchSession(messages, [], 'NEEDLE');
+  const search = new SessionSearch();
+  const matches = search.search(messages, [], 'NEEDLE');
   assert.equal(matches.length, 5);
   assert.deepEqual(
-    matches.map((match) => match.section),
+    Array.from({ length: matches.length }, (_, i) => matches.at(i)!.section),
     ['text', 'thinking', 'attachment', 'tool', 'tool'],
   );
-  assert.equal(matches[0].messageIndex, 9);
-  assert.equal(limitForMessage(200, 9, 80), 240);
+  assert.equal(matches.at(0)!.messageIndex, 9);
   assert.equal(splitUserContent(String(messages[11].content)).files[0].lines, '10-40');
-  assert.equal(searchSession(messages, [], '').length, 0);
+  assert.equal(search.search(messages, [], '').length, 0);
 });
 
 const tool = (id: string, name = 'read', status: ToolActivity['status'] = 'done'): ToolActivity => ({
@@ -226,15 +226,38 @@ test('code tokenizer preserves exact text while adding lightweight semantic clas
   assert.equal(tokenizeCode('const x = 1;', 'ts')[0].kind, 'keyword');
 });
 
+test('cached historical patch counts stay correct after late completion, replacement and patch removal', () => {
+  const edit = { ...tool('edit', 'edit', 'running'), patch: '--- before\n+++ after\n-old\n+new\n+extra' };
+  const messages: Message[] = [
+    { role: 'user', content: 'change' },
+    { role: 'toolResult', toolCallId: edit.id, content: 'done' },
+  ];
+  const stats = () => conversationTurns(messages, () => edit)[0];
+  assert.equal(stats().added, 2);
+  assert.equal(stats().removed, 1);
+  assert.equal(stats().added, 2);
+  edit.status = 'error';
+  edit.patch = '+replacement';
+  assert.equal(stats().failed, true);
+  assert.equal(stats().added, 1);
+  assert.equal(stats().removed, 0);
+  edit.patch = '';
+  assert.equal(stats().added, 0);
+  const replacement = { ...edit, status: 'done' as const, patch: '-removed' };
+  assert.equal(conversationTurns(messages, () => replacement)[0].removed, 1);
+  assert.equal(conversationTurns(messages, () => replacement)[0].failed, false);
+});
+
 test('500-message search stays below the 16 ms budget', () => {
   const messages: Message[] = Array.from({ length: 500 }, (_, index) => ({
     role: index % 2 ? 'assistant' : 'user',
     content: `module ${index}\n${'read source and explain behavior '.repeat(30)}\nneedle ${index}`,
   }));
   const durations: number[] = [];
+  const search = new SessionSearch();
   for (let i = 0; i < 70; i++) {
     const start = performance.now();
-    assert.equal(searchSession(messages, [], 'needle').length, 500);
+    assert.equal(search.search(messages, [], 'needle').length, 500);
     if (i >= 10) durations.push(performance.now() - start);
   }
   durations.sort((a, b) => a - b);

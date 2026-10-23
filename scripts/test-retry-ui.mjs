@@ -239,7 +239,13 @@ try {
   await expect(page.locator('.search-active .inline-error')).toHaveText('Failure 0');
   await page.getByTitle('关闭会话查找').click();
   await history.locator('summary').click();
-  await expect(assistant).toHaveCount(90);
+  await expect(history.locator('summary')).toContainText('90 次');
+  await expect(history.locator('summary')).toContainText('本页 79 条');
+  await expect(assistant).toHaveCount(79);
+  await page.getByRole('button', { name: '加载更新的 11 条消息', exact: true }).click();
+  await expect(page.locator('[data-message-index="90"]')).toBeVisible();
+  await expect(history.locator('summary')).toContainText('90 次');
+  await expect(assistant).toHaveCount(80);
   await show(repeated);
   await expect(history.locator('summary')).toContainText('相同错误 ×3');
   await page.reload();

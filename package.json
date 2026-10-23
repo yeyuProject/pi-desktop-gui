@@ -34,6 +34,7 @@
     "test:retry-ui": "node --import tsx scripts/test-retry-ui.mjs",
     "test:images-ui": "node --import tsx scripts/test-image-input-ui.mjs",
     "test:performance-ui": "node --import tsx scripts/test-performance-ui.mjs",
+    "test:performance-core": "node --expose-gc --import tsx scripts/test-performance-core.ts",
     "test:transcript-ui": "node --import tsx scripts/test-transcript-ui.mjs"
   },
   "build": {
