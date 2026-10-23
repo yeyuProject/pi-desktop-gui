@@ -39,6 +39,38 @@ async function fixture(t: TestContext) {
   return { root, directory, data, git, project, sessionId, workspace, write, toolWrite };
 }
 
+test('nested project checkpoints track writes and commands and restore the project file', async (t) => {
+  const { project, workspace, sessionId, directory } = await fixture(t);
+  project.path = path.join(directory, 'lucky');
+  const name = 'docs/CFS2号上传操作教程.md';
+  const file = path.join(project.path, name);
+  const parentFile = path.join(directory, name);
+  await fs.mkdir(path.dirname(file), { recursive: true });
+  await fs.mkdir(path.dirname(parentFile), { recursive: true });
+  await fs.writeFile(file, 'original project document');
+  await fs.writeFile(parentFile, 'unrelated parent document');
+  const checkpoint = await workspace.captureCheckpoint(project, sessionId, 1);
+  assert.ok(checkpoint);
+  await workspace.beginTool(project, sessionId, 'write-document', 'write', { path: name });
+  await fs.writeFile(file, 'updated by write');
+  await workspace.endTool(project, sessionId, 'write-document');
+  await workspace.beginTool(project, sessionId, 'generate-document', 'powershell', { command: 'generate' });
+  await fs.writeFile(file, 'updated by command');
+  await workspace.endTool(project, sessionId, 'generate-document');
+  const preview = await workspace.checkpointPreview(project, sessionId, checkpoint.id);
+  assert.deepEqual(
+    preview.files.map(({ path, selected, manual }) => ({ path, selected, manual })),
+    [{ path: name, selected: true, manual: false }],
+  );
+  await workspace.revert(project, [name], undefined, {
+    sessionId,
+    checkpointId: checkpoint.id,
+    revision: preview.revision,
+  });
+  assert.equal(await fs.readFile(file, 'utf8'), 'original project document');
+  assert.equal(await fs.readFile(parentFile, 'utf8'), 'unrelated parent document');
+});
+
 test('three turns restore cumulatively while keeping preexisting changes and defaulting manual edits off', async (t) => {
   const { project, workspace, sessionId, write, toolWrite, directory } = await fixture(t);
   await write('before.txt', 'already modified before the run');

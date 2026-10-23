@@ -112,7 +112,7 @@ export async function storeBlobs(repo: string, projectRoot: string, names: strin
     await git(
       ['--git-dir', repo, 'hash-object', '-w', '--no-filters', '--stdin-paths'],
       projectRoot,
-      names.map(quotePath).join('\n') + '\n',
+      names.map((name) => quotePath(path.resolve(projectRoot, name))).join('\n') + '\n',
     ),
   );
   if (ids.length !== names.length) throw new Error('快照写入不完整');
@@ -120,11 +120,12 @@ export async function storeBlobs(repo: string, projectRoot: string, names: strin
 }
 export async function hashBlobs(projectRoot: string, names: string[]) {
   if (!names.length) return [];
+  // Git may switch to the repository root; stdin paths must still refer to the opened project.
   const ids = lines(
     await git(
       ['hash-object', '--no-filters', '--stdin-paths'],
       projectRoot,
-      names.map(quotePath).join('\n') + '\n',
+      names.map((name) => quotePath(path.resolve(projectRoot, name))).join('\n') + '\n',
     ),
   );
   if (ids.length !== names.length) throw new Error('无法读取当前文件');

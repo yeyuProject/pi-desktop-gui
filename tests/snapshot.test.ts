@@ -3,10 +3,11 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
-import { randomUUID } from 'node:crypto';
+import { createHash, randomUUID } from 'node:crypto';
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 import { Workspace } from '../electron/workspace';
+import { createSnapshotRepo, hashBlobs, readBlob, storeBlobs } from '../electron/snapshot';
 import type { Project } from '../shared/types';
 
 const exec = promisify(execFile);
@@ -25,6 +26,30 @@ async function fixture(t: TestContext, format = 'sha1') {
     createdAt: Date.now(),
   };
   return { project, data, workspace: new Workspace(data) };
+}
+
+for (const samePathInParent of [false, true]) {
+  test(`nested projects hash and store their own files with parent duplicates=${samePathInParent}`, async (t) => {
+    const { project, data } = await fixture(t);
+    const projectRoot = path.join(project.path, '子项目 with spaces');
+    const names = ['docs/CFS2号上传操作教程.md', 'docs/截图 教程.docx'];
+    const contents = [Buffer.from('项目内的教程\r\n'), Buffer.from([0x50, 0x4b, 0, 0xff, 0x0d, 0x0a])];
+    await fs.mkdir(path.join(projectRoot, 'docs'), { recursive: true });
+    if (samePathInParent) await fs.mkdir(path.join(project.path, 'docs'));
+    for (const [index, name] of names.entries()) {
+      await fs.writeFile(path.join(projectRoot, name), contents[index]);
+      if (samePathInParent) await fs.writeFile(path.join(project.path, name), 'unrelated parent file');
+    }
+    const expected = contents.map((content) =>
+      createHash('sha1').update(`blob ${content.length}\0`).update(content).digest('hex'),
+    );
+    assert.deepEqual(await hashBlobs(projectRoot, names), expected);
+    const repo = path.join(data, 'objects.git');
+    await createSnapshotRepo(repo, projectRoot);
+    assert.deepEqual(await storeBlobs(repo, projectRoot, names), expected);
+    for (const [index, id] of expected.entries())
+      assert.deepEqual(await readBlob(repo, projectRoot, id), contents[index]);
+  });
 }
 
 test('SHA-256 projects have no phantom changes and restore their baseline', async (t) => {
