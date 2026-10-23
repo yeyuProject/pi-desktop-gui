@@ -17,6 +17,16 @@ await build({
   outfile: 'dist-electron/main.cjs',
   external: ['electron'],
   sourcemap: true,
+  // Worker URLs resolve relative to this bundle in packaged and development launches.
+  define: { 'import.meta.url': '__bundleUrl' },
+  banner: { js: "const __bundleUrl = require('node:url').pathToFileURL(__filename).href;" },
+});
+await build({
+  entryPoints: ['electron/diff-worker.mjs'],
+  bundle: true,
+  platform: 'node',
+  format: 'esm',
+  outfile: 'dist-electron/diff-worker.mjs',
 });
 await build({
   entryPoints: ['electron/preload.ts'],

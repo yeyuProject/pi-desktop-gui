@@ -510,9 +510,10 @@ export interface ApiMap {
     result: Changes;
   };
   diff: {
-    args: [string, string, 'all' | 'run', { sessionId: string; checkpointId?: string }?];
+    args: [string, string, 'all' | 'run', { sessionId: string; checkpointId?: string }?, string?];
     result: FileDiff;
   };
+  cancelDiff: { args: [string]; result: void };
   openFile: { args: [string, string]; result: void };
   openResource: { args: [string, string]; result: void };
   referenceDropped: { args: [string, string[]]; result: { accepted: string[]; rejected: string[] } };

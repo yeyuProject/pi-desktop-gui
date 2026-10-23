@@ -34,6 +34,23 @@ export function useWorkspace(options: WorkspaceOptions) {
   const [checkpointRestoredCount, setCheckpointRestoredCount] = useState<number>();
   const generation = useRef(0),
     refreshGeneration = useRef(0);
+  const diffRequest = useRef<string | undefined>(undefined);
+  function cancelDiff() {
+    if (!diffRequest.current) return;
+    const id = diffRequest.current;
+    diffRequest.current = undefined;
+    void api.invoke('cancelDiff', id).catch(() => {});
+  }
+  async function requestDiff(projectId: string, relative: string, mode: 'all' | 'run') {
+    cancelDiff();
+    const id = crypto.randomUUID();
+    diffRequest.current = id;
+    try {
+      return await api.invoke('diff', projectId, relative, mode, context(), id);
+    } finally {
+      if (diffRequest.current === id) diffRequest.current = undefined;
+    }
+  }
   const focused = useRef(document.hasFocus()),
     loading = useRef(false),
     reloadRequested = useRef(false);
@@ -89,17 +106,20 @@ export function useWorkspace(options: WorkspaceOptions) {
   async function readPreview(refresh: boolean) {
     const current = latest.current;
     if (!current.project || !current.selectedFile) return;
+    // A focus/watcher check must not cancel the initial preview and leave its loader behind.
+    if (!refresh && diffRequest.current) return;
     const token = ++generation.current;
     const valid = () =>
       token === generation.current &&
       latest.current.project?.id === current.project!.id &&
+      latest.current.selected?.id === current.selected?.id &&
       latest.current.selectedFile === current.selectedFile &&
       latest.current.tab === current.tab &&
       latest.current.changeMode === current.changeMode &&
       latest.current.checkpointId === current.checkpointId;
     if (current.tab === 'changes') {
       const value = await current.attempt(() =>
-        api.invoke('diff', current.project!.id, current.selectedFile, current.changeMode, context()),
+        requestDiff(current.project!.id, current.selectedFile, current.changeMode),
       );
       if (!value || !valid()) return;
       if (refresh) {
@@ -144,6 +164,7 @@ export function useWorkspace(options: WorkspaceOptions) {
         : normalized.startsWith(prefix);
       const relative = withinProject ? normalized.slice(prefix.length) : normalized;
       const token = ++generation.current;
+      cancelDiff();
       setInspector(true);
       setSelectedFile(relative);
       setTab(mode);
@@ -153,7 +174,7 @@ export function useWorkspace(options: WorkspaceOptions) {
       setPreviewRange(spec.startLine ? { startLine: spec.startLine, endLine: spec.endLine! } : undefined);
       const sessionId = current.selected?.id;
       if (mode === 'changes') {
-        const value = await api.invoke('diff', current.project!.id, relative, current.changeMode, context());
+        const value = await requestDiff(current.project!.id, relative, current.changeMode);
         if (token === generation.current && latest.current.selected?.id === sessionId) setFileDiff(value);
       } else {
         const value = await api.invoke('preview', current.project!.id, relative);
@@ -175,6 +196,10 @@ export function useWorkspace(options: WorkspaceOptions) {
     setCheckpointPreview(undefined);
     setCheckpointRestoredCount(undefined);
     if (!project) setChanges(undefined);
+    return () => {
+      generation.current++;
+      cancelDiff();
+    };
   }, [selected?.id, project?.id]);
 
   const lastUserTimestamp =
@@ -305,6 +330,7 @@ export function useWorkspace(options: WorkspaceOptions) {
   }
   function selectTab(value: typeof tab) {
     generation.current++;
+    cancelDiff();
     setTab(value);
     setSelectedFile('');
     setFilePreview(undefined);
