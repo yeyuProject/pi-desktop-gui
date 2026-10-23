@@ -1,5 +1,4 @@
-import { memo, useMemo, useRef } from 'react';
-import { createTwoFilesPatch } from 'diff';
+import { memo, useEffect, useMemo, useRef, useState } from 'react';
 import { alignHunk, hunkPrompt, parseDiffHunks, type DiffCell, type DiffHunk } from '../../shared/diff';
 import '../styles/diff-view.css';
 
@@ -44,18 +43,37 @@ export const DiffView = memo(function DiffView({
   className = '',
   onAskHunk,
 }: DiffViewProps) {
-  const hunks = useMemo(
-    () =>
-      parseDiffHunks(
-        full && before !== undefined && after !== undefined
-          ? createTwoFilesPatch(path ?? '', path ?? '', before, after, '', '', {
-              context: Number.MAX_SAFE_INTEGER,
-            })
-          : patch,
-      ),
-    [patch, path, before, after, full],
+  const request = useMemo(() => ({ patch, path, before, after, full }), [patch, path, before, after, full]);
+  const background = full || patch.length > 16_000;
+  type Aligned = { hunk: DiffHunk; rows: ReturnType<typeof alignHunk> }[];
+  const [result, setResult] = useState<{ request: typeof request; aligned?: Aligned; error?: string }>();
+  const immediate = useMemo(
+    () => (background ? undefined : parseDiffHunks(patch).map((hunk) => ({ hunk, rows: alignHunk(hunk) }))),
+    [background, patch],
   );
-  const aligned = useMemo(() => hunks.map((hunk) => ({ hunk, rows: alignHunk(hunk) })), [hunks]);
+  useEffect(() => {
+    if (!background) return;
+    let active = true;
+    const worker = new Worker(new URL('../lib/diff-worker.ts', import.meta.url), { type: 'module' });
+    const finish = (value: { aligned?: Aligned; error?: string }) => {
+      if (!active) return;
+      active = false;
+      clearTimeout(timer);
+      worker.terminate();
+      setResult({ request, ...value });
+    };
+    const timer = setTimeout(() => finish({ error: '差异计算耗时过长，请在编辑器中查看完整内容' }), 8000);
+    worker.onmessage = (event) => finish(event.data);
+    worker.onerror = () => finish({ error: '无法显示差异，请重试或在编辑器中查看' });
+    worker.postMessage(request);
+    return () => {
+      active = false;
+      clearTimeout(timer);
+      worker.terminate();
+    };
+  }, [request, background]);
+  const aligned = background ? (result?.request === request ? result.aligned : undefined) : immediate;
+  const error = result?.request === request ? result.error : undefined;
   const left = useRef<HTMLDivElement>(null),
     right = useRef<HTMLDivElement>(null);
   const header = (hunk: DiffHunk, key: number, allowAsk = true) => (
@@ -73,7 +91,19 @@ export const DiffView = memo(function DiffView({
       )}
     </div>
   );
-  if (!hunks.length) return <pre className={`diff-view diff-raw ${className}`}>{patch}</pre>;
+  if (error)
+    return (
+      <p className="empty-small" role="status">
+        {error}
+      </p>
+    );
+  if (!aligned)
+    return (
+      <p className="empty-small" role="status">
+        加载差异…
+      </p>
+    );
+  if (!aligned.length) return <pre className={`diff-view diff-raw ${className}`}>{patch}</pre>;
   if (split)
     return (
       <div className={`diff-view aligned-diff ${className}`}>

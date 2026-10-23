@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { IconButton } from '../IconButton';
 import { ChevronDown, FileText, Check, AlertCircle, LoaderCircle, Copy, Terminal } from 'lucide-react';
 import { type ToolActivity } from '../../../shared/types';
@@ -51,9 +51,42 @@ export function ToolCard({
   const exitCode = shell
     ? /(?:Command exited with code|exit code:?)\s*(-?\d+)/i.exec(tool.output)?.[1]
     : undefined;
-  const lines = tool.patch ? patchLines(tool.patch) : [];
-  const added = lines.filter((l) => l.startsWith('+')).length,
-    removed = lines.filter((l) => l.startsWith('-')).length;
+  const { added, removed } = useMemo(() => {
+    const lines = tool.patch ? patchLines(tool.patch) : [];
+    return {
+      added: lines.filter((l) => l.startsWith('+')).length,
+      removed: lines.filter((l) => l.startsWith('-')).length,
+    };
+  }, [tool.patch]);
+  const open = expanded || Boolean(match) || tool.status === 'error' || tool.status === 'running';
+  const body = useRef<HTMLDivElement>(null);
+  const scrollPositions = useRef(new Map<string, { top: number; left: number }>());
+  const scrollSelector = '.inline-diff, .arguments, .ansi-output';
+  const scrollKey = (element: HTMLElement) =>
+    element.classList.contains('inline-diff')
+      ? 'diff'
+      : element.classList.contains('arguments')
+        ? 'args'
+        : 'output';
+  useLayoutEffect(() => {
+    if (!open || match || !body.current || !scrollPositions.current.size) return;
+    // A large diff finishes asynchronously. Restore its inner scroll position when it mounts.
+    const restore = () => {
+      const elements = body.current?.querySelectorAll<HTMLElement>(scrollSelector);
+      elements?.forEach((element) => {
+        const position = scrollPositions.current.get(scrollKey(element));
+        if (position) {
+          element.scrollTop = position.top;
+          element.scrollLeft = position.left;
+        }
+      });
+      if (elements?.length) observer.disconnect();
+    };
+    const observer = new MutationObserver(restore);
+    observer.observe(body.current, { childList: true, subtree: true });
+    restore();
+    return () => observer.disconnect();
+  }, [open, Boolean(match)]);
   const written =
     tool.name === 'write' && typeof tool.args.content === 'string'
       ? String(tool.args.content).split('\n').length
@@ -61,7 +94,7 @@ export function ToolCard({
   return (
     <details
       className={'tool-card ' + tool.status}
-      open={expanded || Boolean(match) || tool.status === 'error' || tool.status === 'running'}
+      open={open}
       onToggle={(e) => {
         if (!match) onToggle(e.currentTarget.open);
       }}
@@ -139,46 +172,55 @@ export function ToolCard({
         )}
         <ChevronDown size={13} />
       </summary>
-      <div className="tool-body">
-        {match ? (
-          <pre className="tool-search-content">
-            <SearchHighlight
-              text={match.text}
-              query={match.query}
-              activeStart={match.start}
+      {open && (
+        <div
+          className="tool-body"
+          ref={body}
+          onScrollCapture={(event) => {
+            const element = event.target as HTMLElement;
+            if (element.matches(scrollSelector))
+              scrollPositions.current.set(scrollKey(element), {
+                top: element.scrollTop,
+                left: element.scrollLeft,
+              });
+          }}
+        >
+          {match ? (
+            <pre className="tool-search-content">
+              <SearchHighlight text={match.text} query={match.query} activeStart={match.start} />
+            </pre>
+          ) : tool.patch ? (
+            <DiffView
+              patch={tool.patch}
+              path={typeof tool.args.path === 'string' ? tool.args.path : undefined}
+              className="inline-diff"
+              onAskHunk={askHunk}
             />
-          </pre>
-        ) : tool.patch ? (
-          <DiffView
-            patch={tool.patch}
-            path={typeof tool.args.path === 'string' ? tool.args.path : undefined}
-            className="inline-diff"
-            onAskHunk={askHunk}
-          />
-        ) : (
-          <>
-            {Object.keys(tool.args).length > 0 && (
-              <pre className="arguments">
-                {shell ? String(tool.args.command ?? '') : JSON.stringify(tool.args, null, 2)}
-              </pre>
-            )}
-            <AnsiOutput text={tool.output || '等待输出…'} />
-          </>
-        )}
-        <div className="tool-actions">
-          {Boolean(tool.args.path) && (
-            <IconButton title="查看文件" onClick={() => openFile(String(tool.args.path))}>
-              <FileText size={13} />
-            </IconButton>
+          ) : (
+            <>
+              {Object.keys(tool.args).length > 0 && (
+                <pre className="arguments">
+                  {shell ? String(tool.args.command ?? '') : JSON.stringify(tool.args, null, 2)}
+                </pre>
+              )}
+              <AnsiOutput text={tool.output || '等待输出…'} />
+            </>
           )}
-          <span role="status" className="tool-copy-status">
-            {copyState === 'error' ? '复制失败，请重试' : copyState === 'copied' ? '已复制' : ''}
-          </span>
-          <IconButton title="复制输出" onClick={() => void copyOutput()}>
-            {copyState === 'copied' ? <Check size={13} /> : <Copy size={13} />}
-          </IconButton>
+          <div className="tool-actions">
+            {Boolean(tool.args.path) && (
+              <IconButton title="查看文件" onClick={() => openFile(String(tool.args.path))}>
+                <FileText size={13} />
+              </IconButton>
+            )}
+            <span role="status" className="tool-copy-status">
+              {copyState === 'error' ? '复制失败，请重试' : copyState === 'copied' ? '已复制' : ''}
+            </span>
+            <IconButton title="复制输出" onClick={() => void copyOutput()}>
+              {copyState === 'copied' ? <Check size={13} /> : <Copy size={13} />}
+            </IconButton>
+          </div>
         </div>
-      </div>
+      )}
     </details>
   );
 }

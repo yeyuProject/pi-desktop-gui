@@ -129,10 +129,12 @@ try {
         timestamp: 1700000000000 + i,
       });
     if (spec.patchLines) {
-      const patch = Array.from(
-        { length: spec.patchLines },
-        (_, i) => (i % 2 ? '+' : '-') + 'const item = { value: 12345678, label: "fixture" };',
-      ).join('\n');
+      const patch =
+        '@@ -1,250 +1,250 @@\n' +
+        Array.from(
+          { length: spec.patchLines },
+          (_, i) => (i % 2 ? '+' : '-') + 'const item = { value: 12345678, label: "fixture" };',
+        ).join('\n');
       for (let i = 0; i < runtime.messages.length; i += 4) {
         runtime.messages[i] = { role: 'user', content: `Check module ${i}.` };
         runtime.messages[i + 1] = {
@@ -318,6 +320,37 @@ try {
       'typing must not render the conversation',
     );
     await input.fill('');
+    if (spec.patchLines) {
+      const cards = page.locator('.tool-card');
+      assert.equal(await cards.count(), 20);
+      assert.equal(await cards.locator('.tool-body').count(), 0, 'collapsed tools do not mount hidden diffs');
+      const card = cards.last();
+      await card.locator('summary').click();
+      await expect(card.locator('.diff-row')).toHaveCount(500);
+      await card.getByRole('button', { name: '复制输出', exact: true }).click();
+      assert.equal(await app.evaluate(({ clipboard }) => clipboard.readText()), 'Edited');
+      await card.locator('.inline-diff').evaluate((element) => {
+        element.scrollTop = 140;
+      });
+      await expect
+        .poll(() => card.locator('.inline-diff').evaluate((element) => element.scrollTop))
+        .toBe(140);
+      await card.locator('summary').click();
+      await expect(card.locator('.tool-body')).toHaveCount(0);
+      await card.locator('summary').click();
+      await expect(card.locator('.diff-row')).toHaveCount(500);
+      await expect
+        .poll(() => card.locator('.inline-diff').evaluate((element) => element.scrollTop))
+        .toBe(140);
+      await card.locator('summary').click();
+      await input.press(process.platform === 'darwin' ? 'Meta+f' : 'Control+f');
+      const find = page.getByRole('textbox', { name: '查找当前会话' });
+      await find.fill('file-4996.ts');
+      await expect(page.locator('.tool-card[open] .tool-search-content')).toContainText('file-4996.ts');
+      await find.press('Escape');
+      await expect(page.locator('.tool-search-content')).toHaveCount(0);
+      console.log('PASS collapsed structured diffs, on-demand expansion, full output copy and search reveal');
+    }
     if (item.p95Ms > 100) console.warn('Slow streaming update; inspect performance-ui.json on this host');
     if (spec.messages === 5000 && !spec.patchLines) {
       const outline = page.getByRole('navigation', { name: '对话轮次' });

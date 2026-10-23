@@ -3,7 +3,7 @@ import path from 'node:path';
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 import { createHash } from 'node:crypto';
-import { createTwoFilesPatch } from 'diff';
+import { computeDiff } from './diff-compute';
 import ignore from 'ignore';
 import type { Changes, Change, FileDiff, FileItem, FilePreview, Project } from '../shared/types';
 import { createSnapshotRepo, hashBlobs, readBlob, storeBlobs } from './snapshot';
@@ -682,6 +682,7 @@ export class Workspace {
     relative: string,
     mode: 'all' | 'run',
     context?: CheckpointContext,
+    signal?: AbortSignal,
   ): Promise<FileDiff> {
     const result: FileDiff = { path: relative, patch: '', before: '', after: '' };
     if (
@@ -726,17 +727,13 @@ export class Workspace {
         if (String(e).includes('maxBuffer')) return { ...result, unavailable: '历史版本超过 1 MiB' };
       }
     }
-    result.patch = createTwoFilesPatch(
-      relative,
-      relative,
-      result.before,
-      result.after,
-      '原内容',
-      '当前内容',
-      { context: 4 },
-    );
-    if (result.patch.length > 256 * 1024)
-      result.patch = result.patch.slice(0, 256 * 1024) + '\n… 差异已截断，请在编辑器中查看完整内容';
+    signal?.throwIfAborted();
+    try {
+      result.patch = await computeDiff(relative, result.before, result.after, signal);
+    } catch (error) {
+      if (signal?.aborted) throw error;
+      result.unavailable = error instanceof Error ? error.message : '无法计算差异，请重试';
+    }
     return result;
   }
 }

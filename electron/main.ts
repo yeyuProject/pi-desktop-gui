@@ -86,6 +86,7 @@ let quitting = false;
 let closing = false;
 let sessionEnding = false;
 let activeOperations = 0;
+let activeDiff: { id?: string; controller: AbortController } | undefined;
 const operationWaiters = new Set<() => void>();
 function finishOperation() {
   activeOperations--;
@@ -1402,11 +1403,28 @@ const handlers: Record<keyof ApiMap, (...args: any[]) => any> = {
     if (!['all', 'run'].includes(mode)) throw new Error('差异模式无效');
     return workspace.changes(store.project(id), mode, checkpointContext(id, context));
   },
-  diff: async (id, relative, mode, context) => {
+  diff: async (id, relative, mode, context, requestId) => {
     text(id, 100);
     text(relative, 4096);
+    if (requestId !== undefined) text(requestId, 100);
     if (!['all', 'run'].includes(mode)) throw new Error('差异模式无效');
-    return workspace.diff(store.project(id), relative, mode, checkpointContext(id, context));
+    const project = store.project(id),
+      checkpoint = checkpointContext(id, context);
+    activeDiff?.controller.abort();
+    const request = { id: requestId, controller: new AbortController() };
+    activeDiff = request;
+    try {
+      return await workspace.diff(project, relative, mode, checkpoint, request.controller.signal);
+    } catch (error) {
+      if (!request.controller.signal.aborted) throw error;
+      return { path: relative, patch: '', before: '', after: '', unavailable: '差异预览已取消' };
+    } finally {
+      if (activeDiff === request) activeDiff = undefined;
+    }
+  },
+  cancelDiff: async (requestId) => {
+    text(requestId, 100);
+    if (activeDiff?.id === requestId) activeDiff.controller.abort();
   },
   openFile: async (id, relative) => {
     text(id, 100);
@@ -1541,6 +1559,7 @@ async function createWindow() {
     ]).popup({ window });
   });
   const rendererLost = () => {
+    activeDiff?.controller.abort();
     appDialogsReady = false;
     cancelAppDialogs();
   };
@@ -1824,6 +1843,7 @@ else {
             'checkpointPreview',
             'usageSummary',
             'diff',
+            'cancelDiff',
             'changes',
             'configRead',
             'sessionTree',
@@ -1867,6 +1887,7 @@ else {
               'saveView',
               'readHistory',
               'readDraftImages',
+              'cancelDiff',
               'stop',
               'stopAll',
               'forceStop',
