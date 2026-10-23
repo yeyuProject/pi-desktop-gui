@@ -70,6 +70,7 @@
 - `npm test`：636 项通过、2 项按平台跳过；覆盖差异等价、中文路径、取消、事件循环可继续处理任务和超长结果提示。
 - `npm run test:performance-ui`：补齐结构化差异样本，并验证折叠不挂载、展开、滚动位置恢复、复制完整输出和搜索自动定位。普通 5000 条消息的 30 次流式更新 P95 约 16.1 ms。
 - `scripts/test-diff-ui.mjs`：大差异计算期间仍可调用主进程、编辑草稿、切换文件；旧计算被取消，完整文件对照与追问不破坏草稿。开发目录和独立 macOS arm64 打包版均通过；打包版签名完整性检查通过。
+- 发布前补充了后台预览尚未返回时文件被外部修改的回归：先复现过期提示丢失，再按文件变更修订号保留提示；主动刷新后才显示新内容并清除提示。
 - `scripts/test-conversation-v014-ui.mjs` 和 `scripts/test-workspace-v014-ui.mjs`：搜索、嵌套工具、分组分页、检查点、差异追问、文件引用及会话切换回归通过。
 
 测量文件位于 `test-results/performance-audit-diff-ui-before-20261024.json`、`performance-audit-diff-ui-after-20261024.json`、`performance-audit-diff-worker-after-20261024.json`、`diff-ui.json` 和 `diff-ui-packaged.json`。它们是本地生成结果；持续界面回归已加入 `test:v014-ui`。

@@ -50,6 +50,12 @@ try {
       const started = performance.now();
       if (method === 'diff') globalThis.diffAudit.push({ phase: 'start', file: args[1] });
       const value = await original(event, method, args);
+      if (method === 'diff' && globalThis.holdNextDiff) {
+        globalThis.holdNextDiff = false;
+        await new Promise((resolve) => {
+          globalThis.releaseDiff = resolve;
+        });
+      }
       if (method === 'diff')
         globalThis.diffAudit.push({
           phase: 'end',
@@ -110,6 +116,31 @@ try {
   assert.equal(next.old.unavailable, '差异预览已取消');
   assert.equal(next.current.unavailable, undefined);
   assert.match(next.current.patch, /\+const value100 = 999/);
+  // An external edit can arrive while the background preview is still being returned.
+  await app.evaluate(() => {
+    globalThis.holdNextDiff = true;
+    globalThis.releaseDiff = undefined;
+  });
+  await page.evaluate(() => {
+    globalThis.previewChanges = 0;
+    globalThis.stopPreviewAudit = window.desktop.onEvent((event) => {
+      if (event.type === 'workspaceChanged' && event.changedPaths?.includes('small.ts'))
+        globalThis.previewChanges++;
+    });
+  });
+  await inspector.locator('.change-row').filter({ hasText: 'small.ts' }).click();
+  await expect.poll(() => app.evaluate(() => Boolean(globalThis.releaseDiff))).toBe(true);
+  await fs.writeFile(
+    path.join(fixture.projectDir, 'small.ts'),
+    small.replace('value100 = 100', 'value100 = 1001'),
+  );
+  await page.waitForFunction(() => globalThis.previewChanges > 0);
+  await app.evaluate(() => globalThis.releaseDiff());
+  await expect(inspector.locator('.preview-stale')).toBeVisible();
+  await inspector.locator('.preview-stale').getByRole('button', { name: '刷新', exact: true }).click();
+  await expect(inspector.locator('.diff-pane').last()).toContainText('value100 = 1001');
+  await expect(inspector.locator('.preview-stale')).toHaveCount(0);
+  await page.evaluate(() => globalThis.stopPreviewAudit());
   report.requests = await app.evaluate(() => globalThis.diffAudit);
   assert.deepEqual(report.errors, []);
   assert.equal(provider.requests.length, 0);

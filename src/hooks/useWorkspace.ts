@@ -35,6 +35,7 @@ export function useWorkspace(options: WorkspaceOptions) {
   const generation = useRef(0),
     refreshGeneration = useRef(0);
   const diffRequest = useRef<string | undefined>(undefined);
+  const previewRevision = useRef(0);
   function cancelDiff() {
     if (!diffRequest.current) return;
     const id = diffRequest.current;
@@ -109,6 +110,7 @@ export function useWorkspace(options: WorkspaceOptions) {
     // A focus/watcher check must not cancel the initial preview and leave its loader behind.
     if (!refresh && diffRequest.current) return;
     const token = ++generation.current;
+    const revision = previewRevision.current;
     const valid = () =>
       token === generation.current &&
       latest.current.project?.id === current.project!.id &&
@@ -124,10 +126,11 @@ export function useWorkspace(options: WorkspaceOptions) {
       if (!value || !valid()) return;
       if (refresh) {
         setFileDiff(value);
-        setPreviewStale(false);
+        setPreviewStale(revision !== previewRevision.current);
       } else
         setPreviewStale(
-          value.before !== current.fileDiff?.before ||
+          revision !== previewRevision.current ||
+            value.before !== current.fileDiff?.before ||
             value.after !== current.fileDiff?.after ||
             value.unavailable !== current.fileDiff?.unavailable,
         );
@@ -141,10 +144,11 @@ export function useWorkspace(options: WorkspaceOptions) {
       }
       if (refresh) {
         setFilePreview(value);
-        setPreviewStale(false);
+        setPreviewStale(revision !== previewRevision.current);
       } else
         setPreviewStale(
-          value.text !== current.filePreview?.text ||
+          revision !== previewRevision.current ||
+            value.text !== current.filePreview?.text ||
             value.size !== current.filePreview?.size ||
             value.binary !== current.filePreview?.binary,
         );
@@ -164,6 +168,7 @@ export function useWorkspace(options: WorkspaceOptions) {
         : normalized.startsWith(prefix);
       const relative = withinProject ? normalized.slice(prefix.length) : normalized;
       const token = ++generation.current;
+      const revision = previewRevision.current;
       cancelDiff();
       setInspector(true);
       setSelectedFile(relative);
@@ -175,7 +180,10 @@ export function useWorkspace(options: WorkspaceOptions) {
       const sessionId = current.selected?.id;
       if (mode === 'changes') {
         const value = await requestDiff(current.project!.id, relative, current.changeMode);
-        if (token === generation.current && latest.current.selected?.id === sessionId) setFileDiff(value);
+        if (token === generation.current && latest.current.selected?.id === sessionId) {
+          setFileDiff(value);
+          setPreviewStale(revision !== previewRevision.current);
+        }
       } else {
         const value = await api.invoke('preview', current.project!.id, relative);
         if (token === generation.current && latest.current.selected?.id === sessionId) setFilePreview(value);
@@ -239,6 +247,7 @@ export function useWorkspace(options: WorkspaceOptions) {
       const previewAffected =
         !event.changedPaths ||
         event.changedPaths.some((name) => name === latest.current.selectedFile || name.startsWith('.git/'));
+      if (previewAffected) previewRevision.current++;
       if ((!document.hidden && focused.current) || latest.current.ownRunning) {
         void refreshChanges();
         if (previewAffected) checkPreview();
