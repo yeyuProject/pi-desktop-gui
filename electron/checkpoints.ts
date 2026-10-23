@@ -65,6 +65,8 @@ const safeId = (value: string) => {
   return value;
 };
 const fingerprint = (blob: string, mode: number) => (isWindows ? blob : `${blob}:${mode}`);
+const STORAGE_LIMIT = 200 * 1024 * 1024;
+const CLEANUP_INTERVAL = 10 * 60 * 1000;
 
 export function checkpointRevision(now: Record<string, string>, paths: string[]) {
   return createHash('sha256')
@@ -86,13 +88,54 @@ export class Checkpoints {
   private operation: Promise<unknown> = Promise.resolve();
   private cached?: { sessionId: string; records: CheckpointRecord[] };
   private hashes?: { sessionId: string; files: Map<string, { stamp: string; id: string; mode: number }> };
+  // Observed hashes need not exist in the object store. Never use them to skip storeBlobs in capture.
+  private scanHashes = new Map<string, { root: string; files: Map<string, { stamp: string; id: string }> }>();
+  private storage?: { bytes: number; files: Map<string, number> };
+  private lastCleanup = 0;
   constructor(dataDir: string) {
     this.directory = path.join(dataDir, 'baselines', 'checkpoints');
   }
   private serialize<T>(operation: () => Promise<T>): Promise<T> {
-    const next = this.operation.catch(() => {}).then(operation);
+    const next = this.operation
+      .catch(() => {})
+      .then(async () => {
+        try {
+          return await operation();
+        } catch (error) {
+          // A failed write may leave temporary files or objects that were not accounted for.
+          this.storage = undefined;
+          throw error;
+        }
+      });
     this.operation = next;
     return next;
+  }
+  private account(file: string, size: number) {
+    if (!this.storage) return;
+    this.storage.bytes += size - (this.storage.files.get(file) ?? 0);
+    if (size) this.storage.files.set(file, size);
+    else this.storage.files.delete(file);
+  }
+  private async measureFiles(files: string[]) {
+    if (!this.storage) return;
+    await Promise.all(
+      files.map(async (file) => {
+        try {
+          this.account(file, (await fs.stat(file)).size);
+        } catch (error) {
+          // hash-object may reuse a blob from the project's alternates without writing a loose object.
+          if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error;
+          this.account(file, 0);
+        }
+      }),
+    );
+  }
+  private async removeStored(file: string, recursive = false) {
+    await fs.rm(file, { recursive, force: true });
+    this.account(file, 0);
+    if (recursive && this.storage)
+      for (const stored of this.storage.files.keys())
+        if (stored.startsWith(file + path.sep)) this.account(stored, 0);
   }
   private recordPath(id: string) {
     return path.join(this.directory, safeId(id) + '.json');
@@ -122,8 +165,11 @@ export class Checkpoints {
   private async saveState(sessionId: string, state: SessionTracking) {
     await fs.mkdir(this.directory, { recursive: true });
     const destination = this.statePath(sessionId);
-    await fs.writeFile(destination + '.tmp', JSON.stringify(state), { mode: 0o600 });
+    const content = JSON.stringify(state);
+    await fs.writeFile(destination + '.tmp', content, { mode: 0o600 });
     await fs.rename(destination + '.tmp', destination);
+    this.account(destination + '.tmp', 0);
+    this.account(destination, Buffer.byteLength(content));
   }
   async nextTurn(sessionId: string) {
     return (await this.state(sessionId)).lastTurn + 1;
@@ -201,8 +247,11 @@ export class Checkpoints {
         }
       : record;
     const destination = this.recordPath(record.id);
-    await fs.writeFile(destination + '.tmp', JSON.stringify(stored), { mode: 0o600 });
+    const content = JSON.stringify(stored);
+    await fs.writeFile(destination + '.tmp', content, { mode: 0o600 });
     await fs.rename(destination + '.tmp', destination);
+    this.account(destination + '.tmp', 0);
+    this.account(destination, Buffer.byteLength(content));
     if (this.cached?.sessionId === record.sessionId)
       this.cached.records = [...this.cached.records.filter((item) => item.id !== record.id), record].sort(
         (a, b) => a.turn - b.turn,
@@ -246,11 +295,24 @@ export class Checkpoints {
     const { files, omitted } = await snapshotCandidates(project.path, candidates);
     if (omitted.some((name) => name in state.known))
       throw new Error('部分文件无法读取，无法确认命令执行前后的文件变化，请检查文件权限后重试');
+    const previous = this.scanHashes.get(sessionId);
+    const cached = previous?.root === project.path ? previous.files : undefined;
+    const changed = files.filter((file) => cached?.get(file.name)?.stamp !== file.stamp);
     const ids = await hashBlobs(
       project.path,
-      files.map((file) => file.name),
+      changed.map((file) => file.name),
     );
-    return Object.fromEntries(files.map((file, i) => [file.name, fingerprint(ids[i], file.mode)]));
+    const updated = new Map(changed.map((file, index) => [file.name, ids[index]]));
+    const current = new Map(
+      files.map((file) => [
+        file.name,
+        { stamp: file.stamp, id: updated.get(file.name) ?? cached!.get(file.name)!.id },
+      ]),
+    );
+    this.scanHashes.set(sessionId, { root: project.path, files: current });
+    return Object.fromEntries(
+      files.map((file) => [file.name, fingerprint(current.get(file.name)!.id, file.mode)]),
+    );
   }
   capture(project: Project, sessionId: string, turn: number, timestamp?: number) {
     return this.serialize(() => this.captureUnlocked(project, sessionId, turn, timestamp));
@@ -277,6 +339,8 @@ export class Checkpoints {
       await fs.access(path.join(this.directory, repo, 'HEAD'));
     } catch {
       await createSnapshotRepo(path.join(this.directory, repo), project.path);
+      if (this.storage)
+        await snapshotStorageBytes(path.join(this.directory, repo), (file, size) => this.account(file, size));
     }
     const cached =
       this.hashes?.sessionId === sessionId
@@ -290,6 +354,12 @@ export class Checkpoints {
         ? new Set(await changedSnapshotFiles(path.join(this.directory, repo), project.path))
         : undefined;
     if (changedNames) {
+      // Windows Git may miss same-size edits whose mtime was restored. A boundary scan's
+      // observed content change must invalidate the stored blob even if the index reports clean.
+      const observed = this.scanHashes.get(sessionId);
+      if (observed?.root === project.path)
+        for (const [name, file] of observed.files)
+          if (cached.get(name)?.id !== file.id) changedNames.add(name);
       // The native index may see unchanged children after their directory is replaced by a
       // junction to the original location. Recheck every parent directory before reusing a blob.
       const parents = new Set<string>();
@@ -333,6 +403,11 @@ export class Checkpoints {
       project.path,
       changed.map((file) => file.name),
     );
+    await this.measureFiles(
+      [...new Set(stored)]
+        .map((id) => path.join(this.directory, repo, 'objects', id.slice(0, 2), id.slice(2)))
+        .filter((file) => !this.storage?.files.has(file)),
+    );
     const updated = new Map(changed.map((file, index) => [file.name, stored[index]]));
     const ids = files.map((file) => updated.get(file.name) ?? cached.get(file.name)!.id);
     const present = new Set(files.map((file) => file.name));
@@ -346,12 +421,14 @@ export class Checkpoints {
       removed,
       !cached.size,
     );
+    await this.measureFiles([path.join(this.directory, repo, 'index')]);
     this.hashes = {
       sessionId,
       files: new Map(
         files.map((file, index) => [file.name, { stamp: file.stamp, id: ids[index], mode: file.mode }]),
       ),
     };
+    this.scanHashes.set(sessionId, { root: project.path, files: this.hashes.files });
     const now = Object.fromEntries(files.map((file, i) => [file.name, fingerprint(ids[i], file.mode)]));
     if (state.lastTurn) await this.observe(sessionId, now, 'manual');
     else state.known = now;
@@ -389,7 +466,7 @@ export class Checkpoints {
     await this.write(record);
     state.lastTurn = turn;
     await this.saveState(sessionId, state);
-    await this.cleanupUnlocked();
+    await this.cleanupUnlocked(sessionId);
     if (!(await this.get(sessionId, record.id)))
       throw new Error('本轮检查点超过 200 MiB 的保留上限，请缩小项目范围后重试');
     return this.summary(record, meta);
@@ -424,13 +501,14 @@ export class Checkpoints {
       includesCommitted: record.head !== meta.head,
     };
   }
-  async list(project: Project, sessionId: string, metadata?: Awaited<ReturnType<typeof info>>) {
+  async list(project: Project, sessionId: string, metadata?: Awaited<ReturnType<typeof info>> | null) {
     const records = (await this.records(sessionId)).filter((record) => record.projectId === project.id);
     if (!records.length) return [];
-    let meta;
+    let meta = metadata;
     try {
-      meta = metadata ?? (await info(project.path));
-    } catch {
+      if (meta === undefined) meta = await info(project.path);
+    } catch {}
+    if (!meta) {
       return records.map((record) => ({
         ...this.summary(record, { branch: '', head: '' }),
         available: false,
@@ -534,19 +612,24 @@ export class Checkpoints {
   cleanup() {
     return this.serialize(() => this.cleanupUnlocked());
   }
-  private async cleanupUnlocked() {
-    const records = await this.records();
-    const legacy: { file: string; repo: string; time: number }[] = [];
+  private async cleanupUnlocked(sessionId?: string) {
+    const now = Date.now();
+    const full = !sessionId || !this.storage || now - this.lastCleanup >= CLEANUP_INTERVAL;
     const parent = path.dirname(this.directory);
-    for (const name of await fs.readdir(parent).catch(() => [] as string[])) {
+    if (full) {
+      this.storage = { bytes: 0, files: new Map() };
+      await snapshotStorageBytes(parent, (file, size) => this.account(file, size));
+    }
+    const records = await this.records(full ? undefined : sessionId);
+    const legacy: { file: string; repo: string; time: number }[] = [];
+    for (const name of full ? await fs.readdir(parent).catch(() => [] as string[]) : []) {
       if (!/^[\w-]+\.json$/.test(name)) continue;
       const file = path.join(parent, name);
       const value = JSON.parse(await fs.readFile(file, 'utf8')) as SnapshotData;
       if (value.version === 3 && value.projectId + '.json' === name && /^[\w-]+-\d+\.git$/.test(value.repo))
         legacy.push({ file, repo: path.join(parent, value.repo), time: value.time });
     }
-    const now = Date.now(),
-      remove = new Set<string>();
+    const remove = new Set<string>();
     const grouped = new Map<string, CheckpointRecord[]>();
     for (const record of records)
       grouped.set(record.sessionId, [...(grouped.get(record.sessionId) ?? []), record]);
@@ -555,21 +638,20 @@ export class Checkpoints {
     for (const record of records) if (now - record.time > 7 * 86400000) remove.add(record.id);
     const discard = async () => {
       // Materialize the earliest retained turn before deleting any parent in its delta chain.
-      for (const group of grouped.values()) {
+      for (const [sessionId, group] of grouped) {
+        const discarded = group.filter((record) => remove.has(record.id));
+        if (!discarded.length) continue;
         const live = group.filter((record) => !remove.has(record.id));
-        if (!group.some((record) => remove.has(record.id))) continue;
         for (let index = 0; index < live.length; index++)
           await this.write(live[index], index ? live[index - 1] : null);
-      }
-      for (const record of records)
-        if (remove.has(record.id)) await fs.rm(this.recordPath(record.id), { force: true });
-      for (const [sessionId, group] of grouped) {
-        const live = group.filter((record) => !remove.has(record.id));
+        for (const record of discarded) await this.removeStored(this.recordPath(record.id));
+        grouped.set(sessionId, live);
         if (this.cached?.sessionId === sessionId) this.cached.records = live;
         const repo = this.repoPath(group[0]);
         if (!live.length) {
-          await fs.rm(repo, { recursive: true, force: true });
+          await this.removeStored(repo, true);
           if (this.hashes?.sessionId === sessionId) this.hashes = undefined;
+          this.scanHashes.delete(sessionId);
           const state = await this.state(sessionId);
           state.known = {};
           state.activity = [];
@@ -578,12 +660,18 @@ export class Checkpoints {
         }
         const retained = new Set(live.flatMap((record) => Object.values(record.files)));
         const objects = path.join(repo, 'objects');
-        for (const prefix of await fs.readdir(objects)) {
-          if (!/^[0-9a-f]{2}$/.test(prefix)) continue;
-          for (const suffix of await fs.readdir(path.join(objects, prefix)))
-            if (/^[0-9a-f]+$/.test(suffix) && !retained.has(prefix + suffix))
-              await fs.unlink(path.join(objects, prefix, suffix));
-        }
+        const candidates = new Set(discarded.flatMap((record) => Object.values(record.files)));
+        // Normal retention only considers objects from the removed turns. A full sweep also
+        // reclaims loose objects left behind by interrupted captures.
+        if (full)
+          for (const prefix of await fs.readdir(objects)) {
+            if (!/^[0-9a-f]{2}$/.test(prefix)) continue;
+            for (const suffix of await fs.readdir(path.join(objects, prefix)))
+              if (/^[0-9a-f]+$/.test(suffix)) candidates.add(prefix + suffix);
+          }
+        for (const id of candidates)
+          if (/^(?:[0-9a-f]{40}|[0-9a-f]{64})$/.test(id) && !retained.has(id))
+            await this.removeStored(path.join(objects, id.slice(0, 2), id.slice(2)));
         const state = await this.state(sessionId);
         state.activity = state.activity.filter(
           (event) => event.cursor > Math.min(...live.map((record) => record.cursor)),
@@ -592,19 +680,25 @@ export class Checkpoints {
       }
     };
     if (remove.size) await discard();
+    if (!full) {
+      // Enforce the quota every turn. Reconcile once before evicting across sessions.
+      if (this.storage!.bytes > STORAGE_LIMIT) await this.cleanupUnlocked();
+      return;
+    }
     const oldest = records.slice().sort((a, b) => a.time - b.time);
     legacy.sort((a, b) => a.time - b.time);
-    while ((await snapshotStorageBytes(parent)) > 200 * 1024 * 1024) {
+    while (this.storage!.bytes > STORAGE_LIMIT) {
       const record = oldest.find((item) => !remove.has(item.id));
       if (legacy.length && (!record || legacy[0].time <= record.time)) {
         const expired = legacy.shift()!;
-        await fs.rm(expired.file, { force: true });
-        await fs.rm(expired.repo, { recursive: true, force: true });
+        await this.removeStored(expired.file);
+        await this.removeStored(expired.repo, true);
         continue;
       }
       if (!record) break;
       remove.add(record.id);
       await discard();
     }
+    this.lastCleanup = now;
   }
 }

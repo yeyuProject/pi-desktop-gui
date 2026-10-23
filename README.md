@@ -38,7 +38,7 @@ Sessions and workspaces stay on your machine. Model requests go to whichever pro
 
 ## Features
 
-- **Responsive long conversations** — Reuse completed Markdown sections while replies stream, keep turn navigation compact, load draft images for the selected chat, and save pending edits immediately when switching. Pi environment checks run after the workspace opens.
+- **Responsive long conversations** — Reuse completed Markdown sections during streaming and after replies finish. Browse and search history in pages, type without rerendering the conversation, and load draft image contents only for the selected chat. Environment setup and snapshot cleanup run after the window opens; idle chats stop updating their timers.
 - **Compact conversation history** — Thinking from one user turn shares a single collapsible section. Completed turns start collapsed; search reveals the original text, and you can collapse all thinking at once.
 - **Visible agent workflow** — Streamed thinking, tool calls with arguments and exit status, inline diffs for every edit, plus estimated current context/window capacity, clearly labeled cumulative session tokens, cache breakdown and estimated cost.
 - **Image attachments** — Paste or drop images even when the system omits their file type; selecting a project image through `@` also attaches the image. Supports PNG, JPEG, WebP and GIF, up to 8 images, 8 MiB each and 16 MiB combined.

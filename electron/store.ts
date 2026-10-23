@@ -13,13 +13,7 @@ import type {
   StorageStatus,
 } from '../shared/types';
 import { validateImages } from './images';
-import {
-  detectImageMimeType,
-  imageDataBytes,
-  MAX_IMAGE_BYTES,
-  MAX_IMAGE_COUNT,
-  MAX_IMAGES_BYTES,
-} from '../shared/images';
+import { imageDataBytes, MAX_IMAGE_BYTES, MAX_IMAGE_COUNT, MAX_IMAGES_BYTES } from '../shared/images';
 import { matchesDraft } from '../shared/draft';
 import { emptyState, parseState } from './store-state';
 import { compareAppVersions, stableVersion } from '../shared/app-update';
@@ -66,6 +60,8 @@ export class Store extends EventEmitter {
   }
   async load() {
     this.transientSessions.clear();
+    this.imageFiles = new WeakMap();
+    this.writtenImages.clear();
     this.state = emptyState();
     this.storage = { writable: true };
     try {
@@ -230,30 +226,26 @@ export class Store extends EventEmitter {
         if (typeof file !== 'string' || !/^[a-f0-9]{64}\.bin$/.test(file))
           throw new Error('草稿图片索引无效，原文件已保留');
         const imagePath = this.file(path.join('draft-images', file));
-        if ((await fs.stat(imagePath)).size > MAX_IMAGE_BYTES) throw new Error('草稿图片超过大小限制');
-        const bytes = await fs.readFile(imagePath);
-        if (createHash('sha256').update(bytes).digest('hex') + '.bin' !== file)
-          throw new Error('草稿图片校验失败，原文件已保留');
+        const stat = await fs.stat(imagePath);
+        if (!stat.isFile() || !stat.size || stat.size > MAX_IMAGE_BYTES)
+          throw new Error('草稿图片格式无效或超过大小限制');
         if (
           typeof metadata.id !== 'string' ||
           typeof metadata.name !== 'string' ||
           metadata.name.length > 512 ||
-          !['image/png', 'image/jpeg', 'image/webp', 'image/gif'].includes(metadata.mimeType) ||
-          bytes.length > MAX_IMAGE_BYTES ||
-          detectImageMimeType(bytes) !== metadata.mimeType
+          !['image/png', 'image/jpeg', 'image/webp', 'image/gif'].includes(metadata.mimeType)
         )
           throw new Error('草稿图片格式无效');
-        total += bytes.length;
+        total += stat.size;
         const image = {
           id: metadata.id,
           name: metadata.name,
           mimeType: metadata.mimeType,
           file,
-          bytes: bytes.length,
+          bytes: stat.size,
         };
         session.images[index] = image;
         this.imageFiles.set(image, file);
-        this.writtenImages.add(file);
       }
       if (total > MAX_IMAGES_BYTES) throw new Error('草稿图片超过总大小限制');
     }
@@ -262,24 +254,36 @@ export class Store extends EventEmitter {
   async draftImages(id: string): Promise<ImageAttachment[]> {
     const images = this.session(id).images ?? [];
     const result: ImageAttachment[] = [];
-    for (const image of images) {
-      if (image.data !== undefined) result.push({ ...image, data: image.data });
-      else {
-        if (!image.file || !/^[a-f0-9]{64}\.bin$/.test(image.file)) throw new Error('草稿图片索引无效');
-        const file = this.file(path.join('draft-images', image.file));
-        if ((await fs.stat(file)).size > MAX_IMAGE_BYTES) throw new Error('草稿图片超过大小限制');
-        const bytes = await fs.readFile(file);
-        if (createHash('sha256').update(bytes).digest('hex') + '.bin' !== image.file)
-          throw new Error('草稿图片校验失败，原文件已保留');
-        result.push({
-          id: image.id,
-          name: image.name,
-          mimeType: image.mimeType,
-          data: bytes.toString('base64'),
-        });
+    try {
+      for (const image of images) {
+        if (image.data !== undefined) result.push({ ...image, data: image.data });
+        else {
+          if (!image.file || !/^[a-f0-9]{64}\.bin$/.test(image.file)) throw new Error('草稿图片索引无效');
+          const file = this.file(path.join('draft-images', image.file));
+          if ((await fs.stat(file)).size > MAX_IMAGE_BYTES) throw new Error('草稿图片超过大小限制');
+          const bytes = await fs.readFile(file);
+          if (createHash('sha256').update(bytes).digest('hex') + '.bin' !== image.file)
+            throw new Error('草稿图片校验失败');
+          result.push({
+            id: image.id,
+            name: image.name,
+            mimeType: image.mimeType,
+            data: bytes.toString('base64'),
+          });
+        }
       }
+      validateImages(result);
+    } catch (error) {
+      this.storage = {
+        ...this.storage,
+        writable: false,
+        problem:
+          '草稿图片读取或校验失败，已暂停发送和保存，原文件已保留。请检查数据目录中的 draft-images，恢复图片后重启。',
+      };
+      this.emit('storage', this.storage);
+      throw new Error(this.storage.problem, { cause: error });
     }
-    validateImages(result);
+    for (const image of images) if (image.file) this.writtenImages.add(image.file);
     return result;
   }
   matchesDraft(session: Session, text: string, attachments: string[], images: ImageAttachment[]) {

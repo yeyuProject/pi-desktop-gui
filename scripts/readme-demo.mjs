@@ -303,6 +303,7 @@ const mock = () => {
     readHistory: () => structuredClone(runtime.messages),
     changes: () => ({
       git: true,
+      checkpoints: checkpoint ? [checkpoint] : [],
       branch: 'fix/login-email',
       head: 'a1b2c3d',
       baselineAvailable: true,

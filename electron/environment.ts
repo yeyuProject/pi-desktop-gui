@@ -7,7 +7,13 @@ import type { Environment, Settings } from '../shared/types';
 import type { CommandSpec } from './rpc';
 import { PI_INSTALL_COMMAND, classifyPiVersion, compatibilityMessage } from '../shared/pi-version';
 export { VERIFIED, classifyPiVersion } from '../shared/pi-version';
-import { isWindows, locateExecutable, shellCandidates, nodeExecutableName } from './platform';
+import {
+  isWindows,
+  locateExecutable,
+  shellCandidates,
+  nodeExecutableName,
+  loadLoginShellPath,
+} from './platform';
 const exec = promisify(execFile);
 export async function exists(p: string) {
   try {
@@ -176,10 +182,12 @@ function startInspection(settings: Settings, developmentRoot?: string) {
 
 /** An explicit environment check always probes again and refreshes the startup cache. */
 export async function detectEnvironment(settings: Settings, developmentRoot?: string): Promise<Environment> {
+  await loadLoginShellPath();
   return (await startInspection(settings, developmentRoot).result).environment;
 }
 
 export async function preparePi(settings: Settings, developmentRoot?: string) {
+  await loadLoginShellPath();
   const key = environmentKey(settings, developmentRoot);
   let pending = inspection?.key === key ? inspection : startInspection(settings, developmentRoot);
   const cached = await pending.result;

@@ -142,7 +142,6 @@ test('connection progress is shown without a task timer; real task startup retai
         runtime,
         ownRuntime: true,
         ownRunning: true,
-        elapsed: 0,
         selected: session,
         pending: true,
         sessionEnabled: true,

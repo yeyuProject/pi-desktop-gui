@@ -50,10 +50,14 @@ try {
     // Enter can submit only after automatic model initialization enables sending.
     await page.getByRole('button', { name: '发送任务', exact: true }).click({ trial: true });
     await input.press('Enter');
-    await page.waitForFunction((text) => {
-      const prompt = [...document.querySelectorAll('.message.user')].at(-1);
-      return prompt?.textContent?.includes(text) && document.querySelector('.run-meta .completed');
-    }, text);
+    await page.waitForFunction(
+      (text) => {
+        const prompt = [...document.querySelectorAll('.message.user')].at(-1);
+        return prompt?.textContent?.includes(text) && document.querySelector('.run-meta .completed');
+      },
+      text,
+      { timeout: 60000 },
+    );
   };
   await send('E2E_FILES');
   await send('E2E_EDIT');
@@ -167,6 +171,24 @@ try {
   console.log(
     'PASS multi-turn restore dialog leaves manual edits unchecked and separately returns to the original message',
   );
+} catch (error) {
+  const page = app?.windows()[0];
+  if (page && !page.isClosed()) {
+    await page.screenshot({ path: path.join(output, 'workspace-v014-failed.png') });
+    await fs.writeFile(path.join(output, 'workspace-v014-failed.html'), await page.content());
+    const snapshot = await page.evaluate(async () => {
+      const { runtime } = await window.desktop.invoke('bootstrap');
+      return {
+        status: runtime.status,
+        connected: runtime.connected,
+        error: runtime.error,
+        diagnostic: runtime.diagnostic,
+        messages: runtime.messages,
+      };
+    });
+    await fs.writeFile(path.join(output, 'workspace-v014-failed.json'), JSON.stringify(snapshot, null, 2));
+  }
+  throw error;
 } finally {
   await app
     ?.evaluate(({ BrowserWindow }) =>

@@ -237,6 +237,7 @@ const mock = ({ theme, approval }) => {
   };
   const changes = {
     git: true,
+    checkpoints: [],
     branch: 'fix/login-email',
     head: 'a1b2c3d',
     baselineAvailable: true,

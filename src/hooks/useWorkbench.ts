@@ -61,11 +61,9 @@ export function useWorkbench() {
     [rename, setRename] = useState<{ kind: 'project' | 'session'; id: string; name: string }>(),
     [menuId, setMenuId] = useState('');
   const [seenNotification, setSeenNotification] = useState(Number.MAX_SAFE_INTEGER),
-    [dismissed, setDismissed] = useState<number[]>([]),
-    [, setTick] = useState(0);
+    [dismissed, setDismissed] = useState<number[]>([]);
   const [testResult, setTestResult] = useState(''),
-    [diagnostic, setDiagnostic] = useState(''),
-    [elapsed, setElapsed] = useState(0);
+    [diagnostic, setDiagnostic] = useState('');
   const [shortcutsOpen, setShortcutsOpen] = useState(false),
     [dragging, setDragging] = useState(false);
 
@@ -269,13 +267,6 @@ export function useWorkbench() {
     setMessageLimit(80);
     setExpanded(selected.expandedTools ?? []);
   }, [selected?.id]);
-  useEffect(() => {
-    const timer = setInterval(
-      () => setElapsed(runtime.startedAt ? Math.floor((Date.now() - runtime.startedAt) / 1000) : 0),
-      1000,
-    );
-    return () => clearInterval(timer);
-  }, [runtime.startedAt]);
 
   useEffect(() => {
     if (notice) {
@@ -311,11 +302,6 @@ export function useWorkbench() {
     setSeenNotification(Math.max(0, ...(runtime.notifications ?? []).map((n) => n.id)));
     setDismissed([]);
   }, [runtime.sessionId]);
-  useEffect(() => {
-    if (runtime.status !== 'retrying' || !runtime.retry) return;
-    const timer = setInterval(() => setTick((v) => v + 1), 500);
-    return () => clearInterval(timer);
-  }, [runtime.status, runtime.retry?.startedAt]);
 
   async function send() {
     if (isReadingAttachments()) return;
@@ -724,7 +710,6 @@ export function useWorkbench() {
       error,
       setError,
       setNotice,
-      elapsed,
       setShortcutsOpen,
       stopArmed,
       dragging,

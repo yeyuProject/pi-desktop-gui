@@ -96,6 +96,7 @@ export class AgentService extends EventEmitter {
   private rpc?: PiRpc;
   private modelReader?: PiRpc;
   private publishing?: NodeJS.Timeout;
+  private savingState?: Promise<void>;
   private operation = Promise.resolve();
   private settingsOperation = Promise.resolve();
   private reading = 0;
@@ -280,11 +281,19 @@ export class AgentService extends EventEmitter {
     this.serialized = new WeakMap();
     this.sentFields.clear();
   }
-  private save() {
-    this.store
-      .save()
-      .then(() => this.emit('state', this.store.state))
+  private save(immediate = true) {
+    const saving = immediate ? this.store.save() : this.store.scheduleSave();
+    if (this.savingState === saving) return;
+    this.savingState = saving;
+    void saving
+      .then(() => {
+        // A later save includes earlier changes; broadcast once after that write completes.
+        if (this.savingState !== saving) return;
+        this.savingState = undefined;
+        this.emit('state', this.store.state);
+      })
       .catch((e) => {
+        if (this.savingState === saving) this.savingState = undefined;
         this.setError(`本地保存失败：${errorText(e)}`);
         this.publish();
       });
@@ -306,7 +315,7 @@ export class AgentService extends EventEmitter {
     if (this.runtime.sessionId) {
       const s = this.store.session(this.runtime.sessionId);
       s.lastStatus = status;
-      this.save();
+      this.save(!busy(status));
     }
     this.publish(true);
   }
@@ -315,7 +324,7 @@ export class AgentService extends EventEmitter {
     const session = this.store.session(this.runtime.sessionId);
     session.updatedAt = Date.now();
     if (!busy(this.runtime.status)) session.unread = this.store.state.selectedSessionId !== session.id;
-    this.save();
+    this.save(!busy(this.runtime.status));
   }
   private exclusive<T>(action: () => Promise<T>): Promise<T> {
     this.pendingOperations++;

@@ -101,18 +101,16 @@ export const RichText = memo(function RichText({
   streaming?: boolean;
 }) {
   const previous = useRef<MarkdownParts | undefined>(undefined);
-  if (!streaming) {
-    previous.current = undefined;
-    return <MarkdownBlock text={text} />;
-  }
-  const parts = streamingMarkdown(text, previous.current);
+  if (!streaming && !previous.current) return <MarkdownBlock text={text} />;
+  const parts =
+    previous.current?.source === text ? previous.current : streamingMarkdown(text, previous.current);
   previous.current = parts;
   return (
     <>
       {parts.blocks.map((block, index) => (
         <MarkdownBlock key={index} text={block} />
       ))}
-      {parts.plain ? (
+      {streaming && parts.plain ? (
         <div className="streaming-markdown-text">{parts.tail}</div>
       ) : (
         <MarkdownBlock text={parts.tail} />

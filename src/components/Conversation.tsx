@@ -32,8 +32,6 @@ export function Conversation(
     | 'environment'
     | 'pending'
     | 'setFeatureTab'
-    | 'compact'
-    | 'inspector'
     | 'expanded'
     | 'messageLimit'
     | 'setMessageLimit'
@@ -60,7 +58,7 @@ export function Conversation(
     | 'inspectFile'
     | 'toggleTool'
     | 'messageContext'
-  > & { state: AppState; children: ReactNode; recovery: ReactNode },
+  > & { state: AppState; recovery: ReactNode },
 ) {
   const {
     state,
@@ -69,8 +67,6 @@ export function Conversation(
     environment,
     pending,
     setFeatureTab,
-    compact,
-    inspector,
     expanded,
     messageLimit,
     setMessageLimit,
@@ -344,7 +340,7 @@ export function Conversation(
   };
 
   return (
-    <section className="conversation" inert={inspector && compact}>
+    <>
       {findOpen && (
         <div className="session-find" role="search" aria-label="会话内查找">
           <Search size={14} />
@@ -576,7 +572,6 @@ export function Conversation(
           回到最新
         </button>
       )}
-      {props.children}
-    </section>
+    </>
   );
 }

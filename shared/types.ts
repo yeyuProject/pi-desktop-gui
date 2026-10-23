@@ -339,6 +339,7 @@ export interface Change {
 }
 export interface Changes {
   git: boolean;
+  checkpoints: CheckpointSummary[];
   branch?: string;
   head?: string;
   files: Change[];

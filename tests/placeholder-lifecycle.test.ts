@@ -509,6 +509,7 @@ function closeBoundary(
   showAppDialog = async (_options: unknown, _fallback: boolean) => ({ response: 0 }),
   waitForOperations = async () => {},
   writeWindowState = async () => {},
+  workspaceCleanup = Promise.resolve(),
 ) {
   const call = one(
     (node) =>
@@ -531,6 +532,7 @@ function closeBoundary(
       isMac: false,
       sessionEnding: false,
       workspaceWatcher: undefined,
+      workspaceCleanup,
       configurationWrites: Promise.resolve(),
       writeWindowState,
       showAppDialog,
@@ -538,6 +540,48 @@ function closeBoundary(
     },
   ) as (event: { preventDefault: () => void }) => void;
 }
+
+for (const writable of [true, false])
+  test(`window shows before checkpoint maintenance; writable=${writable}`, async () => {
+    const boundary = one(
+      (node) =>
+        ts.isCallExpression(node) &&
+        node.expression.getText(source) === 'window.once' &&
+        node.arguments[0]?.getText(source) === "'ready-to-show'",
+    );
+    assert.ok(ts.isCallExpression(boundary));
+    const cleanup = deferred();
+    let visible = false,
+      calls = 0,
+      completed = false;
+    const window = { show: () => (visible = true) };
+    const run = compile(
+      `let workspaceCleanup;
+       return { show: ${boundary.arguments[1].getText(source)}, cleanup: () => workspaceCleanup };`,
+      {
+        saved: { maximized: false },
+        window,
+        store: { storage: { writable } },
+        closing: false,
+        quitting: false,
+        workspace: {
+          cleanup: () => {
+            assert.equal(visible, true);
+            calls++;
+            return cleanup.promise.then(() => (completed = true));
+          },
+        },
+        dialog: { showErrorBox: () => assert.fail('maintenance should succeed') },
+      },
+    ) as { show(): void; cleanup(): Promise<void> | undefined };
+    run.show();
+    assert.equal(visible, true);
+    assert.equal(calls, writable ? 1 : 0);
+    assert.equal(completed, false);
+    cleanup.resolve();
+    await run.cleanup();
+    assert.equal(completed, writable);
+  });
 
 test('actual main close path waits for first draft persistence when no AgentService exists', async (t) => {
   const f = await fixture(t);
@@ -997,12 +1041,13 @@ console.log('1.1.0');
   assert.equal((agent as any).probe, undefined);
 });
 
-test('actual update persistence boundary waits for a promoted no-agent draft', async (t) => {
+test('actual update persistence boundary waits for a promoted no-agent draft and startup cleanup', async (t) => {
   const f = await fixture(t);
   const blank = await f.newSession();
   const gate = holdWriter(t, f.store);
   const saving = f.handlers.saveDraft(blank.id, 'first draft before update', []);
   await gate.entered.promise;
+  const cleanup = deferred();
   const boundary = one(
     (node) => ts.isPropertyAssignment(node) && node.name.getText(source) === 'beforeInstall',
   );
@@ -1015,6 +1060,7 @@ test('actual update persistence boundary waits for a promoted no-agent draft', a
       service: f.agents,
       closing: false,
       sessionEnding: false,
+      workspaceCleanup: cleanup.promise,
       writeWindowState: async () => {},
     },
   ) as () => Promise<void>;
@@ -1025,12 +1071,16 @@ test('actual update persistence boundary waits for a promoted no-agent draft', a
     assert.equal(completed, false);
     gate.release.resolve();
     await saving;
+    await nextTurn();
+    assert.equal(completed, false, 'update must also wait for startup checkpoint maintenance');
+    cleanup.resolve();
     await installing;
     const restarted = new Store(f.store.dir);
     await restarted.load();
     assert.equal(restarted.session(blank.id).draft, 'first draft before update');
   } finally {
     gate.release.resolve();
+    cleanup.resolve();
     await saving.catch(() => {});
   }
 });

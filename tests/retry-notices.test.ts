@@ -26,6 +26,7 @@ function fixture(t: TestContext) {
     assertWritable() {},
     matchesDraft: Store.prototype.matchesDraft,
     async save() {},
+    async scheduleSave() {},
     async flush() {},
   };
   const service = new AgentService(store as never, {} as never);
