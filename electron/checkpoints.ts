@@ -609,8 +609,11 @@ export class Checkpoints {
     // unchecked in the undo preview instead of claiming they belong to this turn.
     await this.observe(sessionId, after, boundary.overlapping ? 'manual' : 'pi', changed);
   }
-  cleanup() {
-    return this.serialize(() => this.cleanupUnlocked());
+  cleanup(cleanupBaselines?: () => Promise<void>) {
+    return this.serialize(async () => {
+      await cleanupBaselines?.();
+      await this.cleanupUnlocked();
+    });
   }
   private async cleanupUnlocked(sessionId?: string) {
     const now = Date.now();

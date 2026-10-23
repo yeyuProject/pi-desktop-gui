@@ -549,6 +549,40 @@ test('legacy project baseline remains available before a session has its own che
   assert.equal(changes.files[0].path, 'a.txt');
 });
 
+test('startup baseline cleanup finishes before a new checkpoint starts writing', async (t) => {
+  const { project, workspace, sessionId, write, data } = await fixture(t);
+  await write('a.txt', 'original');
+  await workspace.capture(project);
+  await workspace.captureCheckpoint(project, sessionId, 1);
+  const baseline = path.join(data, 'baselines', `${project.id}.json`);
+  const expired = new Date(Date.now() - 8 * 86400000);
+  await fs.utimes(baseline, expired, expired);
+  const order: string[] = [];
+  let started!: () => void;
+  const cleaning = new Promise<void>((resolve) => (started = resolve));
+  const unlink = fs.unlink;
+  t.mock.method(fs, 'unlink', async (...args: Parameters<typeof unlink>) => {
+    if (String(args[0]) === baseline) {
+      started();
+      await new Promise((resolve) => setTimeout(resolve, 1500));
+      await unlink(...args);
+      order.push('legacy-removed');
+      return;
+    }
+    return unlink(...args);
+  });
+  const writeFile = fs.writeFile;
+  t.mock.method(fs, 'writeFile', async (...args: Parameters<typeof writeFile>) => {
+    if (String(args[0]).endsWith(`${sessionId}-2.json.tmp`)) order.push('checkpoint-written');
+    return writeFile(...args);
+  });
+  const cleanup = workspace.cleanup();
+  await cleaning;
+  await Promise.all([cleanup, workspace.captureCheckpoint(project, sessionId, 2)]);
+  assert.deepEqual(order, ['legacy-removed', 'checkpoint-written']);
+  assert.equal((await workspace.listCheckpoints(project, sessionId)).length, 2);
+});
+
 test('parallel tool completions serialize attribution updates and preserve all twelve paths', async (t) => {
   const { project, workspace, sessionId, write, data } = await fixture(t);
   const first = (await workspace.captureCheckpoint(project, sessionId, 1))!;

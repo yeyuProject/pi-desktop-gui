@@ -451,7 +451,10 @@ export class Workspace {
     if (!this.baselines.has(project.id))
       throw new Error('本轮快照超过 200 MiB 的保留上限，请缩小项目范围或减少需保存的文件后重试');
   }
-  async cleanup() {
+  cleanup() {
+    return this.checkpoints.cleanup(() => this.cleanupBaselines());
+  }
+  private async cleanupBaselines() {
     const dir = path.join(this.dataDir, 'baselines');
     await fs.mkdir(dir, { recursive: true });
     const entries = await fs.readdir(dir);
@@ -483,7 +486,6 @@ export class Workspace {
     for (const name of entries)
       if (/^[\w-]+-\d+\.git$/.test(name) && !live.has(name))
         await fs.rm(path.join(dir, name), { recursive: true, force: true });
-    await this.checkpoints.cleanup();
   }
   private repoPath(b: Baseline) {
     if ('sessionId' in b) return this.checkpoints.repoPath(b as CheckpointRecord);
