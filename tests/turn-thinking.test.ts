@@ -38,7 +38,7 @@ test('thinking spans tools and retries, retains block offsets and separates user
 });
 
 test('pagination retains the full current turn and search offsets for every original thinking block', async () => {
-  const { searchSession } = await import('../src/lib/session-search');
+  const { SessionSearch } = await import('../src/lib/session-search');
   const messages: Message[] = [
     { role: 'assistant', content: [{ type: 'thinking', thinking: 'orphan' }] },
     { role: 'user', content: 'start' },
@@ -55,8 +55,9 @@ test('pagination retains the full current turn and search offsets for every orig
   const groups = turnThinking(messages, 80);
   assert.equal(groups.length, 1);
   assert.equal(groups[0].owner, 2);
-  const matches = searchSession(messages, [], 'needle');
-  for (const match of matches) {
+  const matches = new SessionSearch().search(messages, [], 'needle');
+  for (let index = 0; index < matches.length; index++) {
+    const match = matches.at(index)!;
     const part = groups[0].parts.find((p) => p.index === match.messageIndex && p.block === match.blockIndex)!;
     assert.ok(part);
     assert.equal(groups[0].text.slice(part.offset + match.start, part.offset + match.start + 6), 'needle');

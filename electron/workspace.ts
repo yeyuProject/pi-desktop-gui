@@ -10,7 +10,7 @@ import { createSnapshotRepo, hashBlobs, readBlob, storeBlobs } from './snapshot'
 import { formatAttachmentSpec, parseAttachmentSpec, type AttachmentInfo } from '../shared/attachments';
 import { Checkpoints, checkpointRevision, type SnapshotData, type CheckpointRecord } from './checkpoints';
 import type { CheckpointContext, CheckpointPreview } from '../shared/checkpoints';
-import { isWindows } from './platform';
+import { isWindows, loadLoginShellPath } from './platform';
 export { parseAttachmentSpec } from '../shared/attachments';
 const exec = promisify(execFile);
 const MiB = 1024 * 1024;
@@ -50,6 +50,7 @@ export async function safePath(root: string, relative: string, allowRoot = false
   return real;
 }
 export async function git(root: string, args: string[], maxBuffer = 4 * MiB) {
+  await loadLoginShellPath();
   return (
     await exec('git', ['-c', 'core.fsmonitor=false', '-c', 'core.quotepath=false', ...args], {
       cwd: root,
@@ -279,7 +280,10 @@ async function snapshotPath(root: string, relative: string, allowMissing = false
   return absolute;
 }
 const SNAPSHOT_FILE_LIMIT = 50 * MiB;
-export async function snapshotStorageBytes(directory: string): Promise<number> {
+export async function snapshotStorageBytes(
+  directory: string,
+  onFile?: (file: string, size: number) => void,
+): Promise<number> {
   let entries;
   try {
     entries = await fs.readdir(directory, { withFileTypes: true });
@@ -290,8 +294,11 @@ export async function snapshotStorageBytes(directory: string): Promise<number> {
   const sizes = await Promise.all(
     entries.map(async (entry) => {
       const file = path.join(directory, entry.name);
-      if (entry.isDirectory()) return snapshotStorageBytes(file);
-      return entry.isFile() ? (await fs.stat(file)).size : 0;
+      if (entry.isDirectory()) return snapshotStorageBytes(file, onFile);
+      if (!entry.isFile()) return 0;
+      const size = (await fs.stat(file)).size;
+      onFile?.(file, size);
+      return size;
     }),
   );
   return sizes.reduce((sum, size) => sum + size, 0);
@@ -444,7 +451,10 @@ export class Workspace {
     if (!this.baselines.has(project.id))
       throw new Error('本轮快照超过 200 MiB 的保留上限，请缩小项目范围或减少需保存的文件后重试');
   }
-  async cleanup() {
+  cleanup() {
+    return this.checkpoints.cleanup(() => this.cleanupBaselines());
+  }
+  private async cleanupBaselines() {
     const dir = path.join(this.dataDir, 'baselines');
     await fs.mkdir(dir, { recursive: true });
     const entries = await fs.readdir(dir);
@@ -476,7 +486,6 @@ export class Workspace {
     for (const name of entries)
       if (/^[\w-]+-\d+\.git$/.test(name) && !live.has(name))
         await fs.rm(path.join(dir, name), { recursive: true, force: true });
-    await this.checkpoints.cleanup();
   }
   private repoPath(b: Baseline) {
     if ('sessionId' in b) return this.checkpoints.repoPath(b as CheckpointRecord);
@@ -537,13 +546,20 @@ export class Workspace {
     try {
       meta = await info(project.path);
     } catch {
-      return { git: false, files: [], baselineAvailable: false, omitted: [] };
+      return {
+        git: false,
+        files: [],
+        baselineAvailable: false,
+        omitted: [],
+        checkpoints: context ? await this.checkpoints.list(project, context.sessionId, null) : [],
+      };
     }
-    if (context) await this.checkpoints.list(project, context.sessionId, meta);
+    const checkpoints = context ? await this.checkpoints.list(project, context.sessionId, meta) : [];
     const baseline = await this.baseline(project.id, context);
     const valid = this.validBaseline(baseline, meta);
     const result: Changes = {
       git: true,
+      checkpoints,
       branch: meta.branch,
       head: meta.head,
       files: [],

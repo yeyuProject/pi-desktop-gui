@@ -1,14 +1,15 @@
 import fs from 'node:fs/promises';
 import path from 'node:path';
 import { spawn } from 'node:child_process';
-import { isWindows } from './platform';
+import { isWindows, loadLoginShellPath } from './platform';
 
 /**
  * Run snapshots stored as Git blobs in a private bare repository under the app data directory.
  * Its `alternates` point at the project's object store, so files already known to the project cost
  * nothing to snapshot. The project's own `.git` is only read: no objects, refs, stash or index change.
  */
-function git(args: string[], cwd: string, input?: string) {
+async function git(args: string[], cwd: string, input?: string) {
+  await loadLoginShellPath();
   return new Promise<Buffer>((resolve, reject) => {
     const child = spawn('git', ['-c', 'core.fsmonitor=false', '-c', 'core.quotepath=false', ...args], {
       cwd,

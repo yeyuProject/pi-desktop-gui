@@ -80,6 +80,7 @@ import {
 } from '../shared/types';
 
 let window: BrowserWindow | undefined, store: Store, service: SessionAgents, workspace: Workspace;
+let workspaceCleanup: Promise<void> | undefined;
 let updates: UpdateService;
 let quitting = false;
 let closing = false;
@@ -1569,6 +1570,13 @@ async function createWindow() {
   window.once('ready-to-show', () => {
     if (saved.maximized) window?.maximize();
     window?.show();
+    if (!closing && !quitting && store.storage.writable)
+      workspaceCleanup = workspace.cleanup().catch((error) => {
+        dialog.showErrorBox(
+          '检查点清理未完成',
+          `应用可以继续使用，请检查本地数据目录的权限和磁盘空间。\n\n${String(error)}`,
+        );
+      });
   });
   for (const event of ['resize', 'move', 'maximize', 'unmaximize'] as const)
     window.on(event as 'resize', () => void rememberWindow());
@@ -1652,6 +1660,7 @@ async function createWindow() {
           if (!discardUnsaved && !(await confirmUnsavedQuit(error, true))) return;
         }
         workspaceWatcher?.dispose();
+        await workspaceCleanup;
         await finalWindowWrite;
         await updates.prepareForQuit(
           !sessionEnding && (store.storage.writable || !!store.storage.newerFormat),
@@ -1683,7 +1692,7 @@ else {
     .whenReady()
     .then(async () => {
       app.setAppUserModelId(appUserModelId);
-      await loadLoginShellPath();
+      void loadLoginShellPath();
       store = new Store(app.getPath('userData'), app.getVersion());
       await store.load();
       nativeTheme.themeSource = nativeThemeSource(store.state.settings.theme);
@@ -1700,7 +1709,6 @@ else {
       if ((store.storage.recovery || store.state.appVersion !== app.getVersion()) && store.storage.writable)
         await store.save().catch(() => {});
       workspace = new Workspace(store.dir);
-      if (store.storage.writable) await workspace.cleanup();
       service = new SessionAgents(
         store,
         workspace,
@@ -1741,6 +1749,7 @@ else {
           if (closing || sessionEnding) throw new Error('应用正在退出，请下次启动后重试更新');
           if (!store.storage.writable && !store.storage.newerFormat) store.assertWritable();
           await service.disconnect();
+          await workspaceCleanup;
           if (store.storage.writable) await store.flush();
           clearTimeout(windowTimer);
           windowTimer = undefined;

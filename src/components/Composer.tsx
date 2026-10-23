@@ -55,7 +55,6 @@ export type ComposerProps = Pick<
   | 'attachmentBytes'
   | 'inputMaxHeight'
   | 'setInputMaxHeight'
-  | 'elapsed'
   | 'setShortcutsOpen'
   | 'stopArmed'
   | 'dragging'
@@ -123,7 +122,6 @@ export function Composer(props: ComposerProps) {
     attachmentBytes,
     inputMaxHeight,
     setInputMaxHeight,
-    elapsed,
     setShortcutsOpen,
     stopArmed,
     dragging,

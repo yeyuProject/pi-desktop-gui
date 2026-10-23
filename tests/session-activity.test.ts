@@ -114,7 +114,7 @@ test('cancelled and failed connection attempts preserve activity and unread', as
   assert.deepEqual(f.recency(), before);
 });
 
-test('an exit state event can precede persistence of its final activity timestamp', async (t) => {
+test('exit broadcasts wait for the final activity timestamp to be persisted', async (t) => {
   const f = await fixture(t);
   await f.service.connect(f.older.id);
   await f.store.flush();
@@ -155,13 +155,13 @@ test('an exit state event can precede persistence of its final activity timestam
     assert.equal(saved.lastStatus, 'interrupted');
     assert.equal(saved.updatedAt, 1, 'the first queued save still contains the previous activity');
     assert.ok(f.older.updatedAt > 1);
-    assert.equal(renderedAt, f.older.updatedAt, 'state events expose the completed exit activity');
-    assert.notEqual(saved.updatedAt, renderedAt, 'waiting for this disk timestamp in the UI cannot finish');
+    assert.equal(renderedAt, undefined, 'the superseded save must not broadcast the still-pending activity');
   } finally {
     release();
     await f.store.flush();
   }
   const disk = JSON.parse(await fs.readFile(path.join(f.dir, 'state.json'), 'utf8'));
+  assert.equal(renderedAt, f.older.updatedAt);
   assert.equal(
     disk.sessions.find((session: { id: string }) => session.id === f.older.id).updatedAt,
     renderedAt,
@@ -194,6 +194,77 @@ test('accepted messages and background completion still advance activity and mar
     assert.ok(f.older.updatedAt > f.newer.updatedAt);
     assert.equal(f.older.unread, true);
   }
+});
+
+test('a burst of 400 message and tool boundaries shares one timed save and broadcast', async (t) => {
+  const f = await fixture(t);
+  f.service.runtime.sessionId = f.older.id;
+  f.service.runtime.status = 'running';
+  const internal = f.service as unknown as { onEvent(record: unknown): void };
+  const saves = t.mock.method(f.store, 'save');
+  let broadcasts = 0;
+  f.service.on('state', () => broadcasts++);
+  const published = once(f.service, 'state');
+  for (let index = 0; index < 100; index++) {
+    internal.onEvent({ type: 'message_start', message: { role: 'assistant', content: [] } });
+    internal.onEvent({ type: 'message_end', message: { role: 'assistant', content: `answer ${index}` } });
+    internal.onEvent({ type: 'tool_execution_start', toolCallId: `tool-${index}`, toolName: 'read' });
+    internal.onEvent({
+      type: 'tool_execution_end',
+      toolCallId: `tool-${index}`,
+      result: { content: 'contents' },
+    });
+  }
+  assert.equal(saves.mock.callCount(), 0);
+  assert.equal(broadcasts, 0);
+  await published;
+  assert.equal(saves.mock.callCount(), 1);
+  assert.equal(broadcasts, 1);
+  const disk = JSON.parse(await fs.readFile(path.join(f.dir, 'state.json'), 'utf8'));
+  assert.equal(
+    disk.sessions.find((session: { id: string }) => session.id === f.older.id).updatedAt,
+    f.older.updatedAt,
+  );
+});
+
+for (const status of ['completed', 'stopped', 'error', 'interrupted'] as const)
+  test(`${status} persists pending activity immediately without a duplicate broadcast`, async (t) => {
+    const f = await fixture(t);
+    f.service.runtime.sessionId = f.older.id;
+    f.service.runtime.status = 'running';
+    const internal = f.service as unknown as { activity(): void; status(value: string): void };
+    const saves = t.mock.method(f.store, 'save');
+    let broadcasts = 0;
+    f.service.on('state', () => broadcasts++);
+    internal.activity();
+    assert.equal(saves.mock.callCount(), 0);
+    internal.status(status);
+    internal.activity();
+    assert.equal(
+      saves.mock.callCount(),
+      2,
+      'terminal status and final activity are immediate durability barriers',
+    );
+    await f.store.flush();
+    assert.equal(broadcasts, 1);
+    const disk = JSON.parse(await fs.readFile(path.join(f.dir, 'state.json'), 'utf8'));
+    const saved = disk.sessions.find((session: { id: string }) => session.id === f.older.id);
+    assert.equal(saved.lastStatus, status);
+    assert.equal(saved.updatedAt, f.older.updatedAt);
+    assert.equal(saved.unread, true);
+  });
+
+test('dispose flushes pending running activity', async (t) => {
+  const f = await fixture(t);
+  f.service.runtime.sessionId = f.older.id;
+  f.service.runtime.status = 'running';
+  (f.service as unknown as { activity(): void }).activity();
+  await f.service.dispose();
+  const disk = JSON.parse(await fs.readFile(path.join(f.dir, 'state.json'), 'utf8'));
+  assert.equal(
+    disk.sessions.find((session: { id: string }) => session.id === f.older.id).updatedAt,
+    f.older.updatedAt,
+  );
 });
 
 test('message, tool and run boundaries update activity without per-token persistence', async (t) => {

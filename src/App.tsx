@@ -42,6 +42,43 @@ export default function App() {
     () => <UpdateBadge update={model.update} open={() => setUpdateOpen(true)} />,
     [model.update],
   );
+  const recovery = useMemo(
+    () =>
+      model.ownRuntime && model.runtime.crash && model.selected ? (
+        <CrashCard
+          key={model.runtime.crash.at}
+          crash={model.runtime.crash}
+          projectId={model.project?.id}
+          sessionId={model.selected.id}
+          disabled={model.pending || model.running || !model.storage.writable}
+          recover={(prompt) =>
+            model.action(() => window.desktop.invoke('recover', model.selected!.id, prompt))
+          }
+          inspect={() => {
+            model.setChangeMode('run');
+            model.setTab('changes');
+            model.setInspector(true);
+          }}
+          undo={() => model.revert(null)}
+          diagnostic={() => model.openSettings('diagnostic')}
+        />
+      ) : null,
+    [
+      model.ownRuntime,
+      model.runtime.crash,
+      model.selected?.id,
+      model.project?.id,
+      model.pending,
+      model.running,
+      model.storage.writable,
+      model.action,
+      model.setChangeMode,
+      model.setTab,
+      model.setInspector,
+      model.revert,
+      model.openSettings,
+    ],
+  );
   if (!state)
     return (
       <main className="loading-screen">
@@ -144,65 +181,44 @@ export default function App() {
           ])}
         />
         <div ref={columns} className={'workspace-columns' + (compact ? ' compact' : '')}>
-          <Conversation
-            {...pick(model, [
-              'storage',
-              'runtime',
-              'environment',
-              'pending',
-              'setFeatureTab',
-              'compact',
-              'inspector',
-              'expanded',
-              'messageLimit',
-              'setMessageLimit',
-              'newContent',
-              'setNewContent',
-              'thread',
-              'input',
-              'autoScroll',
-              'selected',
-              'project',
-              'sessionEnabled',
-              'ownRuntime',
-              'running',
-              'messages',
-              'approvals',
-              'lastAssistant',
-              'visibleMessages',
-              'attempt',
-              'persistDraft',
-              'focusComposer',
-              'selectSession',
-              'openSettings',
-              'connect',
-              'inspectFile',
-              'toggleTool',
-              'messageContext',
-            ])}
-            state={state}
-            recovery={
-              model.ownRuntime && model.runtime.crash && model.selected ? (
-                <CrashCard
-                  key={model.runtime.crash.at}
-                  crash={model.runtime.crash}
-                  projectId={model.project?.id}
-                  sessionId={model.selected.id}
-                  disabled={model.pending || model.running || !model.storage.writable}
-                  recover={(prompt) =>
-                    model.action(() => window.desktop.invoke('recover', model.selected!.id, prompt))
-                  }
-                  inspect={() => {
-                    model.setChangeMode('run');
-                    model.setTab('changes');
-                    model.setInspector(true);
-                  }}
-                  undo={() => model.revert(null)}
-                  diagnostic={() => model.openSettings('diagnostic')}
-                />
-              ) : null
-            }
-          >
+          <section className="conversation" inert={model.inspector && compact}>
+            <Conversation
+              {...pick(model, [
+                'storage',
+                'runtime',
+                'environment',
+                'pending',
+                'setFeatureTab',
+                'expanded',
+                'messageLimit',
+                'setMessageLimit',
+                'newContent',
+                'setNewContent',
+                'thread',
+                'input',
+                'autoScroll',
+                'selected',
+                'project',
+                'sessionEnabled',
+                'ownRuntime',
+                'running',
+                'messages',
+                'approvals',
+                'lastAssistant',
+                'visibleMessages',
+                'attempt',
+                'persistDraft',
+                'focusComposer',
+                'selectSession',
+                'openSettings',
+                'connect',
+                'inspectFile',
+                'toggleTool',
+                'messageContext',
+              ])}
+              state={state}
+              recovery={recovery}
+            />
             <Composer
               {...pick(model, [
                 'storage',
@@ -238,7 +254,6 @@ export default function App() {
                 'attachmentBytes',
                 'inputMaxHeight',
                 'setInputMaxHeight',
-                'elapsed',
                 'setShortcutsOpen',
                 'stopArmed',
                 'dragging',
@@ -273,7 +288,7 @@ export default function App() {
               ])}
               state={state}
             />
-          </Conversation>
+          </section>
           {model.inspector && !compact && (
             <ResizeHandle
               label="文件面板宽度"

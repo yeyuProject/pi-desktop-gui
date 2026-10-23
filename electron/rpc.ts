@@ -13,17 +13,24 @@ export interface CommandSpec {
 }
 export class LfJsonDecoder {
   private decoder = new StringDecoder('utf8');
-  private buffer = '';
+  private fragments: string[] = [];
+  private length = 0;
   constructor(
     private emit: (value: any) => void,
     private invalid: (error: Error) => void,
   ) {}
   push(chunk: Buffer) {
-    this.buffer += this.decoder.write(chunk);
-    let index: number;
-    while ((index = this.buffer.indexOf('\n')) >= 0) {
-      const line = this.buffer.slice(0, index).replace(/\r$/, '');
-      this.buffer = this.buffer.slice(index + 1);
+    const text = this.decoder.write(chunk);
+    let start = 0,
+      index: number;
+    // A large get_messages response spans many stdout chunks. Scan each chunk
+    // once and join only complete records, instead of copying the growing prefix.
+    while ((index = text.indexOf('\n', start)) >= 0) {
+      this.fragments.push(text.slice(start, index));
+      const line = this.fragments.join('').replace(/\r$/, '');
+      this.fragments = [];
+      this.length = 0;
+      start = index + 1;
       if (!line.trim()) continue;
       try {
         const record = JSON.parse(line);
@@ -34,8 +41,14 @@ export class LfJsonDecoder {
         this.invalid(new Error(`Pi 输出不是有效 JSONL：${(e as Error).message}`));
       }
     }
-    if (this.buffer.length > 128 * 1024 * 1024) {
-      this.buffer = '';
+    if (start < text.length) {
+      const remainder = text.slice(start);
+      this.fragments.push(remainder);
+      this.length += remainder.length;
+    }
+    if (this.length > 128 * 1024 * 1024) {
+      this.fragments = [];
+      this.length = 0;
       this.invalid(new Error('Pi 单条协议记录超过 128 MiB'));
     }
   }

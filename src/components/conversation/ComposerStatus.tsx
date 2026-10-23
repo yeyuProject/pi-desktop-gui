@@ -1,4 +1,5 @@
 import { AlertCircle, RefreshCw, X, Link2 } from 'lucide-react';
+import { useEffect, useState } from 'react';
 import { IconButton } from '../IconButton';
 import { Badge } from '../Badge';
 import { ModelErrorCard } from '../ModelErrorCard';
@@ -7,6 +8,17 @@ import { modKey, shortcut } from '../../lib/platform';
 import type { ComposerProps } from '../Composer';
 import type { ModelErrorAction } from '../../../shared/errors';
 const api = window.desktop;
+// Only the visible status area ticks; task completion removes its timer entirely.
+function useNow(active: boolean) {
+  const [now, setNow] = useState(Date.now);
+  useEffect(() => {
+    if (!active) return;
+    setNow(Date.now());
+    const timer = setInterval(() => setNow(Date.now()), 1000);
+    return () => clearInterval(timer);
+  }, [active]);
+  return now;
+}
 export function ComposerFeedback(
   props: ComposerProps & { handleModelError: (action: ModelErrorAction) => Promise<void> },
 ) {
@@ -23,6 +35,7 @@ export function ComposerFeedback(
     selected,
     setNotice,
   } = props;
+  const now = useNow(ownRuntime && runtime.status === 'retrying' && Boolean(runtime.retry));
   return (
     <>
       {error && !(ownRuntime && runtime.errorKind && error === runtime.error) && (
@@ -40,8 +53,8 @@ export function ComposerFeedback(
           <span>
             第 {runtime.retry.attempt}/{runtime.retry.maxAttempts} 次重试
             {runtime.retry.phase === 'requesting'
-              ? `，等待模型响应（${Math.max(0, Math.floor((Date.now() - (runtime.retry.requestedAt ?? runtime.retry.startedAt)) / 1000))} 秒）`
-              : `，${Math.max(0, Math.ceil((runtime.retry.startedAt + runtime.retry.delayMs - Date.now()) / 1000))} 秒后开始`}
+              ? `，等待模型响应（${Math.max(0, Math.floor((now - (runtime.retry.requestedAt ?? runtime.retry.startedAt)) / 1000))} 秒）`
+              : `，${Math.max(0, Math.ceil((runtime.retry.startedAt + runtime.retry.delayMs - now) / 1000))} 秒后开始`}
             {runtime.retry.error && <small>{runtime.retry.error}</small>}
           </span>
           <button onClick={() => selected && void attempt(() => api.invoke('abortRetry', selected.id))}>
@@ -132,7 +145,6 @@ export function ComposerFooter(props: ComposerProps) {
     ownRuntime,
     runtime,
     ownRunning,
-    elapsed,
     connect,
     pending,
     sessionEnabled,
@@ -145,6 +157,8 @@ export function ComposerFooter(props: ComposerProps) {
     setShortcutsOpen,
   } = props;
   const connecting = ownRunning && !runtime.connected;
+  const now = useNow(ownRunning);
+  const elapsed = runtime.startedAt ? Math.max(0, Math.floor((now - runtime.startedAt) / 1000)) : 0;
   return (
     <>
       {ownRuntime &&
@@ -182,9 +196,7 @@ export function ComposerFooter(props: ComposerProps) {
             </button>
           )}
         </div>
-        {runtime.status === 'stopping' &&
-        runtime.stopStartedAt &&
-        Date.now() - runtime.stopStartedAt > 15000 ? (
+        {runtime.status === 'stopping' && runtime.stopStartedAt && now - runtime.stopStartedAt > 15000 ? (
           <button
             className="danger-link"
             onClick={() => selected && void attempt(() => api.invoke('forceStop', selected.id))}

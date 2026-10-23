@@ -43,6 +43,8 @@ export function useWorkspace(options: WorkspaceOptions) {
     latest.current.selected
       ? { sessionId: latest.current.selected.id, checkpointId: latest.current.checkpointId || undefined }
       : undefined;
+  const updateCheckpoints = (value: CheckpointSummary[]) =>
+    setCheckpoints((previous) => (JSON.stringify(previous) === JSON.stringify(value) ? previous : value));
 
   async function refreshChanges() {
     const current = latest.current;
@@ -61,8 +63,10 @@ export function useWorkspace(options: WorkspaceOptions) {
         latest.current.selected?.id === current.selected?.id &&
         latest.current.checkpointId === current.checkpointId &&
         latest.current.changeMode === current.changeMode
-      )
+      ) {
         setChanges(value);
+        updateCheckpoints(value.checkpoints);
+      }
     });
     loading.current = false;
     if (reloadRequested.current) {
@@ -74,11 +78,11 @@ export function useWorkspace(options: WorkspaceOptions) {
   async function refreshCheckpoints() {
     const current = latest.current;
     if (!current.selected?.projectId) {
-      setCheckpoints([]);
+      updateCheckpoints([]);
       return [];
     }
     const value = await current.attempt(() => api.invoke('checkpoints', current.selected!.id));
-    if (value && latest.current.selected?.id === current.selected.id) setCheckpoints(value);
+    if (value && latest.current.selected?.id === current.selected.id) updateCheckpoints(value);
     return value ?? [];
   }
 
@@ -173,9 +177,13 @@ export function useWorkspace(options: WorkspaceOptions) {
     if (!project) setChanges(undefined);
   }, [selected?.id, project?.id]);
 
+  const lastUserTimestamp =
+    runtime.sessionId === selected?.id
+      ? runtime.messages.findLast((message) => message.role === 'user')?.timestamp
+      : undefined;
   useEffect(() => {
     void refreshChanges();
-  }, [project?.id, selected?.id, changeMode, checkpointId]);
+  }, [project?.id, selected?.id, changeMode, checkpointId, lastUserTimestamp]);
   useEffect(() => {
     if (latest.current.tab !== 'changes' || !latest.current.selectedFile) return;
     generation.current++;
@@ -183,13 +191,6 @@ export function useWorkspace(options: WorkspaceOptions) {
     setPreviewStale(false);
     void readPreview(true);
   }, [changeMode, checkpointId]);
-  const lastUserTimestamp =
-    runtime.sessionId === selected?.id
-      ? runtime.messages.findLast((message) => message.role === 'user')?.timestamp
-      : undefined;
-  useEffect(() => {
-    void refreshCheckpoints();
-  }, [selected?.id, lastUserTimestamp]);
   useEffect(() => {
     const checkPreview = () => {
       if (latest.current.selectedFile) void readPreview(false);
@@ -198,7 +199,6 @@ export function useWorkspace(options: WorkspaceOptions) {
       focused.current = true;
       if (latest.current.project) {
         void refreshChanges();
-        void refreshCheckpoints();
         checkPreview();
       }
     };
@@ -216,7 +216,6 @@ export function useWorkspace(options: WorkspaceOptions) {
         event.changedPaths.some((name) => name === latest.current.selectedFile || name.startsWith('.git/'));
       if ((!document.hidden && focused.current) || latest.current.ownRunning) {
         void refreshChanges();
-        if (event.changedPaths?.some((name) => name.startsWith('.git/'))) void refreshCheckpoints();
         if (previewAffected) checkPreview();
       } else if (previewAffected && latest.current.selectedFile) setPreviewStale(true);
     });

@@ -10,6 +10,7 @@ export const isWindows = process.platform === 'win32';
 export const isMac = process.platform === 'darwin';
 export const nodeExecutableName = isWindows ? 'node.exe' : 'node 可执行文件';
 export async function locateExecutable(name: string): Promise<string> {
+  await loadLoginShellPath();
   try {
     const { stdout } = await exec(isWindows ? 'where.exe' : 'which', [name], {
       windowsHide: true,
@@ -59,6 +60,7 @@ function detach(command: string, args: string[], cwd?: string) {
 }
 
 async function onPath(name: string) {
+  await loadLoginShellPath();
   try {
     await exec('which', [name], { timeout: 3000 });
     return true;
@@ -261,7 +263,11 @@ export async function openWithApp(editor: string, file: string) {
  * GUI apps launched from Finder or a desktop menu inherit a minimal PATH, so tools installed with
  * nvm, Homebrew or similar are invisible. Read the PATH from the user's login shell once.
  */
-export async function loadLoginShellPath() {
+let loginShellPath: Promise<void> | undefined;
+export function loadLoginShellPath() {
+  return (loginShellPath ??= readLoginShellPath());
+}
+async function readLoginShellPath() {
   if (isWindows || process.env.PI_DESKTOP_SKIP_SHELL_PATH) return;
   const shell = process.env.SHELL || (isMac ? '/bin/zsh' : '/bin/bash');
   try {

@@ -7,6 +7,110 @@ import { Store } from '../electron/store';
 
 const png =
   'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVQIHWP4z8DwHwAFgAI/ScLbtAAAAABJRU5ErkJggg==';
+test('startup reads no stored image bodies and opening a draft reads only that session', async (t) => {
+  const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'pi-draft-lazy-'));
+  t.after(() => fs.rm(dir, { recursive: true, force: true }));
+  const seed = new Store(dir);
+  await seed.load();
+  for (let index = 0; index < 16; index++) {
+    const session = seed.createSession();
+    session.images = [
+      {
+        id: `image-${index}`,
+        name: `${index}.png`,
+        mimeType: 'image/png',
+        data: Buffer.concat([Buffer.from(png, 'base64'), Buffer.from(String(index))]).toString('base64'),
+      },
+    ];
+  }
+  await seed.save();
+  const reads: string[] = [];
+  const read = fs.readFile;
+  t.mock.method(fs, 'readFile', async (...args: Parameters<typeof read>) => {
+    if (String(args[0]).endsWith('.bin')) reads.push(String(args[0]));
+    return read(...args);
+  });
+  const store = new Store(dir);
+  await store.load();
+  assert.equal(store.storage.writable, true);
+  assert.equal(store.state.sessions.length, 16);
+  assert.deepEqual(reads, []);
+  await store.save();
+  assert.deepEqual(reads, [], 'saving unrelated state keeps unopened image references');
+  const selected = store.state.sessions[7];
+  const images = await store.draftImages(selected.id);
+  assert.equal(images.length, 1);
+  assert.deepEqual(reads, [path.join(dir, 'draft-images', selected.images![0].file!)]);
+});
+
+for (const corruption of ['content', 'mime'] as const) {
+  test(`deferred ${corruption} validation preserves corrupt image files and pauses writes`, async (t) => {
+    const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'pi-draft-corrupt-'));
+    t.after(() => fs.rm(dir, { recursive: true, force: true }));
+    const seed = new Store(dir);
+    await seed.load();
+    const session = seed.createSession();
+    session.images = [{ id: 'image', name: 'image.png', mimeType: 'image/png', data: png }];
+    await seed.save();
+    const index = path.join(dir, 'state.json');
+    const raw = JSON.parse(await fs.readFile(index, 'utf8'));
+    const file = path.join(dir, 'draft-images', raw.sessions[0].images[0].file);
+    if (corruption === 'content') {
+      const bytes = await fs.readFile(file);
+      bytes[0] ^= 255;
+      await fs.writeFile(file, bytes);
+    } else {
+      raw.sessions[0].images[0].mimeType = 'image/jpeg';
+      await fs.writeFile(index, JSON.stringify(raw));
+    }
+    const before = await fs.readFile(index);
+    const imageBefore = await fs.readFile(file);
+    const backup = await fs.readFile(path.join(dir, 'state.backup-1.json'));
+    const store = new Store(dir);
+    await store.load();
+    assert.equal(store.storage.writable, true, 'content validation waits for this draft to be opened');
+    let storageEvents = 0;
+    store.on('storage', () => storageEvents++);
+    await assert.rejects(store.draftImages(session.id), /草稿图片读取或校验失败/);
+    assert.equal(store.storage.writable, false);
+    assert.equal(storageEvents, 1);
+    await assert.rejects(store.save(), /已暂停发送和保存/);
+    assert.deepEqual(await fs.readFile(index), before);
+    assert.deepEqual(await fs.readFile(file), imageBefore);
+    assert.deepEqual(await fs.readFile(path.join(dir, 'state.backup-1.json')), backup);
+  });
+}
+
+for (const invalid of ['directory', 'large', 'total'] as const) {
+  test(`startup still rejects ${invalid} image storage before enabling writes`, async (t) => {
+    const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'pi-draft-limits-'));
+    t.after(() => fs.rm(dir, { recursive: true, force: true }));
+    const seed = new Store(dir);
+    await seed.load();
+    const session = seed.createSession();
+    session.images = [{ id: 'image', name: 'image.png', mimeType: 'image/png', data: png }];
+    await seed.save();
+    const index = path.join(dir, 'state.json');
+    const raw = JSON.parse(await fs.readFile(index, 'utf8'));
+    const file = path.join(dir, 'draft-images', raw.sessions[0].images[0].file);
+    if (invalid === 'directory') {
+      await fs.unlink(file);
+      await fs.mkdir(file);
+    } else {
+      await fs.truncate(file, invalid === 'large' ? 8 * 1024 * 1024 + 1 : 6 * 1024 * 1024);
+      if (invalid === 'total') {
+        const image = raw.sessions[0].images[0];
+        raw.sessions[0].images = [image, { ...image, id: 'second' }, { ...image, id: 'third' }];
+        await fs.writeFile(index, JSON.stringify(raw));
+      }
+    }
+    const store = new Store(dir);
+    await store.load();
+    assert.equal(store.storage.writable, false);
+    await assert.rejects(store.save(), /草稿图片/);
+  });
+}
+
 test('typing is coalesced, flush saves immediately, and images survive a restart without rewriting', async (t) => {
   const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'pi-draft-storage-'));
   const store = new Store(dir);

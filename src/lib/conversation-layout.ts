@@ -133,6 +133,21 @@ export interface TurnItem {
   added: number;
   removed: number;
 }
+const patchCounts = new WeakMap<
+  ToolActivity,
+  { patch: string | undefined; added: number; removed: number }
+>();
+function countChanges(tool: ToolActivity) {
+  const cached = patchCounts.get(tool);
+  if (cached && cached.patch === tool.patch) return cached;
+  const counts = { patch: tool.patch, added: 0, removed: 0 };
+  for (const line of tool.patch?.split('\n') ?? []) {
+    if (line.startsWith('+') && !line.startsWith('+++')) counts.added++;
+    if (line.startsWith('-') && !line.startsWith('---')) counts.removed++;
+  }
+  patchCounts.set(tool, counts);
+  return counts;
+}
 export function conversationTurns(
   messages: Message[],
   toolFor: (message: Message) => ToolActivity,
@@ -162,17 +177,16 @@ export function conversationTurns(
       const tool = toolFor(message);
       current.modified ||= tool.name === 'write' || tool.name === 'edit';
       current.failed ||= tool.status === 'error';
-      for (const line of tool.patch?.split('\n') ?? []) {
-        if (line.startsWith('+') && !line.startsWith('+++')) current.added++;
-        if (line.startsWith('-') && !line.startsWith('---')) current.removed++;
-      }
+      const counts = countChanges(tool);
+      current.added += counts.added;
+      current.removed += counts.removed;
     }
   }
   return turns;
 }
 
 /** Presentation only: preserve source messages and search coordinates. */
-export function turnThinking(messages: Message[], startIndex = 0) {
+export function turnThinking(messages: Message[], startIndex = 0, endIndex = messages.length) {
   const groups: {
     owner: number;
     end: number;
@@ -180,12 +194,13 @@ export function turnThinking(messages: Message[], startIndex = 0) {
     parts: { index: number; block: number; offset: number }[];
   }[] = [];
   let current: (typeof groups)[number] | undefined;
-  messages.forEach((message, index) => {
+  for (let index = 0; index < endIndex; index++) {
+    const message = messages[index];
     if (message.role === 'user') current = undefined;
     if (current) current.end = index;
-    if (message.role !== 'assistant' || !Array.isArray(message.content)) return;
+    if (message.role !== 'assistant' || !Array.isArray(message.content)) continue;
     const blocks = message.content.filter((b) => b.type === 'thinking' && b.thinking);
-    if (!blocks.length) return;
+    if (!blocks.length) continue;
     if (!current) {
       current = { owner: index, end: index, text: '', parts: [] };
       groups.push(current);
@@ -195,6 +210,6 @@ export function turnThinking(messages: Message[], startIndex = 0) {
       current!.parts.push({ index, block: blockIndex, offset: current!.text.length });
       current!.text += block.thinking;
     });
-  });
+  }
   return groups.filter((g) => g.end >= startIndex);
 }

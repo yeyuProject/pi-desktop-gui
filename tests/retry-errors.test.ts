@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { conversationTurns, groupConversation, hideRecoveredErrors } from '../src/lib/conversation-layout';
-import { searchSession } from '../src/lib/session-search';
+import { SessionSearch } from '../src/lib/session-search';
 import type { Message, ToolActivity } from '../shared/types';
 
 const failure = (errorMessage = 'Connection error.', content: Message['content'] = []): Message => ({
@@ -35,7 +35,10 @@ test('unresolved repeated or mixed failures form one display group without rewri
     assert.equal(items[1].kind, 'errors');
     assert.deepEqual('indices' in items[1] && items[1].indices, [1, 2, 3]);
     assert.equal(conversationTurns(messages, toolFor)[0].failed, true);
-    assert.equal(searchSession(messages, [], errors[0]).length, errors.filter((v) => v === errors[0]).length);
+    assert.equal(
+      new SessionSearch().search(messages, [], errors[0]).length,
+      errors.filter((v) => v === errors[0]).length,
+    );
     assert.deepEqual(messages, before);
   }
 });
@@ -100,12 +103,13 @@ test('successful recovery removes the group while prior turns and cancellation r
 const React = await import('react');
 const { renderToStaticMarkup } = await import('react-dom/server');
 const { RetryErrorGroup } = await import('../src/components/conversation/RetryErrorGroup');
-function markup(errors: string[], activeIndex?: number) {
+function markup(errors: string[], activeIndex?: number, start = 0, end = errors.length) {
   const messages = errors.map((error, index) => ({ ...failure(error), timestamp: index + 1 }));
   return renderToStaticMarkup(
     React.createElement(RetryErrorGroup, {
       messages,
       indices: messages.map((_, index) => index),
+      visibleIndices: messages.map((_, index) => index).slice(start, end),
       activeIndex,
       renderMessage: (index) =>
         React.createElement('p', { key: index, 'data-message-index': index }, errors[index]),
@@ -134,4 +138,18 @@ test('searching a prior failure reveals its original child without duplicating t
   assert.match(expanded, /Connection error\./);
   assert.equal(expanded.match(/Latest failure\./g)?.length, 1);
   assert.equal(markup(['Previous', 'Latest'], 1).match(/data-message-index=/g)?.length, 1);
+});
+
+test('a paged retry group preserves the full count while mounting only the selected page', () => {
+  const html = markup(
+    Array.from({ length: 90 }, (_, i) => `Failure ${i}`),
+    12,
+    10,
+    90,
+  );
+  assert.match(html, /请求失败记录 · 90 次/);
+  assert.match(html, /本页 80 条/);
+  assert.equal(html.match(/data-message-index=/g)?.length, 80);
+  assert.doesNotMatch(html, /data-message-index="0"/);
+  assert.match(html, /data-message-index="89"/);
 });
