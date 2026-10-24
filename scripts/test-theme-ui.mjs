@@ -392,11 +392,29 @@ try {
       findMenu('edit').items.some((item) => item.role?.toLowerCase() === role),
       `Native Edit ${role} retained`,
     );
-  for (const role of ['resetzoom', 'zoomin', 'zoomout', 'togglefullscreen'])
-    assert.ok(
-      findMenu('view').items.some((item) => item.role?.toLowerCase() === role),
-      `Native View ${role} retained`,
-    );
+  assert.ok(findMenu('view').items.some((item) => item.role?.toLowerCase() === 'togglefullscreen'));
+  for (const [label, accelerator] of [
+    ['重置缩放', 'CmdOrCtrl+0'],
+    ['放大', 'CmdOrCtrl+Plus'],
+    ['缩小', 'CmdOrCtrl+-'],
+  ]) {
+    assert.equal(findMenu('view').items.find((item) => item.label === label)?.accelerator, accelerator);
+  }
+  // Persistence uses application-owned zoom actions. Exercise the actual menu callbacks,
+  // rather than requiring Electron's non-persisted role implementation.
+  const zoom = async (label) =>
+    app.evaluate(({ Menu, BrowserWindow }, label) => {
+      Menu.getApplicationMenu()
+        .getMenuItemById('view')
+        .submenu.items.find((item) => item.label === label)
+        .click();
+      return BrowserWindow.getAllWindows()[0].webContents.getZoomFactor();
+    }, label);
+  assert.equal(await zoom('重置缩放'), 1);
+  assert.ok((await zoom('放大')) > 1);
+  assert.equal(await zoom('重置缩放'), 1);
+  assert.ok((await zoom('缩小')) < 1);
+  assert.equal(await zoom('重置缩放'), 1);
   assert.ok(
     findMenu('file').items.some((item) => item.role === (process.platform === 'darwin' ? 'close' : 'quit')),
   );
