@@ -85,7 +85,7 @@ flowchart LR
 
 ## 授权、模板与本地用量
 
-- `shared/approval.ts` 只识别明确的安全命令前缀；有重定向、管道、变量或复合语法时只授权完整命令。`approval-paths.ts` 解析真实路径和敏感目标，使用 `pi/tool-path.ts` 对齐已验证 Pi 的路径规则。授权只存在当前 Pi 会话内，切换与撤销时清空或删除。
+- `shared/approval.ts` 的命令授权只匹配用户确认过的完整命令文本，旧的前缀授权不再生效。`approval-paths.ts` 解析真实路径和敏感目标，使用 `pi/tool-path.ts` 对齐已验证 Pi 的路径规则；项目修改授权排除 `.git`、`.pi`、`.gitattributes` 和 `.gitmodules`，这些路径每次单独确认。确认模式下，项目外或无法验证的读取每次单独确认；只读模式仅放行项目内可验证的读取与搜索。授权只存在当前 Pi 会话内，切换与撤销时清空或删除。`workspace.ts` 在共享 Git 进程入口检查项目是否受信任，未信任项目的文件搜索仅使用目录遍历。
 - `electron/prompts.ts` 直接维护 Pi 原生 Markdown 模板和 YAML frontmatter，不建立另一套模板数据库。可编辑范围由实际资源目录、来源与真实路径共同确定；更新和删除验证 revision，包资源保持只读。
 - `shared/draft.ts` 记录长文本片段在草稿中的位置。发送、外部编辑和退出保存均保留片段；片段不是丢弃正文的视觉占位符。
 - `pi/session-usage.ts` 读取 Pi 的实际 usage 记录，包含历史分支、压缩及嵌套工具开销；缺失的 token 或价格不猜测。`shared/usage.ts` 按最后活动时间选择今日/七天会话后汇总整份会话费用，这不是供应商账单的逐日消费统计。

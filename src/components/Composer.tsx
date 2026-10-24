@@ -571,7 +571,7 @@ export function Composer(props: ComposerProps) {
                         ? 'Pi 将直接修改文件和执行命令'
                         : mode === 'confirm'
                           ? '修改文件和执行命令前会先询问你'
-                          : '只读：Pi 只能读取和分析，不能修改或执行',
+                          : '只读：Pi 只能读取和分析项目内文件，不能修改或执行',
                   );
                 })
               }

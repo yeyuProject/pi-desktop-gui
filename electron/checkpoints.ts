@@ -327,7 +327,7 @@ export class Checkpoints {
     if (!Number.isSafeInteger(turn) || turn < 1) throw new Error('检查点轮次无效');
     let meta;
     try {
-      meta = await info(project.path);
+      meta = await info(project);
     } catch {
       return undefined;
     }
@@ -506,7 +506,7 @@ export class Checkpoints {
     if (!records.length) return [];
     let meta = metadata;
     try {
-      if (meta === undefined) meta = await info(project.path);
+      if (meta === undefined) meta = await info(project);
     } catch {}
     if (!meta) {
       return records.map((record) => ({

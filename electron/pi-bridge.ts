@@ -20,7 +20,7 @@ import {
   DESKTOP_BRIDGE_PROTOCOL,
   DESKTOP_WORKSPACE_PREFIX,
 } from '../shared/pi-bridge';
-import { classifyWriteTarget } from './approval-paths';
+import { classifyReadTarget, classifyWriteTarget } from './approval-paths';
 import {
   APPROVAL_ALLOW,
   APPROVAL_ALWAYS,
@@ -74,14 +74,16 @@ export default function desktopBridge(pi: ExtensionAPI) {
     publishGrants(ctx);
   });
   async function approve(toolName: string, input: unknown, ctx: ExtensionContext) {
-    const verdict = decide(approvalMode, toolName);
+    if (approvalMode === 'auto') return;
+    const request = describe(toolName, input);
+    if (request.kind === 'read') request.readTarget = await classifyReadTarget(ctx.cwd, request.path ?? '');
+    const verdict = decide(approvalMode, toolName, request.readTarget);
     if (verdict === 'allow') return;
     if (verdict === 'deny')
       return {
         block: true as const,
-        reason: `当前为只读模式，桌面端拒绝了 ${toolName}。请只读取和分析，不要修改文件或执行命令。`,
+        reason: `当前为只读模式，桌面端拒绝了 ${toolName}。只允许读取和搜索当前项目内可确认的路径，不允许修改文件或执行命令。`,
       };
-    const request = describe(toolName, input);
     if (request.kind === 'write')
       request.writeTarget = await classifyWriteTarget(ctx.cwd, request.path ?? '');
     request.grant = grantForRequest(request);

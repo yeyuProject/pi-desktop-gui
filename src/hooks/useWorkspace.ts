@@ -216,7 +216,7 @@ export function useWorkspace(options: WorkspaceOptions) {
       : undefined;
   useEffect(() => {
     void refreshChanges();
-  }, [project?.id, selected?.id, changeMode, checkpointId, lastUserTimestamp]);
+  }, [project?.id, project?.trusted, selected?.id, changeMode, checkpointId, lastUserTimestamp]);
   useEffect(() => {
     if (latest.current.tab !== 'changes' || !latest.current.selectedFile) return;
     generation.current++;

@@ -14,8 +14,8 @@ import { useLayer } from '../hooks/useLayer';
 
 export const approvalModes: [ApprovalMode, string, string][] = [
   ['auto', '全自动', 'Pi 直接修改文件、执行命令'],
-  ['confirm', '确认修改', '写文件、执行命令和调用外部工具前先询问'],
-  ['readonly', '只读', '只允许读取和搜索，拒绝所有修改和命令'],
+  ['confirm', '确认修改', '修改、执行命令、项目外读取和外部工具调用前先询问'],
+  ['readonly', '只读', '只允许项目内读取和搜索，拒绝所有修改和命令'],
 ];
 export function ApprovalSwitch({
   mode,
@@ -126,7 +126,11 @@ export function ApprovalCard({
   return (
     <section
       className={
-        'approval-card ' + a.kind + (a.writeTarget && a.writeTarget !== 'project' ? ' approval-warning' : '')
+        'approval-card ' +
+        a.kind +
+        ((a.writeTarget && a.writeTarget !== 'project') || a.readTarget === 'outside'
+          ? ' approval-warning'
+          : '')
       }
       aria-label={`等待批准：${a.toolName}`}
     >
@@ -137,7 +141,9 @@ export function ApprovalCard({
             ? 'Pi 想执行命令'
             : a.kind === 'write'
               ? `Pi 想${a.toolName === 'edit' ? '修改' : '写入'}文件`
-              : `Pi 想调用 ${a.toolName}`}
+              : a.kind === 'read'
+                ? 'Pi 想读取或搜索文件'
+                : `Pi 想调用 ${a.toolName}`}
         </strong>
         {a.path && <code>{a.path}</code>}
       </header>
@@ -146,7 +152,13 @@ export function ApprovalCard({
           <AlertTriangle size={15} />
           {a.writeTarget === 'sensitive'
             ? '敏感文件：本次需要单独确认'
-            : '项目外路径或无法确认的路径：本次需要单独确认'}
+            : '项目外路径、执行配置或无法确认的路径：本次需要单独确认'}
+        </p>
+      )}
+      {a.readTarget === 'outside' && (
+        <p className="approval-path-warning">
+          <AlertTriangle size={15} />
+          项目外路径或无法确认的读取路径：本次需要单独确认，文件内容可能发送给模型
         </p>
       )}
       {a.kind === 'shell' ? (

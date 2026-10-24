@@ -350,7 +350,12 @@ const mock = ({ theme, approval }) => {
           toolName: 'bash',
           kind: 'shell',
           summary: 'npm test -- validate',
-          grant: { id: 'shell:npm test', kind: 'shell-prefix', toolName: 'bash', command: 'npm test' },
+          grant: {
+            id: 'shell-exact:bash:npm test',
+            kind: 'shell-exact',
+            toolName: 'bash',
+            command: 'npm test',
+          },
         },
       },
     ];

@@ -162,7 +162,7 @@ The Windows installer is also unsigned for now, so SmartScreen may warn on first
 <details>
 <summary><b>Is read-only mode a sandbox?</b></summary>
 
-No. Approval modes control tool calls made through Pi — read-only allows only built-in read and search tools and also blocks manual `!` / `!!` commands. They cannot restrict code that an installed extension runs by itself.
+No. Approval modes control tool calls made through Pi. Read-only allows built-in read and search tools only for verified paths inside the current project, and blocks manual `!` / `!!` commands. Confirm mode asks separately for each outside or unverifiable read; remembered shell approvals match only the complete command text. Project-wide write approval excludes `.git`, `.pi`, `.gitattributes`, and `.gitmodules`. These controls cannot restrict code that an installed extension runs by itself.
 </details>
 
 <details>
