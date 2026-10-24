@@ -63,11 +63,17 @@ export function useShortcuts(options: ShortcutsOptions) {
       if (!event.repeat) runAction(binding.action);
     };
     window.addEventListener('keydown', key);
+    const customAction = (event: Event) => {
+      const action = (event as CustomEvent).detail;
+      if (workbenchShortcuts.some((binding) => binding.action === action)) runAction(action);
+    };
+    window.addEventListener('pi:action', customAction);
     const off = window.desktop.onEvent((event) => {
       if (event.type === 'action') runAction(event.action);
     });
     return () => {
       window.removeEventListener('keydown', key);
+      window.removeEventListener('pi:action', customAction);
       off();
     };
   }, []);

@@ -18,6 +18,7 @@ Object.assign(store.state.settings, {
   provider: 'fixture',
   modelId: 'test',
   onboardingDone: true,
+  autoDownloadUpdates: true,
 });
 await store.save();
 let app, page;

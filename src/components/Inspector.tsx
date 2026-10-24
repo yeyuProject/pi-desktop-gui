@@ -128,6 +128,38 @@ export function Inspector(
   const [rules, setRules] = useState<AgentRulesFile>(),
     [rulesLoaded, setRulesLoaded] = useState(false);
   const anchor = useRef(1);
+  const fileIndex = changes?.files.findIndex((file) => file.path === selectedFile) ?? -1;
+  const nextFile = (direction: number) => {
+    const files = changes?.files ?? [];
+    if (!files.length || pending) return;
+    const index = Math.max(0, Math.min(files.length - 1, fileIndex + direction));
+    void inspectFile(files[index].path, 'changes');
+    requestAnimationFrame(() =>
+      inspectorPanel.current?.querySelector<HTMLElement>('.review-navigation')?.focus(),
+    );
+  };
+  useEffect(() => {
+    const key = (event: KeyboardEvent) => {
+      if (
+        !inspector ||
+        tab !== 'changes' ||
+        event.isComposing ||
+        event.defaultPrevented ||
+        !event.altKey ||
+        event.metaKey ||
+        event.ctrlKey ||
+        !(event.target instanceof Node) ||
+        !inspectorPanel.current?.contains(event.target)
+      )
+        return;
+      if (event.key === 'PageDown' || event.key === 'PageUp') {
+        event.preventDefault();
+        nextFile(event.key === 'PageDown' ? 1 : -1);
+      }
+    };
+    window.addEventListener('keydown', key);
+    return () => window.removeEventListener('keydown', key);
+  }, [inspector, tab, selectedFile, changes, pending]);
   const drag = useRef<{ y: number; split: number; height: number; value: number } | null>(null);
   const splitValue = props.state.settings.inspectorSplit;
   const selectedSession = props.state.sessions.find(
@@ -417,6 +449,27 @@ export function Inspector(
                 </div>
               ) : (
                 <>
+                  {!!changes.files.length && (
+                    <nav tabIndex={-1} className="review-navigation" aria-label="逐个审查变更">
+                      <button
+                        disabled={pending || fileIndex <= 0}
+                        onClick={() => nextFile(-1)}
+                        title="Alt+PageUp"
+                      >
+                        上一个文件
+                      </button>
+                      <span aria-live="polite">
+                        {Math.max(0, fileIndex + 1)} / {changes.files.length}
+                      </span>
+                      <button
+                        disabled={pending || fileIndex >= changes.files.length - 1}
+                        onClick={() => nextFile(1)}
+                        title="Alt+PageDown"
+                      >
+                        {fileIndex < 0 ? '开始逐个审查' : '下一个文件'}
+                      </button>
+                    </nav>
+                  )}
                   <div className={'change-list ' + (selectedFile ? 'has-preview' : '')}>
                     {changes.files.length === 0 ? (
                       <div className="clean-state">

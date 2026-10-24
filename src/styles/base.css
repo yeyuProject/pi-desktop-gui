@@ -41,7 +41,7 @@
 .mcp-status pre {
   white-space: pre-wrap;
   overflow-wrap: anywhere;
-  font-size: 12px;
+  font-size: calc(12px * var(--font-scale));
   padding: 10px;
   border-radius: 8px;
   background: var(--code);
@@ -135,7 +135,7 @@
   border-radius: 10px;
   padding: 14px;
   font-family: Consolas, monospace;
-  font-size: 12px;
+  font-size: calc(12px * var(--font-scale));
   line-height: 1.6;
   tab-size: 2;
 }
@@ -154,7 +154,7 @@
   display: block;
   color: var(--muted);
   overflow-wrap: anywhere;
-  font-size: 11px;
+  font-size: calc(11px * var(--font-scale));
 }
 .session-tree article {
   border-left: 2px solid var(--line);
@@ -198,7 +198,7 @@
   text-overflow: ellipsis;
   white-space: nowrap;
   color: var(--muted);
-  font-size: 10px;
+  font-size: calc(10px * var(--font-scale));
 }
 .image-attachments button {
   position: absolute;

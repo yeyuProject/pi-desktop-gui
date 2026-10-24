@@ -125,6 +125,8 @@ for (const scenario of [
         text() {},
         assertTerminalClosed: async () => {},
         store: {
+          dir: '/fixture',
+          purgeDeletedSession: async () => {},
           state,
           session: () => session,
           removeSessions: () => {
@@ -136,6 +138,8 @@ for (const scenario of [
           },
         },
         service: { active: () => false, release: async () => {} },
+        workspace: { removeSession: async () => {} },
+        removeSessionScratch: async () => {},
         showAppDialog: async () => ({ response: scenario === 'cancel' ? 0 : 1 }),
         save: async () => {},
         fs: {

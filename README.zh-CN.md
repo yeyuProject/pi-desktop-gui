@@ -88,7 +88,7 @@ npm install -g --ignore-scripts @earendil-works/pi-coding-agent
 | **macOS**   | Apple Silicon · Intel | `.dmg` · `.zip`                                          |
 | **Linux**   | x86_64                | `.AppImage`（支持自动更新）· `.deb`                      |
 
-Windows 安装版、macOS 和 Linux AppImage 支持应用内更新（可在 **设置 → 关于与更新** 关闭自动下载）；其他格式在有新版本时提示手动下载。Mac 请从可写目录运行应用，推荐放入“应用程序”；v0.14.30 及更早版本需先手动安装一次 v0.14.31 或更新版本，之后可直接在应用内升级。任务或审批未结束时不会重启更新。
+Windows 安装版、macOS 和 Linux AppImage 支持应用内更新（默认手动下载，可在 **设置 → 关于与更新** 开启自动下载；仅点击“立即重启”才安装）；其他格式在有新版本时提示手动下载。Mac 请从可写目录运行应用，推荐放入“应用程序”；v0.14.30 及更早版本需先手动安装一次 v0.14.31 或更新版本，之后可直接在应用内升级。任务或审批未结束时不会重启更新。
 
 ### 3. 连接模型并开始
 
@@ -153,7 +153,7 @@ macOS 版本采用 ad-hoc 签名，并在打包时校验签名完整性。目前
 xattr -dr com.apple.quarantine "/Applications/Pi Desktop.app"
 ```
 
-Windows 安装包目前也未签名，首次运行可能出现 SmartScreen 提示。更新下载会校验 SHA-512。
+Windows 安装包目前也未签名，首次运行可能出现 SmartScreen 提示。更新先验证内置公钥对应的 Ed25519 发布者签名，再校验安装包 SHA-512。更新代理和 HTTPS 镜像可在 **设置 → 外观与编辑器 → 更新网络** 配置。发布签名流程见 [更新签名](docs/update-signing.md)。
 </details>
 
 <details>

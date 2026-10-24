@@ -20,6 +20,7 @@ import { compareAppVersions, stableVersion } from '../shared/app-update';
 import { sessionUsage } from './pi/session-usage';
 import type { SessionUsage } from '../shared/usage';
 import { isReusableSession } from './session-lifecycle';
+import { readLargeTranscript } from './large-transcript';
 export { defaultSettings } from './store-state';
 
 const BACKUP_INTERVAL = 10 * 60 * 1000;
@@ -37,6 +38,9 @@ export class Store extends EventEmitter {
   private writtenImages = new Set<string>();
   // Keep stable IDs for late draft IPC, but never infer this status from loaded blank rows.
   private transientSessions = new Set<string>();
+  private retryTimer?: NodeJS.Timeout;
+  private retrying?: Promise<void>;
+  private recoveryStopped = false;
   constructor(
     readonly dir: string,
     private readonly appVersion?: string,
@@ -46,19 +50,78 @@ export class Store extends EventEmitter {
   private file(name: string) {
     return path.join(this.dir, name);
   }
-  private writeFailure(error: unknown) {
+  private writeFailure(error: unknown, retryable = false) {
     const code = (error as NodeJS.ErrnoException).code;
     this.storage = {
       ...this.storage,
       writable: false,
-      problem: `无法写入本地数据目录，发送与保存已暂停。请检查磁盘剩余空间和目录权限后重新启动${code ? `（${code}）` : ''}。`,
+      retryable,
+      problem: `无法写入本地数据目录，发送与保存已暂停。请检查磁盘剩余空间和目录权限${code ? `（${code}）` : ''}。${retryable ? '草稿仍在内存中，将自动重试，也可点击“重试保存”。' : '修复后请重新启动。'}`,
     };
     this.emit('storage', this.storage);
+    if (retryable && !this.retryTimer && !this.recoveryStopped) {
+      this.retryTimer = setTimeout(() => {
+        this.retryTimer = undefined;
+        void this.retrySave().catch(() => {});
+      }, 5000);
+      this.retryTimer.unref();
+    }
+  }
+  retrySave() {
+    if (this.retrying) return this.retrying;
+    if (!this.storage.retryable) return Promise.reject(new Error(this.storage.problem ?? '无需重试保存'));
+    this.retrying = this.save(true).finally(() => {
+      this.retrying = undefined;
+    });
+    return this.retrying;
+  }
+  stopRecovery() {
+    this.recoveryStopped = true;
+    clearTimeout(this.retryTimer);
+    this.retryTimer = undefined;
+  }
+  async purgeDeletedSession(id: string) {
+    // Flush first, then scrub historical indexes so deleted drafts cannot be restored from a backup.
+    await this.flush();
+    this.writing = this.writing
+      .catch(() => {})
+      .then(async () => {
+        for (const name of await fs.readdir(this.dir)) {
+          if (!/^state\.(?:backup-\d|pre-[\w.-]+)\.json$/.test(name)) continue;
+          const raw = JSON.parse(await fs.readFile(this.file(name), 'utf8'));
+          if (!Array.isArray(raw.sessions)) throw new Error('无法清理备份中的会话，请检查本地数据目录');
+          raw.sessions = raw.sessions.filter((session: Session) => session.id !== id);
+          if (raw.selectedSessionId === id) delete raw.selectedSessionId;
+          await this.replace(name, JSON.stringify(raw));
+        }
+        const used = new Set<string>();
+        for (const session of this.state.sessions)
+          for (const image of session.images ?? []) if (image.file) used.add(image.file);
+        for (const name of await fs.readdir(this.dir)) {
+          if (!/^state\.(?:backup-\d|pre-[\w.-]+)\.json$/.test(name)) continue;
+          const raw = JSON.parse(await fs.readFile(this.file(name), 'utf8'));
+          for (const session of raw.sessions ?? [])
+            for (const image of session.images ?? []) if (image.file) used.add(image.file);
+        }
+        for (const file of await fs.readdir(this.file('draft-images')).catch((e) => {
+          if (e.code === 'ENOENT') return [];
+          throw e;
+        })) {
+          if (/^[a-f0-9]{64}\.bin$/.test(file) && !used.has(file)) {
+            await fs.rm(this.file(path.join('draft-images', file)));
+            this.writtenImages.delete(file);
+          }
+        }
+      });
+    await this.writing;
   }
   assertWritable() {
     if (!this.storage.writable) throw new Error(this.storage.problem);
   }
   async load() {
+    this.recoveryStopped = false;
+    clearTimeout(this.retryTimer);
+    this.retryTimer = undefined;
     this.transientSessions.clear();
     this.imageFiles = new WeakMap();
     this.writtenImages.clear();
@@ -277,9 +340,11 @@ export class Store extends EventEmitter {
       this.storage = {
         ...this.storage,
         writable: false,
+        retryable: false,
         problem:
           '草稿图片读取或校验失败，已暂停发送和保存，原文件已保留。请检查数据目录中的 draft-images，恢复图片后重启。',
       };
+      this.stopRecovery();
       this.emit('storage', this.storage);
       throw new Error(this.storage.problem, { cause: error });
     }
@@ -347,7 +412,7 @@ export class Store extends EventEmitter {
     }
     await this.replace('state.backup-1.json', contents);
   }
-  save() {
+  save(retry = false) {
     const deferred = this.deferredSave;
     this.deferredSave = undefined;
     if (deferred) clearTimeout(deferred.timer);
@@ -379,7 +444,7 @@ export class Store extends EventEmitter {
       2,
     );
     const write = async () => {
-      this.assertWritable();
+      if (!retry || !this.storage.retryable) this.assertWritable();
       try {
         if (images.size) await fs.mkdir(this.file('draft-images'), { recursive: true });
         for (const [file, data] of images) {
@@ -407,8 +472,14 @@ export class Store extends EventEmitter {
               : image;
           });
         }
+        if (retry && this.storage.retryable) {
+          clearTimeout(this.retryTimer);
+          this.retryTimer = undefined;
+          this.storage = { ...this.storage, writable: true, retryable: undefined, problem: undefined };
+          this.emit('storage', this.storage);
+        }
       } catch (error) {
-        this.writeFailure(error);
+        this.writeFailure(error, true);
         throw new Error(this.storage.problem, { cause: error });
       }
     };
@@ -537,7 +608,7 @@ export class Store extends EventEmitter {
   }
 }
 
-type Transcript = { cwd: string; name?: string; messages: Message[]; stats: SessionUsage };
+type Transcript = { cwd: string; name?: string; messages: Message[]; stats: SessionUsage; warning?: string };
 const transcriptCache = new Map<string, { stamp: string; bytes: number; value: Transcript }>();
 const transcriptReads = new Map<string, Promise<Transcript>>();
 const transcriptBudget = 32 * 1024 * 1024;
@@ -546,7 +617,7 @@ const transcriptStamp = (stat: NonNullable<Awaited<ReturnType<typeof fs.stat>>>)
 export async function readSessionFile(file: string): Promise<Transcript> {
   const key = path.resolve(file);
   const stat = await fs.stat(key);
-  if (stat.size > 64 * 1024 * 1024) throw new Error('会话文件超过 64 MiB，请在 Pi 中压缩或导出后再导入');
+  if (stat.size > 64 * 1024 * 1024) return readLargeTranscript(key);
   const stamp = transcriptStamp(stat);
   const cached = transcriptCache.get(key);
   transcriptCache.delete(key);
@@ -587,7 +658,7 @@ async function readSessionFileUncached(
   file: string,
 ): Promise<{ cwd: string; name?: string; messages: Message[]; stats: SessionUsage }> {
   const stat = await fs.stat(file);
-  if (stat.size > 64 * 1024 * 1024) throw new Error('会话文件超过 64 MiB，请在 Pi 中压缩或导出后再导入');
+  if (stat.size > 64 * 1024 * 1024) return readLargeTranscript(file);
   const raw = await fs.readFile(file, 'utf8');
   const entries: any[] = [];
   const lines = raw.split('\n');

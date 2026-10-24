@@ -96,6 +96,14 @@ try {
     .toBe(true);
   await expect(input).toHaveValue('切换文件时保留这份草稿');
   await expect(inspector.locator('.unified-diff')).not.toContainText('replacement_');
+  await inspector.getByRole('button', { name: '下一段', exact: true }).click();
+  assert.equal(await page.evaluate(() => document.activeElement?.className), 'diff-hunk');
+  await inspector.getByRole('button', { name: '上一个文件', exact: true }).focus();
+  await page.keyboard.press('Alt+PageUp');
+  await expect(inspector.locator('.preview-toolbar strong')).toHaveAttribute('title', 'large.ts');
+  await page.keyboard.press('Alt+PageDown');
+  await expect(inspector.locator('.preview-toolbar strong')).toHaveAttribute('title', 'small.ts');
+  await expect(inspector.locator('.unified-diff')).toContainText('value100 = 999');
 
   await inspector.getByRole('button', { name: '对照', exact: true }).click();
   await expect(inspector.locator('.diff-pane')).toHaveCount(2);

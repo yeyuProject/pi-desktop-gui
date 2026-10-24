@@ -76,8 +76,58 @@ export const DiffView = memo(function DiffView({
   const error = result?.request === request ? result.error : undefined;
   const left = useRef<HTMLDivElement>(null),
     right = useRef<HTMLDivElement>(null);
+  const root = useRef<HTMLDivElement>(null);
+  const cursor = useRef(-1);
+  useEffect(() => {
+    cursor.current = -1;
+  }, [request]);
+  const navigate = (direction: number) => {
+    const headers = root.current?.querySelectorAll<HTMLElement>(
+      split ? '.diff-pane:last-child .diff-hunk' : '.diff-hunk',
+    );
+    if (!headers?.length) return;
+    cursor.current = Math.max(0, Math.min(headers.length - 1, cursor.current + direction));
+    headers[cursor.current].scrollIntoView({ block: 'start' });
+    headers[cursor.current].focus({ preventScroll: true });
+  };
+  const navigation = (
+    <nav className="review-navigation" aria-label="改动段导航">
+      <button onClick={() => navigate(-1)} title="Alt+[">
+        上一段
+      </button>
+      <span>{aligned?.length ?? 0} 段改动</span>
+      <button onClick={() => navigate(1)} title="Alt+]">
+        下一段
+      </button>
+    </nav>
+  );
+  const wrap = (children: React.ReactNode) => (
+    <div
+      ref={root}
+      className="diff-review"
+      onKeyDown={(event) => {
+        if (
+          event.nativeEvent.isComposing ||
+          event.defaultPrevented ||
+          !event.altKey ||
+          event.ctrlKey ||
+          event.metaKey
+        )
+          return;
+        if (event.code === 'BracketLeft' || event.code === 'BracketRight') {
+          event.preventDefault();
+          navigate(event.code === 'BracketRight' ? 1 : -1);
+        }
+      }}
+    >
+      {navigation}
+      {children}
+    </div>
+  );
+  const chunks = <T,>(rows: T[]) =>
+    Array.from({ length: Math.ceil(rows.length / 100) }, (_, i) => rows.slice(i * 100, (i + 1) * 100));
   const header = (hunk: DiffHunk, key: number, allowAsk = true) => (
-    <div className="diff-hunk" key={`h-${key}`}>
+    <div className="diff-hunk" tabIndex={-1} key={`h-${key}`}>
       <code>{hunk.header}</code>
       {allowAsk && path && onAskHunk && (
         <button
@@ -105,7 +155,7 @@ export const DiffView = memo(function DiffView({
     );
   if (!aligned.length) return <pre className={`diff-view diff-raw ${className}`}>{patch}</pre>;
   if (split)
-    return (
+    return wrap(
       <div className={`diff-view aligned-diff ${className}`}>
         {(['left', 'right'] as const).map((side) => (
           <div
@@ -119,34 +169,42 @@ export const DiffView = memo(function DiffView({
             }}
           >
             {aligned.map(({ hunk, rows }, i) => (
-              <div key={i}>
+              <div className="diff-hunk-group" key={i}>
                 {header(hunk, i, side === 'right')}
-                {rows.map((row, j) => (
-                  <Cell key={j} cell={row[side]} side={side} />
+                {chunks(rows).map((chunk, index) => (
+                  <div className="diff-chunk" key={index}>
+                    {chunk.map((row, j) => (
+                      <Cell key={j} cell={row[side]} side={side} />
+                    ))}
+                  </div>
                 ))}
               </div>
             ))}
           </div>
         ))}
-      </div>
+      </div>,
     );
-  return (
+  return wrap(
     <div className={`diff-view unified-diff ${className}`}>
       {aligned.map(({ hunk, rows }, i) => (
-        <div key={i}>
+        <div className="diff-hunk-group" key={i}>
           {header(hunk, i)}
-          {rows.map((row, j) =>
-            row.left?.kind === 'context' ? (
-              <Cell key={j} cell={row.right} side="right" />
-            ) : (
-              <div key={j}>
-                {row.left && <Cell cell={row.left} side="left" />}
-                {row.right && <Cell cell={row.right} side="right" />}
-              </div>
-            ),
-          )}
+          {chunks(rows).map((chunk, index) => (
+            <div className="diff-chunk" key={index}>
+              {chunk.map((row, j) =>
+                row.left?.kind === 'context' ? (
+                  <Cell key={j} cell={row.right} side="right" />
+                ) : (
+                  <div key={j}>
+                    {row.left && <Cell cell={row.left} side="left" />}
+                    {row.right && <Cell cell={row.right} side="right" />}
+                  </div>
+                ),
+              )}
+            </div>
+          ))}
         </div>
       ))}
-    </div>
+    </div>,
   );
 });

@@ -1,6 +1,6 @@
 export const workbenchShortcuts = [
   { action: 'new', key: 'n', mod: true, label: '新建独立对话' },
-  { action: 'search', key: 'k', mod: true, label: '搜索会话标题与内容' },
+  { action: 'search', key: 'k', mod: true, label: '搜索会话与操作' },
   { action: 'find', key: 'f', mod: true, label: '查找当前会话' },
   { action: 'sidebar', key: 'b', mod: true, label: '收起或展开侧栏' },
   { action: 'inspector', key: 'j', mod: true, label: '收起或展开工作区面板' },

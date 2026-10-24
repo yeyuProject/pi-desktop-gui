@@ -34,6 +34,7 @@ export interface Project {
   createdAt: number;
 }
 export interface Session {
+  historyNotice?: string;
   id: string;
   projectId?: string;
   title: string;
@@ -70,6 +71,10 @@ export interface Settings {
   onboardingDone: boolean;
   notifyOnFinish: boolean;
   autoDownloadUpdates: boolean;
+  updateProxy?: string;
+  updateMirror?: string;
+  notifyOnApproval?: boolean;
+  notifyOnError?: boolean;
 }
 export interface AppState {
   version: 1;
@@ -94,6 +99,7 @@ export interface IndexRecovery {
   restarted: boolean;
 }
 export interface StorageStatus {
+  retryable?: boolean;
   writable: boolean;
   problem?: string;
   recovery?: IndexRecovery;
@@ -254,6 +260,7 @@ export interface Runtime {
     contextWindow?: number;
   };
   notifications?: RuntimeNotification[];
+  historyNotice?: string;
   retry?: {
     attempt: number;
     maxAttempts: number;
@@ -406,6 +413,9 @@ export interface Bootstrap extends StateSnapshot {
   update: UpdateState;
 }
 export interface ApiMap {
+  retryStorage: { args: []; result: void };
+  rendererReady: { args: []; result: void };
+  clearLocalData: { args: []; result: void };
   appDialogsReady: { args: []; result: void };
   respondAppDialog: { args: [id: string, response: number]; result: void };
   showAppMenu: { args: [id: AppMenuId, x: number, y: number]; result: void };

@@ -24,6 +24,9 @@ export function WorkspaceHeader(
     | 'project'
     | 'ownRuntime'
     | 'running'
+    | 'activities'
+    | 'state'
+    | 'selectSession'
   >,
 ) {
   const {
@@ -39,6 +42,7 @@ export function WorkspaceHeader(
     ownRuntime,
     running,
   } = props;
+  const waiting = props.state?.sessions.filter((session) => props.activities[session.id]?.pending > 0) ?? [];
 
   return (
     <header className="workspace-header" inert={inspector && compact}>
@@ -63,6 +67,19 @@ export function WorkspaceHeader(
         </div>
       </div>
       <div className="header-actions">
+        {waiting.length > 0 && (
+          <button
+            className="attention-button"
+            aria-live="polite"
+            title={waiting.map((session) => session.title).join('、')}
+            onClick={() => {
+              const next = waiting.find((session) => session.id !== selected?.id) ?? waiting[0];
+              void props.selectSession(next);
+            }}
+          >
+            待回复 {waiting.reduce((sum, session) => sum + props.activities[session.id].pending, 0)}
+          </button>
+        )}
         <button aria-label="Pi 功能" disabled={!selected} onClick={() => setFeatureTab('session')}>
           <Command size={16} />
           <span>Pi 功能</span>

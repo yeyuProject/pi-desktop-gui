@@ -4,8 +4,7 @@ import type { ElectronHttpExecutor } from 'electron-updater/out/electronHttpExec
 import path from 'node:path';
 import { MacUpdateError, stageMacUpdate, startMacInstaller, type MacUpdatePlan } from './mac-update';
 
-/** Use the normal GitHub provider, cache and SHA-512 downloader without Squirrel's identity requirement.
- * The distributed ad-hoc builds have no persistent Developer ID. Each ZIP is independently verified. */
+/** Signed release metadata supplies the hash; macOS additionally validates each staged bundle. */
 export class MacArchiveUpdater extends electronUpdater.AppUpdater {
   declare protected httpExecutor: ElectronHttpExecutor;
   private plan?: MacUpdatePlan;
@@ -47,12 +46,14 @@ export class MacArchiveUpdater extends electronUpdater.AppUpdater {
   }
   private launchInstaller(relaunch: boolean) {
     if (!this.plan) return Promise.reject(new Error('更新尚未下载完成'));
-    this.installing ??= startMacInstaller(this.plan, relaunch, () => this.autoInstallOnAppQuit).catch(
-      (error) => {
-        this.installing = undefined;
-        throw error;
-      },
-    );
+    this.installing ??= startMacInstaller(
+      this.plan,
+      relaunch,
+      () => relaunch || this.autoInstallOnAppQuit,
+    ).catch((error) => {
+      this.installing = undefined;
+      throw error;
+    });
     return this.installing;
   }
   async installDownloaded() {

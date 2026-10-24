@@ -156,7 +156,7 @@ macOS builds use ad-hoc signing and pass a signature integrity check during pack
 xattr -dr com.apple.quarantine "/Applications/Pi Desktop.app"
 ```
 
-The Windows installer is also unsigned for now, so SmartScreen may warn on first launch. Update downloads are verified with SHA-512.
+The Windows installer is also unsigned for now, so SmartScreen may warn on first launch. Updates require an Ed25519 publisher signature verified against the bundled public key, followed by SHA-512 verification of the installer. Downloads are manual by default; installation requires an explicit restart. An update-only proxy or HTTPS mirror can be configured in Settings. See [release signing](docs/update-signing.md).
 </details>
 
 <details>

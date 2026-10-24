@@ -76,7 +76,7 @@ Most files in the working tree use CRLF. Compare with `git diff --ignore-cr-at-e
 2. Add release notes at `docs/releases/v<version>.md`.
 3. Push the tag `v<version>`. The tag must match the package version.
 
-The **Build, test and release** workflow then runs the three-platform tests, the Windows/Linux upgrade regression and packaging. On success it creates a GitHub Release with the installers, `latest.yml`, `latest-linux.yml`, `.blockmap` files and a `SHA256SUMS.txt` covering every asset. Update manifests are checked for version, file names, size and SHA-512 before publishing.
+The **Build, test and release** workflow then runs the three-platform tests, the Windows/Linux upgrade regression and packaging. On success it creates a **draft** GitHub Release with installers, three platform manifests, blockmaps and SHA-256 checksums. Before publication, independently review the artifacts, sign the manifests outside CI and upload their `.sig` files. Regenerate the checksums to include the signatures, verify the uploaded files, then publish the draft. Follow [independent release signing](docs/update-signing.md); never put the signing private key in GitHub Actions.
 
 You can also run the workflow manually from the Actions tab and download installers from that run's artifacts without publishing.
 

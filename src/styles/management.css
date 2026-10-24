@@ -8,7 +8,7 @@
   transform: rotate(-90deg);
 }
 .project-waiting {
-  font-size: 10px;
+  font-size: calc(10px * var(--font-scale));
   font-style: normal;
   color: var(--warning, #b4730f);
   white-space: nowrap;
@@ -44,7 +44,7 @@
 .approval-grant > span {
   flex: 1;
   min-width: 0;
-  font-size: 11px;
+  font-size: calc(11px * var(--font-scale));
 }
 .approval-grant > span {
   overflow-wrap: anywhere;
@@ -55,7 +55,7 @@
   width: auto;
   flex: 0 0 auto;
   padding: 4px;
-  font-size: 11px;
+  font-size: calc(11px * var(--font-scale));
 }
 .approval-card.approval-warning {
   border-color: var(--danger, #b33c36);
@@ -213,7 +213,7 @@
   gap: 4px;
 }
 .resource-actions button {
-  font-size: 11px;
+  font-size: calc(11px * var(--font-scale));
   padding: 4px 6px;
 }
 .resource-readonly {
@@ -240,13 +240,13 @@
   background: var(--accent-soft);
 }
 .usage-periods strong {
-  font-size: 13px;
+  font-size: calc(13px * var(--font-scale));
 }
 .usage-projects {
   width: 100%;
   margin-top: 12px;
   border-collapse: collapse;
-  font-size: 12px;
+  font-size: calc(12px * var(--font-scale));
 }
 .usage-projects th,
 .usage-projects td {

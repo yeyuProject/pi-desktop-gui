@@ -615,6 +615,30 @@ export class Checkpoints {
       await this.cleanupUnlocked();
     });
   }
+  removeSession(sessionId: string) {
+    safeId(sessionId);
+    return this.serialize(async () => {
+      // Session object stores are separate; never collect another session's blobs.
+      const entries = await fs.readdir(this.directory).catch((error) => {
+        if (error.code === 'ENOENT') return [] as string[];
+        throw error;
+      });
+      for (const name of entries) {
+        if (
+          (name.startsWith(sessionId + '-') &&
+            /^\d+\.json(?:\.tmp)?$/.test(name.slice(sessionId.length + 1))) ||
+          name === `session-${sessionId}.state` ||
+          name === `session-${sessionId}.state.tmp` ||
+          name === `session-${sessionId}-objects.git`
+        )
+          await this.removeStored(path.join(this.directory, name), true);
+      }
+      this.tracking.delete(sessionId);
+      if (this.cached?.sessionId === sessionId) this.cached = undefined;
+      if (this.hashes?.sessionId === sessionId) this.hashes = undefined;
+      this.scanHashes.delete(sessionId);
+    });
+  }
   private async cleanupUnlocked(sessionId?: string) {
     const now = Date.now();
     const full = !sessionId || !this.storage || now - this.lastCleanup >= CLEANUP_INTERVAL;

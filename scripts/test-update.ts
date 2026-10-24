@@ -4,7 +4,8 @@ import { createReadStream } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import http from 'node:http';
-import { createHash, randomUUID } from 'node:crypto';
+import { createHash, randomUUID, generateKeyPairSync, sign } from 'node:crypto';
+import { updateSigningPayload } from '../shared/update-signature';
 import { execFile, spawn, type ChildProcess } from 'node:child_process';
 import { promisify } from 'node:util';
 import { createRequire } from 'node:module';
@@ -36,6 +37,8 @@ const installDir = path.join(root, 'installed');
 const oldVersion = '0.9.0',
   nextVersion = '0.9.1';
 const assets = new Map<string, string>();
+const fixtureKeys = generateKeyPairSync('ed25519');
+const fixturePublicKey = fixtureKeys.publicKey.export({ type: 'spki', format: 'pem' }).toString();
 let badChecksum = false;
 const requests: string[] = [];
 const server = http.createServer(async (req, res) => {
@@ -177,6 +180,8 @@ const fixtureFs = require('node:fs'), fixturePath = require('node:path');
 const fixtureRoot = ${JSON.stringify(root)};
 const fixtureCase = JSON.parse(fixtureFs.readFileSync(fixturePath.join(fixtureRoot, 'active-case.json'), 'utf8'));
 const fixtureElectron = require('electron');
+if (fixtureCase.mode === 'startup-failure' && fixtureElectron.app.getVersion() === '${nextVersion}')
+  fixtureElectron.app.whenReady().then(() => fixtureElectron.app.exit(9));
 const fixtureDefaultDataDir = fixtureElectron.app.getPath('userData');
 fixtureElectron.app.setPath('userData', fixtureCase.dataDir);
 fixtureElectron.app.on('session-created', session => session.webRequest.onBeforeRequest({urls:['http://*/*','https://*/*']}, (details, callback) => {
@@ -188,7 +193,7 @@ fixtureElectron.app.on('browser-window-created', (_, window) => window.webConten
   try {
     const bootstrap = await window.webContents.executeJavaScript('window.desktop.invoke("bootstrap")');
     fixtureFs.writeFileSync(fixturePath.join(fixtureCase.dataDir, 'boot-' + fixtureElectron.app.getVersion() + '.json'), JSON.stringify({version:fixtureElectron.app.getVersion(),executable:process.execPath,bootstrap,pid:process.pid,defaultDataDir:fixtureDefaultDataDir}));
-    if (fixtureElectron.app.getVersion() === '${nextVersion}') setTimeout(() => fixtureElectron.app.quit(), 2500);
+    if (fixtureElectron.app.getVersion() === '${nextVersion}' || fixtureCase.awaitingRollback) setTimeout(() => fixtureElectron.app.quit(), 2500);
   } catch (error) { fixtureFs.writeFileSync(fixturePath.join(fixtureRoot, 'boot-error.txt'), String(error)); }
 }));
 `;
@@ -237,30 +242,19 @@ try {
         {
           name: 'loopback-update-feed',
           setup(build) {
-            build.onLoad(
-              { filter: /electron[\\/](?:mac-update-driver|update-driver)\.ts$/ },
-              async (args) => {
-                const source = await fs.readFile(args.path, 'utf8');
-                const options = JSON.stringify({
-                  provider: 'generic',
-                  url: feed,
-                  useMultipleRangeRequest: false,
-                });
-                return {
-                  loader: 'ts',
-                  contents: source
-                    .replace('new NsisUpdater()', `new NsisUpdater(${options})`)
-                    .replace('new AppImageUpdater()', `new AppImageUpdater(${options})`)
-                    .replace('super(null)', `super(${options})`),
-                };
-              },
-            );
-            build.onLoad({ filter: /shared[\\/]app-update\.ts$/ }, async (args) => ({
+            build.onLoad({ filter: /shared[\\/]update-trust\.ts$/ }, async () => ({
               loader: 'ts',
-              contents: (await fs.readFile(args.path, 'utf8')).replace(
-                'https://api.github.com/repos/yeyuProject/pi-desktop-gui/releases/latest',
-                feed + 'releases/latest',
-              ),
+              contents: `export const UPDATE_PUBLIC_KEY = ${JSON.stringify(fixturePublicKey)};`,
+            }));
+            build.onLoad({ filter: /electron[\\/]update-network\.ts$/ }, async (args) => ({
+              loader: 'ts',
+              contents: (await fs.readFile(args.path, 'utf8'))
+                .replace('https://github.com/yeyuProject/pi-desktop-gui/releases/latest/download/', feed)
+                .replace(
+                  "url.protocol !== 'https:'",
+                  "(url.protocol !== 'https:' && url.hostname !== '127.0.0.1')",
+                )
+                .replace('env: NodeJS.ProcessEnv = process.env', 'env: NodeJS.ProcessEnv = {}'),
             }));
           },
         },
@@ -348,6 +342,15 @@ try {
     for (const file of await fs.readdir(out))
       if (/\.(?:exe|AppImage|zip|blockmap|yml)$/.test(file)) assets.set(file, path.join(out, file));
   }
+  for (const [name, file] of [...assets]) {
+    if (!/^latest(?:-mac|-linux)?\.yml$/.test(name)) continue;
+    const bytes = await fs.readFile(file);
+    const signature = sign(null, updateSigningPayload(name, bytes), fixtureKeys.privateKey).toString(
+      'base64',
+    );
+    await fs.writeFile(file + '.sig', signature);
+    assets.set(name + '.sig', file + '.sig');
+  }
   if (process.platform === 'darwin') {
     const previousDeveloperDirectory = process.env.DEVELOPER_DIR;
     process.env.DEVELOPER_DIR = '/pi-update-no-xcode-installed';
@@ -371,11 +374,13 @@ try {
   const modes =
     process.platform === 'win32'
       ? ['restart', 'stale-shortcut', 'unpacked-restart', 'portable-to-installer', 'on-quit']
-      : ['restart', 'on-quit'];
+      : process.platform === 'darwin'
+        ? ['restart', 'startup-failure', 'on-quit']
+        : ['restart', 'on-quit'];
   for (const mode of modes) {
     const portable = mode === 'portable-to-installer';
     const unpacked = mode === 'unpacked-restart';
-    const restart = mode === 'restart' || mode === 'stale-shortcut' || unpacked;
+    const restart = mode === 'restart' || mode === 'stale-shortcut' || mode === 'startup-failure' || unpacked;
     const runningDirectory = unpacked ? path.join(root, mode, 'unpacked with spaces') : installDir;
     let otherCopyFiles: [string, string][] | undefined;
     const executable =
@@ -413,6 +418,7 @@ try {
       modelId: 'test',
       theme: 'dark',
       onboardingDone: true,
+      autoDownloadUpdates: true,
     });
     await store.save();
     await fs.writeFile(path.join(root, 'active-case.json'), JSON.stringify({ dataDir, mode }));
@@ -500,10 +506,12 @@ try {
     await page.evaluate(() => window.desktop.invoke('checkUpdate'));
     if (badChecksum) {
       await page.waitForFunction(() => (window as any).updateStates.at(-1)?.state === 'error');
-      assert.match(await page.evaluate(() => (window as any).updateStates.at(-1).error), /校验失败/);
+      assert.match(await page.evaluate(() => (window as any).updateStates.at(-1).error), /发布者签名/);
       badChecksum = false;
       await page.evaluate(() => window.desktop.invoke('checkUpdate'));
-      console.log('PASS real checksum failure rejects the downloaded installer and permits a clean retry');
+      console.log(
+        'PASS changed metadata fails publisher verification before any installer download and permits a clean retry',
+      );
     }
     await page.waitForFunction(
       (portable) => (window as any).updateStates.at(-1)?.state === (portable ? 'available' : 'ready'),
@@ -560,6 +568,13 @@ try {
         'PASS real receipt write failure cancels installation, restores workspace notifications and allows retry',
       );
     }
+    if (mode === 'startup-failure') {
+      await fs.rm(path.join(dataDir, `boot-${oldVersion}.json`), { force: true });
+      await fs.writeFile(
+        path.join(root, 'active-case.json'),
+        JSON.stringify({ dataDir, mode, awaitingRollback: true }),
+      );
+    }
     const closed = portable
       ? new Promise<void>((resolve) => portableBrowser!.once('disconnected', () => resolve()))
       : app!.waitForEvent('close', { timeout: 120000 });
@@ -579,11 +594,68 @@ try {
     console.log(`Exit evidence ${mode}: ${JSON.stringify(exit)}`);
     app = undefined;
     portableBrowser = undefined;
+    if (mode === 'startup-failure') {
+      const restored = await until(async () =>
+        JSON.parse(await fs.readFile(path.join(dataDir, `boot-${oldVersion}.json`), 'utf8')),
+      );
+      assert.equal(restored.version, oldVersion);
+      assert.equal(restored.bootstrap.update.lastInstall.outcome, 'failed');
+      assert.equal(
+        restored.bootstrap.state.sessions.find((item: any) => item.id === session.id).draft,
+        draft,
+      );
+      assert.equal(
+        JSON.parse(
+          extractFile(
+            path.join(installDir, productName + '.app/Contents/Resources/app.asar'),
+            'package.json',
+          ).toString(),
+        ).version,
+        oldVersion,
+      );
+      await until(async () => {
+        try {
+          process.kill(restored.pid, 0);
+          return false;
+        } catch {
+          return true;
+        }
+      });
+      console.log(
+        'PASS new application exits before renderer readiness; old bundle and saved draft are restored automatically',
+      );
+      continue;
+    }
     if (portable)
       await exec(assets.get(`Pi-Desktop-${nextVersion}-win-x64-setup.exe`)!, ['/S', `/D=${installDir}`], {
         windowsHide: true,
         timeout: 180000,
       });
+    if (mode === 'on-quit') {
+      if (process.platform === 'linux')
+        assert.deepEqual(
+          await fs.readFile(executable),
+          await fs.readFile(assets.get(`Pi-Desktop-${oldVersion}-linux-x64.AppImage`)!),
+        );
+      else {
+        const asar =
+          process.platform === 'win32'
+            ? path.join(installDir, 'resources/app.asar')
+            : path.join(installDir, productName + '.app/Contents/Resources/app.asar');
+        assert.equal(JSON.parse(extractFile(asar, 'package.json').toString()).version, oldVersion);
+      }
+      assert.equal(
+        JSON.parse(await fs.readFile(path.join(dataDir, 'state.json'), 'utf8')).sessions.find(
+          (item: any) => item.id === session.id,
+        ).draft,
+        draft,
+      );
+      await assert.rejects(fs.access(path.join(dataDir, `boot-${nextVersion}.json`)));
+      console.log(
+        'PASS normal quit preserves the installed version and saved draft; installation requires an explicit restart',
+      );
+      continue;
+    }
     if (!restart) {
       if (process.platform === 'win32')
         await until(

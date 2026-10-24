@@ -476,6 +476,11 @@ export function Conversation(
           </div>
         )}
         <div ref={threadContent}>
+          {(selected?.historyNotice || runtime.historyNotice) && (
+            <p className="environment-note" role="status">
+              {selected?.historyNotice || runtime.historyNotice}
+            </p>
+          )}
           {thinkingGroups.length > 0 && (
             <button
               className="collapse-thinking"

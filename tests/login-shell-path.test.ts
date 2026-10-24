@@ -51,7 +51,7 @@ test('concurrent POSIX lookups await one login shell and inherit its merged PATH
   assert.deepEqual(calls, ['/bin/zsh', 'which']);
 });
 
-test('a failed login shell preserves inherited PATH and does not spawn again', async () => {
+test('a failed login shell preserves PATH, coalesces automatic retries and permits explicit redetection', async () => {
   const process = { env: { PATH: '/usr/bin' } };
   let calls = 0;
   const loader = create(
@@ -67,6 +67,8 @@ test('a failed login shell preserves inherited PATH and does not spawn again', a
   await loader.load();
   assert.equal(calls, 1);
   assert.equal(process.env.PATH, '/usr/bin');
+  await loader.load(true);
+  assert.equal(calls, 2, 'explicit redetection retries a failed shell');
 });
 
 test('Windows lookup does not start a login shell', async () => {

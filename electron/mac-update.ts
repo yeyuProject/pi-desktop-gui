@@ -1,12 +1,13 @@
 import nodeFs from 'node:fs';
 import { createRequire } from 'node:module';
 import path from 'node:path';
-import { createHash } from 'node:crypto';
+import { createHash, randomUUID } from 'node:crypto';
 import { execFile, spawn } from 'node:child_process';
 import { promisify } from 'node:util';
 import { compareAppVersions, stableVersion } from '../shared/app-update';
 import { UpdateAttemptFile } from './update-attempt';
 import { machArchitectures } from './macho';
+import { launchHealthyUpdate, UpdateProcessAliveError } from './update-health';
 
 const exec = promisify(execFile);
 // Electron's patched fs sees app.asar as a directory. Bundle traversal, hashing and
@@ -362,9 +363,16 @@ export async function runMacInstaller(plan: MacUpdatePlan, parent: number, relau
     swapped = true;
     // Keep the old bundle at the hidden staging path as a recoverable backup.
     await signature(plan.target);
+    if (relaunch)
+      await launchHealthyUpdate(
+        path.join(plan.target, 'Contents/MacOS', plan.executable),
+        path.join(plan.directory, 'health.json'),
+        randomUUID(),
+        plan.targetVersion,
+      );
     await fs.writeFile(path.join(plan.directory, 'result.json'), JSON.stringify({ outcome: 'installed' }));
   } catch (error) {
-    if (swapped) {
+    if (swapped && !(error instanceof UpdateProcessAliveError)) {
       await exec(path.join(plan.directory, 'mac-update-swap'), [plan.target, plan.candidate]);
     }
     await new UpdateAttemptFile(plan.receiptDirectory).record({
@@ -374,16 +382,15 @@ export async function runMacInstaller(plan: MacUpdatePlan, parent: number, relau
       outcome: 'failed',
     });
     await fs.writeFile(path.join(plan.directory, 'result.json'), JSON.stringify({ outcome: 'failed' }));
+    if (swapped && relaunch && !(error instanceof UpdateProcessAliveError)) {
+      const environment = { ...process.env };
+      delete environment.ELECTRON_RUN_AS_NODE;
+      delete environment.NODE_CHANNEL_FD;
+      await exec('/usr/bin/open', ['-n', plan.target], { env: environment }).catch(() => {});
+    }
     throw error;
   } finally {
     await fs.rm(path.join(plan.directory, 'install.lock'), { force: true });
   }
   await cleanOlderBackups(plan).catch(() => {});
-  if (relaunch) {
-    const environment = { ...process.env };
-    // The helper is Node-only; propagating this flag makes the new Electron app exit without a window.
-    delete environment.ELECTRON_RUN_AS_NODE;
-    delete environment.NODE_CHANNEL_FD;
-    await exec('/usr/bin/open', ['-n', plan.target], { env: environment });
-  }
 }

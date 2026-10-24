@@ -78,7 +78,8 @@ async function fixture(t: TestContext, dependencies: Record<string, unknown> = {
   const store = new Store(dir);
   await store.load();
   store.state.projects.push({ id: 'project', name: 'Project', path: dir, trusted: false, createdAt: 1 });
-  const agents = new SessionAgents(store, new Workspace(dir));
+  const workspace = new Workspace(dir);
+  const agents = new SessionAgents(store, workspace);
   const events: AppEvent[] = [];
   const send = (event: AppEvent) => events.push(structuredClone(event));
   const operations = compile(
@@ -96,6 +97,8 @@ async function fixture(t: TestContext, dependencies: Record<string, unknown> = {
      };`,
     {
       store,
+      workspace,
+      removeSessionScratch: async () => {},
       service: agents,
       send,
       validateImages,
@@ -554,7 +557,7 @@ for (const writable of [true, false])
     let visible = false,
       calls = 0,
       completed = false;
-    const window = { show: () => (visible = true) };
+    const window = { show: () => (visible = true), webContents: { setZoomFactor: () => {} } };
     const run = compile(
       `let workspaceCleanup;
        return { show: ${boundary.arguments[1].getText(source)}, cleanup: () => workspaceCleanup };`,

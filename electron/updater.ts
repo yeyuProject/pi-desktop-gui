@@ -1,5 +1,6 @@
 import { EventEmitter } from 'node:events';
 import { MacUpdateError } from './mac-update';
+import { UpdateSignatureError } from '../shared/update-signature';
 import {
   compareAppVersions,
   stableVersion,
@@ -37,7 +38,7 @@ export function updateInstallation(
   return env.APPIMAGE ? 'appimage' : 'deb';
 }
 export function updateError(error: unknown) {
-  if (error instanceof MacUpdateError) return error.message;
+  if (error instanceof MacUpdateError || error instanceof UpdateSignatureError) return error.message;
   const detail = error instanceof Error ? error.message : String(error);
   if (/ENOENT/i.test(detail) && /app-update\.yml/i.test(detail))
     return '当前程序缺少自动更新配置，请前往版本页面下载完整安装包。';
@@ -103,7 +104,7 @@ export class UpdateService extends EventEmitter {
   private timer?: NodeJS.Timeout;
   private interval?: NodeJS.Timeout;
   private unsubscribe?: () => void;
-  private installOnQuit = true;
+  private installOnQuit = false;
   constructor(private readonly options: UpdateOptions) {
     super();
     this.autoDownload = options.autoDownload;
@@ -120,7 +121,7 @@ export class UpdateService extends EventEmitter {
     if (options.enabled && this.state.mode === 'auto' && !options.driver)
       throw new Error('自动更新组件未初始化');
     this.unsubscribe = options.driver?.subscribe((event) => this.onDriverEvent(event));
-    options.driver?.configure(this.autoDownload, true);
+    options.driver?.configure(this.autoDownload, false);
   }
   private publish(value: Partial<UpdateState>) {
     this.state = { ...this.state, ...value };
@@ -242,30 +243,10 @@ export class UpdateService extends EventEmitter {
     this.options.driver?.configure(autoDownload, this.installOnQuit);
     if (enable && this.state.state === 'available') void this.download();
   }
-  /** Call after the normal exit flow has stopped Pi and flushed data. */
-  async prepareForQuit(allowInstall: boolean) {
-    this.installOnQuit = allowInstall && this.state.state === 'ready' && !this.options.busy();
-    this.options.driver?.configure(this.autoDownload, this.installOnQuit);
-    if (this.installOnQuit && this.options.driver?.prepareForQuit) {
-      try {
-        const attempt: UpdateInstallAttempt = {
-          currentVersion: this.state.currentVersion,
-          targetVersion: this.state.version!,
-          startedAt: Date.now(),
-          outcome: 'pending',
-        };
-        await this.options.recordAttempt?.(attempt);
-        this.publish({ lastInstall: attempt });
-        if (!this.installOnQuit || this.state.state !== 'ready' || this.options.busy()) {
-          this.markInstallFailed();
-          return;
-        }
-        await this.options.driver.prepareForQuit();
-      } catch (error) {
-        this.markInstallFailed();
-        this.fail(error);
-      }
-    }
+  /** Quitting never authorizes installation, even when a download is ready. */
+  async prepareForQuit(_allowInstall: boolean) {
+    this.installOnQuit = false;
+    this.options.driver?.configure(this.autoDownload, false);
   }
   async install() {
     if (!this.state.enabled || this.state.mode !== 'auto' || this.state.state !== 'ready')
