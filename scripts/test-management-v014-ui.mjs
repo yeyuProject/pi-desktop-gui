@@ -17,7 +17,9 @@ const server = http.createServer(async (request, response) => {
   const prompt =
     typeof content === 'string' ? content : (content ?? []).map((part) => part.text ?? '').join('');
   const hasResult = body.messages.slice(index + 1).some((message) => message.role === 'tool');
-  const file = /^MGMT_WRITE ([\w./-]+)$/.exec(prompt)?.[1];
+  const write = /^MGMT_WRITE ([\w./-]+)$/.exec(prompt)?.[1];
+  const read = /^MGMT_READ (.+)$/.exec(prompt)?.[1];
+  const file = write ?? read;
   response.writeHead(200, { 'content-type': 'text/event-stream', connection: 'keep-alive' });
   const emit = (delta, reason = null) =>
     response.write(
@@ -32,8 +34,8 @@ const server = http.createServer(async (request, response) => {
           id: randomUUID(),
           type: 'function',
           function: {
-            name: 'write',
-            arguments: JSON.stringify({ path: file, content: 'management test\n' }),
+            name: write ? 'write' : 'read',
+            arguments: JSON.stringify(write ? { path: file, content: 'management test\n' } : { path: file }),
           },
         },
       ],
@@ -163,10 +165,13 @@ try {
   await until((value) => value.runtime.approvalMode === 'confirm');
   await input.fill('!npm test tests/a.ts');
   await input.press('Enter');
-  await page.getByRole('button', { name: '本会话允许 npm test 开头', exact: true }).click();
+  await page.getByRole('button', { name: '本会话总是允许此完整命令', exact: true }).click();
   await idle();
   await input.fill('!npm test tests/b.ts');
   await input.press('Enter');
+  const card = page.locator('.approval-card');
+  await card.getByRole('button', { name: '本会话总是允许此完整命令', exact: true }).waitFor();
+  await card.getByRole('button', { name: '允许', exact: true }).click();
   await until((value) =>
     value.runtime.messages.some(
       (message) => message.role === 'bashExecution' && message.command === 'npm test tests/b.ts',
@@ -176,21 +181,20 @@ try {
   assert.equal(await page.locator('.approval-card').count(), 0);
   await input.fill('!npm test && printf compound');
   await input.press('Enter');
-  const card = page.locator('.approval-card');
   await card.getByRole('button', { name: '本会话总是允许此完整命令', exact: true }).waitFor();
   await card.getByRole('button', { name: '拒绝…', exact: true }).click();
   await card.getByRole('button', { name: '拒绝', exact: true }).click();
   await idle();
   await mode.click();
-  await page.getByRole('button', { name: '撤回 命令前缀：npm test', exact: true }).click();
+  await page.getByRole('button', { name: '撤回 完整命令：npm test tests/a.ts', exact: true }).click();
   await until((value) => !value.runtime.approvalGrants.length);
   await page.keyboard.press('Escape');
   await input.fill('!npm test tests/c.ts');
   await input.press('Enter');
-  await page.getByRole('button', { name: '本会话允许 npm test 开头', exact: true }).waitFor();
+  await page.getByRole('button', { name: '本会话总是允许此完整命令', exact: true }).waitFor();
   await card.getByRole('button', { name: '允许', exact: true }).click();
   await idle();
-  console.log('PASS actual Pi command prefix grants, compound-command confirmation and individual revoke');
+  console.log('PASS actual Pi exact command grants, changed-argument confirmation and individual revoke');
 
   await input.fill('MGMT_WRITE first.txt');
   await input.press('Enter');
@@ -219,6 +223,40 @@ try {
   await page.keyboard.press('Escape');
   console.log(
     'PASS project write grant, sensitive target still prompts, collapsed waiting badge and clear all',
+  );
+
+  const outside = path.join(fixture.dir, 'outside-approval.txt');
+  const secret = 'temporary-outside-approval-sentinel';
+  await fs.writeFile(outside, secret);
+  const readsStart = requests.length;
+  for (let attempt = 0; attempt < 2; attempt++) {
+    await input.fill(`MGMT_READ ${outside}`);
+    await input.press('Enter');
+    const readCard = page.getByRole('region', { name: '等待批准：read', exact: true });
+    await readCard.waitFor();
+    assert.match(await readCard.innerText(), /项目外路径.*本次需要单独确认/);
+    assert.equal(await readCard.getByRole('button', { name: /本会话/ }).count(), 0);
+    await readCard.getByRole('button', { name: '拒绝…', exact: true }).click();
+    await readCard.getByRole('button', { name: '拒绝', exact: true }).click();
+    await page.locator('.run-meta .completed').waitFor();
+  }
+  await mode.click();
+  await page.getByRole('menuitemradio', { name: /^只读/ }).click();
+  await until((value) => value.runtime.approvalMode === 'readonly');
+  await input.fill(`MGMT_READ ${outside}`);
+  await input.press('Enter');
+  await until(
+    (value) =>
+      value.runtime.status === 'completed' &&
+      value.runtime.tools.some((tool) => tool.name === 'read' && tool.output.includes('只读模式')),
+  );
+  assert.equal(await page.locator('.approval-card').count(), 0);
+  assert.equal(JSON.stringify(requests.slice(readsStart)).includes(secret), false);
+  await mode.click();
+  await page.getByRole('menuitemradio', { name: /^确认修改/ }).click();
+  await until((value) => value.runtime.approvalMode === 'confirm');
+  console.log(
+    'PASS outside reads prompt each time; readonly blocks them without sending file content to the provider',
   );
 
   await input.fill('/settings');

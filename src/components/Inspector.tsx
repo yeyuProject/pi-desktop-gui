@@ -402,8 +402,8 @@ export function Inspector(
               ) : !changes.git ? (
                 <div className="inspector-empty">
                   <GitBranch size={27} />
-                  <h3>当前目录没有 Git 仓库</h3>
-                  <p>仍然可以与 Pi 对话和浏览文件。</p>
+                  <h3>{changes.error ? 'Git 状态尚未读取' : '当前目录没有 Git 仓库'}</h3>
+                  <p>{changes.error ?? '仍然可以与 Pi 对话和浏览文件。'}</p>
                 </div>
               ) : changeMode === 'run' && !changes.baselineAvailable ? (
                 <div className="inspector-empty">

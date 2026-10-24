@@ -7,7 +7,6 @@ import { pathToFileURL } from 'node:url';
 import { isWindows } from '../electron/platform';
 import { normalizePiToolPath } from '../electron/pi/tool-path';
 import {
-  commandPrefix,
   grantForRequest,
   matchesGrant,
   describe,
@@ -34,25 +33,22 @@ test('tool path normalization follows Pi 1.1 native aliases before checking boun
   }
 });
 
-test('prefix rules accept literal arguments and isolate scripts and subcommands', () => {
-  for (const [command, prefix] of [
-    ['npm test tests/a.test.ts', 'npm test'],
-    ['  npm\ttest tests/b.test.ts  ', 'npm test'],
-    ['npm run test:unit -- --watch', 'npm run test:unit'],
-    ['git diff --stat src/a.ts', 'git diff'],
-    ['cargo test test_name', 'cargo test'],
-    ['pytest tests/a.py', 'pytest'],
-    ['go test ./...', 'go test'],
-  ])
-    assert.equal(commandPrefix(command), prefix, command);
+test('shell grants match only the reviewed full command, including arguments and tool', () => {
   const grant = grantForRequest(describe('bash', { command: 'npm test tests/a.test.ts' }))!;
-  assert.equal(matchesGrant(grant, describe('bash', { command: 'npm test tests/b.test.ts' })), true);
-  for (const command of ['npm publish', 'npm test-other', 'npm test && rm -rf build', 'npm run test'])
+  assert.equal(grant.kind, 'shell-exact');
+  assert.equal(matchesGrant(grant, describe('bash', { command: 'npm test tests/a.test.ts' })), true);
+  for (const command of [
+    'npm test tests/b.test.ts',
+    'npm publish',
+    'npm test-other',
+    'npm test && rm -rf build',
+    'npm run test',
+  ])
     assert.equal(matchesGrant(grant, describe('bash', { command })), false, command);
   assert.equal(matchesGrant(grant, describe('powershell', { command: 'npm test tests/a.test.ts' })), false);
 });
 
-test('more than 25 shell operators, expansions, quote and wrapper variants never receive a prefix grant', () => {
+test('shell operators, expansions, quotes and wrappers receive exact grants only', () => {
   const commands = [
     'npm test && echo injected',
     'npm test || echo injected',
@@ -101,12 +97,34 @@ test('more than 25 shell operators, expansions, quote and wrapper variants never
   ];
   assert.ok(commands.length >= 25);
   for (const command of commands) {
-    assert.equal(commandPrefix(command), null, command);
     const request = describe('bash', { command });
     const grant = grantForRequest(request)!;
     assert.equal(grant.kind, 'shell-exact', command);
     assert.equal(matchesGrant(grant, request), true);
     assert.equal(matchesGrant(grant, describe('bash', { command: command + ' other' })), false);
+  }
+});
+
+test('argument-based execution and writes cannot reuse approvals for the same executable', () => {
+  for (const [command, changed] of [
+    ['rg TODO', 'rg --pre=sh TODO'],
+    ['sed -n 1p README.md', 'sed -i s/a/b/ config.txt'],
+    ['git log', 'git log --output=config.txt'],
+    ['git grep TODO', 'git grep --open-files-in-pager=sh TODO'],
+    ['git diff', 'git diff --ext-diff'],
+    ['npm test', 'npm test --script-shell=sh'],
+    ['pytest tests/a.py', 'pytest -p arbitrary'],
+  ]) {
+    const request = describe('bash', { command });
+    assert.equal(matchesGrant(grantForRequest(request)!, describe('bash', { command: changed })), false);
+    const legacy = {
+      id: 'legacy',
+      kind: 'shell-prefix' as const,
+      toolName: 'bash',
+      command: command.split(' ')[0],
+    };
+    assert.equal(matchesGrant(legacy, request), false, 'legacy grants must fail closed');
+    assert.equal(matchesGrant(legacy, describe('bash', { command: changed })), false);
   }
 });
 
@@ -121,6 +139,10 @@ test('write grants resolve links, missing children, sibling boundaries and sensi
   await fs.symlink(project, path.join(dir, 'project-link'), 'junction');
   await fs.writeFile(path.join(outside, 'linked-file.txt'), 'outside');
   await fs.link(path.join(outside, 'linked-file.txt'), path.join(project, 'hard-link.txt'));
+  await fs.mkdir(path.join(project, '.git'));
+  await fs.mkdir(path.join(project, '.pi'));
+  await fs.symlink(path.join(project, '.git'), path.join(project, 'git-alias'), 'junction');
+  await fs.symlink(path.join(project, '.pi'), path.join(project, 'pi-alias'), 'junction');
   for (const target of ['src/new.ts', path.join(project, 'plain.txt')])
     assert.equal(await classifyWriteTarget(project, target), 'project', target);
   for (const target of [
@@ -132,6 +154,19 @@ test('write grants resolve links, missing children, sibling boundaries and sensi
     outside,
     '',
     'bad\0path',
+    '.git',
+    '.git/config',
+    '.git/hooks/pre-commit',
+    '.pi/extensions/injected.ts',
+    '.pi/settings.json',
+    '.gitattributes',
+    'src/.gitattributes',
+    '.gitmodules',
+    '.GIT/config',
+    'nested/.PI/extensions/injected.ts',
+    'git-alias/config',
+    'pi-alias/extensions/injected.ts',
+    pathToFileURL(path.join(project, '.git/config')).href,
   ])
     assert.equal(await classifyWriteTarget(project, target), 'outside', target);
   for (const target of [
@@ -197,12 +232,13 @@ test('bridge publishes scoped grants, revokes them and resets them on session st
   const bridge = (method: string, params = {}) =>
     handler!(Buffer.from(JSON.stringify({ id: 'test', method, params })).toString('base64'), ctx);
   await call('npm test a.ts');
-  await call('npm test b.ts');
+  await call('npm test a.ts');
   assert.equal(requests.length, 1);
   const grant = events.at(-1).grants[0];
-  assert.equal(grant.command, 'npm test');
+  assert.equal(grant.command, 'npm test a.ts');
+  assert.equal(grant.kind, 'shell-exact');
   await bridge('revoke_approval', { id: grant.id });
-  await call('npm test b.ts');
+  await call('npm test a.ts');
   assert.equal(requests.length, 2);
   await call('npm test && echo other');
   assert.equal(requests.length, 3);

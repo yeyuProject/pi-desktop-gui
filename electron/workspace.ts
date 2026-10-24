@@ -49,11 +49,14 @@ export async function safePath(root: string, relative: string, allowRoot = false
   if (!contained(canonical, real)) throw new Error('符号链接指向项目外，无法访问');
   return real;
 }
-export async function git(root: string, args: string[], maxBuffer = 4 * MiB) {
+export async function git(project: Project, args: string[], maxBuffer = 4 * MiB) {
+  // Even status can execute repository-configured filters. Check trust at the shared
+  // process boundary so file search, previews and checkpoints cannot bypass it.
+  if (!project.trusted) throw new Error('请先信任并启用项目，再读取 Git 状态');
   await loadLoginShellPath();
   return (
     await exec('git', ['-c', 'core.fsmonitor=false', '-c', 'core.quotepath=false', ...args], {
-      cwd: root,
+      cwd: project.path,
       windowsHide: true,
       maxBuffer,
       timeout: 15000,
@@ -62,9 +65,9 @@ export async function git(root: string, args: string[], maxBuffer = 4 * MiB) {
     })
   ).stdout;
 }
-export async function info(root: string) {
+export async function info(project: Project) {
   const [location, status] = await Promise.all([
-    git(root, [
+    git(project, [
       'rev-parse',
       '--show-toplevel',
       '--show-prefix',
@@ -72,7 +75,7 @@ export async function info(root: string) {
       '--git-path',
       'logs/HEAD',
     ]),
-    git(root, ['status', '--porcelain=v2', '--branch', '-z', '--untracked-files=all', '--', '.']),
+    git(project, ['status', '--porcelain=v2', '--branch', '-z', '--untracked-files=all', '--', '.']),
   ]);
   const [gitRoot, prefix = '', reflogPath] = location.trimEnd().split(/\r?\n/);
   let reflog = '';
@@ -226,7 +229,7 @@ export async function listDirectory(project: Project, directory: string): Promis
 }
 export async function allFiles(project: Project): Promise<string[]> {
   try {
-    const raw = await git(project.path, [
+    const raw = await git(project, [
       'ls-files',
       '-z',
       '--cached',
@@ -419,7 +422,7 @@ export class Workspace {
   async capture(project: Project) {
     let meta;
     try {
-      meta = await info(project.path);
+      meta = await info(project);
     } catch {
       return;
     }
@@ -542,9 +545,18 @@ export class Workspace {
     mode: 'all' | 'run' = 'all',
     context?: CheckpointContext,
   ): Promise<Changes> {
+    if (!project.trusted)
+      return {
+        git: false,
+        files: [],
+        baselineAvailable: false,
+        omitted: [],
+        checkpoints: [],
+        error: '请先信任并启用项目，再读取 Git 状态',
+      };
     let meta;
     try {
-      meta = await info(project.path);
+      meta = await info(project);
     } catch {
       return {
         git: false,
@@ -637,7 +649,7 @@ export class Workspace {
     remove: (file: string) => Promise<void> = (file) => fs.rm(file),
     context?: CheckpointContext,
   ): Promise<string[]> {
-    const meta = await info(project.path);
+    const meta = await info(project);
     if (context) await this.checkpoints.list(project, context.sessionId, meta);
     const baseline = await this.baseline(project.id, context);
     if (!baseline || !this.validBaseline(baseline, meta))
@@ -692,7 +704,7 @@ export class Workspace {
       relative.includes('\0')
     )
       return { ...result, unavailable: '该文件不能在差异面板中预览' };
-    const meta = await info(project.path);
+    const meta = await info(project);
     if (context) await this.checkpoints.list(project, context.sessionId, meta);
     const baseline = await this.baseline(project.id, context);
     if (mode === 'run' && (!baseline || !this.validBaseline(baseline, meta)))
@@ -718,7 +730,7 @@ export class Workspace {
     } else if (meta.head) {
       try {
         result.before = await git(
-          project.path,
+          project,
           ['show', `${meta.head}:${meta.prefix}${relative.replaceAll('\\', '/')}`],
           MiB,
         );

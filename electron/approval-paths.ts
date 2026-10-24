@@ -2,7 +2,7 @@ import fs from 'node:fs/promises';
 import path from 'node:path';
 import { isWindows, pathKey } from './platform';
 import { normalizePiToolPath } from './pi/tool-path';
-import { sensitiveWritePath, type WriteTarget } from '../shared/approval';
+import { sensitiveWritePath, type ReadTarget, type WriteTarget } from '../shared/approval';
 
 /** Resolve existing ancestors as well as a new file's name, so directory links cannot escape. */
 export async function canonicalWritePath(target: string): Promise<string> {
@@ -39,24 +39,48 @@ export function isWithinDirectory(root: string, target: string): boolean {
   );
 }
 
+/** These files can make later Git or Pi operations execute code. Never bulk-authorize them. */
+function protectedProjectPath(target: string): boolean {
+  return target
+    .split(/[\\/]/)
+    .some((part) => /^(?:\.git|\.pi|\.gitattributes|\.gitmodules)$/i.test(part.replace(/[. ]+$/, '')));
+}
+
+function ordinaryPath(resolved: string): boolean {
+  return !(
+    isWindows &&
+    (resolved.startsWith('\\\\?\\') ||
+      resolved.startsWith('\\\\.\\') ||
+      resolved.slice(2).includes(':') ||
+      resolved
+        .split(/[\\/]/)
+        .some((part) => /^(?:con|prn|aux|nul|com[1-9]|lpt[1-9])(?:\.|$)/i.test(part.trim())))
+  );
+}
+
+export async function classifyReadTarget(cwd: string, targetPath: string): Promise<ReadTarget> {
+  if (!targetPath || targetPath.includes('\0')) return 'outside';
+  try {
+    const resolved = normalizePiToolPath(cwd, targetPath);
+    if (!ordinaryPath(resolved)) return 'outside';
+    // Require an existing target: Pi's read tool can try alternate Unicode spellings
+    // for missing paths. An unverified fallback must not inherit a project grant.
+    const [root, target] = await Promise.all([fs.realpath(cwd), fs.realpath(resolved)]);
+    if (!isWithinDirectory(root, target)) return 'outside';
+    const stat = await fs.stat(target);
+    return stat.isDirectory() || (stat.isFile() && stat.nlink === 1) ? 'project' : 'outside';
+  } catch {
+    return 'outside';
+  }
+}
+
 export async function classifyWriteTarget(cwd: string, targetPath: string): Promise<WriteTarget> {
   if (!targetPath || targetPath.includes('\0')) return 'outside';
   if (sensitiveWritePath(targetPath)) return 'sensitive';
   try {
     const resolved = normalizePiToolPath(cwd, targetPath);
     // NTFS alternate streams and device paths do not name an ordinary project file.
-    if (
-      isWindows &&
-      (resolved.startsWith('\\\\?\\') || resolved.startsWith('\\\\.\\') || resolved.slice(2).includes(':'))
-    )
-      return 'outside';
-    if (
-      isWindows &&
-      resolved
-        .split(/[\\/]/)
-        .some((part) => /^(?:con|prn|aux|nul|com[1-9]|lpt[1-9])(?:\.|$)/i.test(part.trim()))
-    )
-      return 'outside';
+    if (!ordinaryPath(resolved) || protectedProjectPath(resolved)) return 'outside';
     const sensitiveName = isWindows
       ? resolved
           .split(/[\\/]/)
@@ -65,6 +89,7 @@ export async function classifyWriteTarget(cwd: string, targetPath: string): Prom
       : resolved;
     if (sensitiveWritePath(sensitiveName)) return 'sensitive';
     const [root, target] = await Promise.all([fs.realpath(cwd), canonicalWritePath(resolved)]);
+    if (protectedProjectPath(target)) return 'outside';
     if (sensitiveWritePath(target)) return 'sensitive';
     const stat = await fs.stat(target).catch((error: NodeJS.ErrnoException) => {
       if (error.code !== 'ENOENT') throw error;

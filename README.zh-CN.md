@@ -52,7 +52,7 @@
 
 <table>
   <tr>
-    <td width="50%"><img src="docs/assets/screenshots/approval.png" width="100%" alt="确认模式：Pi 执行 npm test 前请求批准，可选择允许、本会话允许 npm test 开头或拒绝" /></td>
+    <td width="50%"><img src="docs/assets/screenshots/approval.png" width="100%" alt="确认模式：Pi 执行命令前请求批准" /></td>
     <td width="50%"><img src="docs/assets/screenshots/workspace-dark.png" width="100%" alt="深色主题下的同一工作区" /></td>
   </tr>
   <tr>
@@ -159,7 +159,7 @@ Windows 安装包目前也未签名，首次运行可能出现 SmartScreen 提�
 <details>
 <summary><b>只读模式是沙箱吗？</b></summary>
 
-不是。审批模式控制的是通过 Pi 发起的工具调用：只读模式仅放行内置的读取与搜索工具，也会拦截手动 `!` / `!!` 命令。它不能限制已安装扩展自身运行的代码。
+不是。审批模式控制的是通过 Pi 发起的工具调用：只读模式仅放行当前项目内可验证路径的内置读取与搜索工具，也会拦截手动 `!` / `!!` 命令。确认模式对项目外或无法验证的读取每次单独询问；记住的命令授权只匹配完整命令文本。「允许修改项目内文件」不覆盖 `.git`、`.pi`、`.gitattributes` 和 `.gitmodules`。这些控制不能限制已安装扩展自身运行的代码。
 </details>
 
 <details>

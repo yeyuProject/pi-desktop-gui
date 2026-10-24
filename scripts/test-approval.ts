@@ -26,7 +26,9 @@ async function until(fn: () => boolean, ms = 25000) {
 const nextDialog = () => until(() => s.runtime.dialogs.length > 0 || settled());
 try {
   assert.equal(decide('auto', 'bash'), 'allow');
-  assert.equal(decide('confirm', 'read'), 'allow');
+  assert.equal(decide('confirm', 'read', 'project'), 'allow');
+  assert.equal(decide('confirm', 'read', 'outside'), 'ask');
+  assert.equal(decide('readonly', 'read', 'outside'), 'deny');
   assert.equal(decide('confirm', 'write'), 'ask');
   assert.equal(decide('confirm', 'mcp__x'), 'ask');
   assert.equal(decide('readonly', 'bash'), 'deny');
