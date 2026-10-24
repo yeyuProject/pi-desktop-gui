@@ -33,7 +33,7 @@ test('unfinished record limit counts all fragments and clears them after rejecti
   assert.equal(errors.length, 0);
   decoder.push(Buffer.from('x'));
   assert.equal(errors.length, 1);
-  assert.match(errors[0].message, /128 MiB/);
+  assert.match(errors[0].message, /内容过大.*终端导出/);
   decoder.push(Buffer.from('{"type":"recovered"}\n'));
   assert.deepEqual(values, [{ type: 'recovered' }]);
 });

@@ -52,11 +52,38 @@ try {
   assert.equal(await input.inputValue(), '这条草稿不应被审批卡片打断');
   assert.equal(await exists(path.join(fixture.projectDir, '输出结果.txt')), false);
 
+  const mod = process.platform === 'darwin' ? 'Meta' : 'Control';
+  await input.press(`${mod}+n`);
+  await page.waitForFunction(
+    async (id) => (await window.desktop.invoke('bootstrap')).state.selectedSessionId !== id,
+    fixture.sessionId,
+  );
+  await page.keyboard.press(`${mod}+b`);
+  await page.getByRole('button', { name: '待回复 1', exact: true }).waitFor();
+  if (process.platform === 'darwin') assert.equal(await app.evaluate(({ app }) => app.getBadgeCount()), 1);
+  await page.getByRole('button', { name: '待回复 1', exact: true }).click();
+  await write.waitFor();
+  assert.equal(await input.inputValue(), '这条草稿不应被审批卡片打断');
+  console.log('PASS background approval remains reachable with collapsed sidebar and a native app badge');
+
   await mode.click();
   await page.keyboard.press('Escape');
   assert.equal(await page.getByRole('menu').count(), 0);
   assert.equal(await page.locator('.stop-button.armed').count(), 0);
-  await write.getByRole('button', { name: '允许', exact: true }).click();
+  await input.focus();
+  await page.keyboard.press(`${mod}+Shift+a`);
+  assert.equal(
+    await exists(path.join(fixture.projectDir, '输出结果.txt')),
+    false,
+    'first shortcut only focuses the approval for review',
+  );
+  assert.equal(
+    await write
+      .getByRole('button', { name: '允许', exact: true })
+      .evaluate((el) => el === document.activeElement),
+    true,
+  );
+  await page.keyboard.press(`${mod}+Shift+a`);
   const shell = page.locator('.approval-card.shell');
   await shell.waitFor();
   assert.equal(
@@ -70,9 +97,10 @@ try {
   await shell.waitFor();
   assert.equal(await shell.locator('.approval-command').innerText(), command);
   assert.match(await page.locator('.thread').innerText(), /E2E_FILES/);
-  await shell.getByRole('button', { name: '拒绝…', exact: true }).click();
+  await input.focus();
+  await page.keyboard.press(`${mod}+Shift+d`);
   await shell.getByRole('textbox', { name: '拒绝原因' }).fill('界面测试：不要执行命令');
-  await shell.getByRole('button', { name: '拒绝', exact: true }).click();
+  await shell.getByRole('textbox', { name: '拒绝原因' }).press('Enter');
   await page.locator('.run-meta .completed').waitFor();
   const runtime = (await page.evaluate(() => window.desktop.invoke('bootstrap'))).runtime;
   assert.match(runtime.tools.find((t) => ['bash', 'powershell'].includes(t.name)).output, /不要执行命令/);

@@ -66,3 +66,20 @@
 .theme-swatch[data-theme='navy'] {
   background: #0f1828;
 }
+
+:root {
+  --warning: #775000;
+}
+:root[data-theme='dark'],
+:root[data-theme='navy'] {
+  --warning: #f0bf70;
+}
+@media (prefers-color-scheme: dark) {
+  :root[data-theme='system'] {
+    --warning: #f0bf70;
+  }
+}
+.attention-button {
+  color: var(--warning);
+  font-weight: 650;
+}

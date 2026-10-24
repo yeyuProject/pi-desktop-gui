@@ -38,6 +38,10 @@ const draftKeys = [
   'inspectorWidth',
   'inspectorSplit',
   'notifyOnFinish',
+  'notifyOnApproval',
+  'notifyOnError',
+  'updateProxy',
+  'updateMirror',
 ] as const;
 
 export function SettingsModal(
@@ -476,10 +480,51 @@ export function SettingsModal(
                       }}
                     />
                     <span>
-                      窗口在后台时发送系统通知
-                      <small>任务完成、失败或 Pi 等待你回复时提醒，并闪烁任务栏图标</small>
+                      任务完成时发送系统通知
+                      <small>当前未查看的会话完成时提醒</small>
                     </span>
                   </label>
+                  {(['notifyOnApproval', 'notifyOnError'] as const).map((key) => (
+                    <label className="check-row" key={key}>
+                      <input
+                        type="checkbox"
+                        checked={prefs[key] !== false}
+                        onChange={(event) => setPrefs({ ...prefs, [key]: event.target.checked })}
+                      />
+                      <span>
+                        {key === 'notifyOnApproval'
+                          ? '审批或等待回复时发送系统通知'
+                          : '任务失败时发送系统通知'}
+                      </span>
+                    </label>
+                  ))}
+                  <h3>更新网络</h3>
+                  <label className="field-label" htmlFor="update-proxy">
+                    更新代理
+                  </label>
+                  <input
+                    className="input"
+                    id="update-proxy"
+                    placeholder="http://127.0.0.1:7890"
+                    value={prefs.updateProxy ?? ''}
+                    onChange={(event) => setPrefs({ ...prefs, updateProxy: event.target.value })}
+                  />
+                  <p className="settings-copy">
+                    留空时使用启动环境的 HTTPS_PROXY / ALL_PROXY，否则使用系统代理。仅作用于应用更新。
+                  </p>
+                  <label className="field-label" htmlFor="update-mirror">
+                    更新镜像目录
+                  </label>
+                  <input
+                    className="input"
+                    id="update-mirror"
+                    placeholder="https://example.com/pi-desktop/"
+                    value={prefs.updateMirror ?? ''}
+                    onChange={(event) => setPrefs({ ...prefs, updateMirror: event.target.value })}
+                  />
+                  <p className="settings-copy">
+                    留空使用 GitHub。镜像必须包含原始更新清单、发布者签名和安装包；更换镜像仍会验证签名。
+                  </p>
                 </>
               )}
               {settingsTab === 'diagnostic' && (
@@ -515,6 +560,13 @@ export function SettingsModal(
                     运行差异基线保留 7 天，总计不超过 200 MiB。清理基线不影响项目与 Pi 会话文件。
                   </p>
                   <h3>旧空会话</h3>
+                  <button
+                    disabled={pending || running}
+                    onClick={() => void attempt(() => api.invoke('clearLocalData'))}
+                  >
+                    <Trash2 size={15} />
+                    清除桌面本地数据…
+                  </button>
                   <p className="settings-copy">
                     新建后未使用的占位不会成为长期历史。旧版本留下的空会话可在这里手动清理；草稿、附件、图片、自定义设置和正在使用的会话会保留。
                   </p>

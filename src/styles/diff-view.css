@@ -56,7 +56,7 @@
 }
 .diff-hunk button {
   font: inherit;
-  font-size: 10px;
+  font-size: calc(10px * var(--font-scale));
   flex-shrink: 0;
   padding: 1px 5px;
 }
@@ -71,4 +71,28 @@
 }
 .diff-pane:first-child {
   border-right: 1px solid var(--line);
+}
+
+.review-navigation {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 8px;
+  flex-wrap: wrap;
+  font-size: calc(11px * var(--font-scale));
+}
+.diff-review {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  min-height: 0;
+  min-width: 0;
+}
+.diff-chunk {
+  content-visibility: auto;
+  contain-intrinsic-size: auto 2000px;
+}
+.diff-hunk:focus {
+  outline: 2px solid var(--accent);
+  outline-offset: -2px;
 }

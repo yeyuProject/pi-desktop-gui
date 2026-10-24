@@ -3,6 +3,9 @@ import type { AppUpdater } from 'electron-updater';
 import path from 'node:path';
 import type { DesktopRelease, UpdateDriver, UpdateDriverEvent } from './updater';
 import { MacArchiveUpdater } from './mac-update-driver';
+import { SignedUpdateProvider } from './signed-update-provider';
+import { updateFeed, updateProxy } from './update-network';
+import type { Settings } from '../shared/types';
 
 function release(info: {
   version: string;
@@ -35,9 +38,9 @@ export function nativeUpdateDriver(updater: AppUpdater): UpdateDriver {
       listeners.add(listener);
       return () => listeners.delete(listener);
     },
-    configure(autoDownload, installOnQuit) {
+    configure(autoDownload, _installOnQuit) {
       updater.autoDownload = autoDownload;
-      updater.autoInstallOnAppQuit = installOnQuit;
+      updater.autoInstallOnAppQuit = false;
     },
     async check() {
       const result = await updater.checkForUpdates();
@@ -49,16 +52,36 @@ export function nativeUpdateDriver(updater: AppUpdater): UpdateDriver {
     },
     install() {
       // An explicit restart should show installer progress and actionable native errors.
-      // The updater's separate normal-quit handler still installs silently.
+      // Normal quit is configured separately and never authorizes installation.
       updater.quitAndInstall(false, true);
     },
   };
 }
-export function createNativeUpdateDriver(installation: 'nsis' | 'appimage' | 'mac'): UpdateDriver {
+export function createNativeUpdateDriver(
+  installation: 'nsis' | 'appimage' | 'mac',
+  settings: () => Settings,
+): UpdateDriver {
+  const secure = (updater: AppUpdater): UpdateDriver => {
+    const driver = nativeUpdateDriver(updater);
+    return {
+      ...driver,
+      async check() {
+        const config = settings();
+        await updater.netSession.setProxy(updateProxy(config.updateProxy));
+        await updater.netSession.closeAllConnections();
+        updater.setFeedURL({
+          provider: 'custom',
+          updateProvider: SignedUpdateProvider,
+          url: updateFeed(config.updateMirror),
+        } as Parameters<AppUpdater['setFeedURL']>[0]);
+        await driver.check();
+      },
+    };
+  };
   if (installation === 'mac') {
     const updater = new MacArchiveUpdater();
     return {
-      ...nativeUpdateDriver(updater),
+      ...secure(updater),
       install: () => updater.installDownloaded(),
       prepareForQuit: () => updater.prepareForQuit(),
     };
@@ -68,7 +91,7 @@ export function createNativeUpdateDriver(installation: 'nsis' | 'appimage' | 'ma
     const updater = new NsisUpdater();
     // The registered installation can belong to a different copy of this app.
     updater.installDirectory = path.dirname(process.execPath);
-    return nativeUpdateDriver(updater);
+    return secure(updater);
   }
-  return nativeUpdateDriver(new AppImageUpdater());
+  return secure(new AppImageUpdater());
 }

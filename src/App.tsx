@@ -10,7 +10,7 @@ import { Composer as ComposerView } from './components/Composer';
 import { SettingsModal as SettingsModalView } from './components/SettingsModal';
 import { StorageBanner } from './components/StorageBanner';
 import { CrashCard } from './components/CrashCard';
-import { memo, useMemo, useState } from 'react';
+import { memo, useEffect, useMemo, useState } from 'react';
 import { AboutUpdates, UpdateBadge, UpdateDialog } from './components/Updates';
 import { ResizeHandle } from './components/ResizeHandle';
 import { CheckpointDialog } from './components/CheckpointDialog';
@@ -38,6 +38,13 @@ export default function App() {
   const model = useWorkbench();
   const [updateOpen, setUpdateOpen] = useState(false);
   const { state, compact, columns, error } = model;
+  useEffect(() => {
+    if (!state) return;
+    const frame = requestAnimationFrame(() => {
+      void window.desktop.invoke('rendererReady').catch(() => {});
+    });
+    return () => cancelAnimationFrame(frame);
+  }, [Boolean(state)]);
   const updateBadge = useMemo(
     () => <UpdateBadge update={model.update} open={() => setUpdateOpen(true)} />,
     [model.update],
@@ -167,6 +174,9 @@ export default function App() {
         />
         <WorkspaceHeader
           {...pick(model, [
+            'activities',
+            'state',
+            'selectSession',
             'setFeatureTab',
             'sidebar',
             'setSidebar',

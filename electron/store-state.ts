@@ -17,7 +17,11 @@ export const defaultSettings: Settings = {
   inspectorSplit: 40,
   onboardingDone: false,
   notifyOnFinish: true,
-  autoDownloadUpdates: true,
+  autoDownloadUpdates: false,
+  updateProxy: '',
+  updateMirror: '',
+  notifyOnApproval: true,
+  notifyOnError: true,
 };
 export const emptyState = (): AppState => ({
   version: 1,
@@ -141,6 +145,11 @@ export function parseState(value: unknown) {
     state.sessions.push(session);
   }
   const settings = object(value.settings) ? value.settings : {};
+  // Preserve the previous master-switch preference when splitting notification categories.
+  if (settings.notifyOnFinish === false) {
+    if (!('notifyOnApproval' in settings)) state.settings.notifyOnApproval = false;
+    if (!('notifyOnError' in settings)) state.settings.notifyOnError = false;
+  }
   if (value.settings !== undefined && !object(value.settings)) repairedSettings++;
   for (const key of Object.keys(defaultSettings) as (keyof Settings)[]) {
     if (!(key in settings)) continue;

@@ -109,7 +109,7 @@ test('Mac updates download and wait for an acknowledged installer before complet
   await installing;
   assert.equal(completed, true);
 });
-test('Mac normal quit records an attempt and awaits preparation; busy or failed preparation cannot install', async (t) => {
+test('normal quit never installs a downloaded update or starts an installer', async (t) => {
   const driver = new Driver();
   let busy = true,
     prepared = 0;
@@ -144,8 +144,8 @@ test('Mac normal quit records an attempt and awaits preparation; busy or failed 
   assert.equal(prepared, 0);
   await service.prepareForQuit(true);
   await new Promise((resolve) => setImmediate(resolve));
-  assert.equal(prepared, 1);
-  assert.deepEqual(records, ['pending', 'failed']);
+  assert.equal(prepared, 0);
+  assert.deepEqual(records, []);
 });
 
 test('startup waits ten seconds, periodic checks wait six hours, and manual checks are immediate', async (t) => {
@@ -253,7 +253,7 @@ test('manual download, preference changes and progress reach independent update 
   await service.check();
   assert.equal(driver.checks, 1, 'a ready update is retained during subsequent checks');
   service.prepareForQuit(true);
-  assert.equal(driver.installOnQuit, true);
+  assert.equal(driver.installOnQuit, false);
 });
 test('install waits for preparation, rejects busy work and prevents concurrent installs', async (t) => {
   const driver = new Driver();

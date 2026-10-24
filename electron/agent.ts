@@ -772,12 +772,25 @@ export class AgentService extends EventEmitter {
     }
     this.publish();
   }
-  private async readTranscript(file: string | undefined, fallback: Message[]): Promise<Message[]> {
+  private async readTranscript(
+    file: string | undefined,
+    fallback: Message[],
+    sessionId = this.runtime.sessionId,
+  ): Promise<Message[]> {
     const runtime = this.runtime;
     if (fallback.length && this.freshSessionFile === file) this.freshSessionFile = undefined;
     if (file) {
       try {
         const transcript = await readSessionFile(file);
+        const session = this.store.state?.sessions?.find((item) => item.id === sessionId);
+        if (session && session.historyNotice !== transcript.warning) {
+          session.historyNotice = transcript.warning;
+          this.emit('state', this.store.state);
+        }
+        if (this.runtime === runtime && this.runtime.historyNotice !== transcript.warning) {
+          this.runtime.historyNotice = transcript.warning;
+          this.publish();
+        }
         if (this.runtime === runtime && this.freshSessionFile === file) this.freshSessionFile = undefined;
         return transcript.messages.map(redactMessageError);
       } catch (error) {
@@ -2144,7 +2157,7 @@ export class AgentService extends EventEmitter {
     const live = this.runtime.sessionId === id ? this.runtime.messages : [];
     if (busy(this.runtime.status) && this.runtime.sessionId === id && !(this.connecting && !live.length))
       return live;
-    return this.readTranscript(s.file, live);
+    return this.readTranscript(s.file, live, id);
   }
   async dispose() {
     this.shutdown = true;

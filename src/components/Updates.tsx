@@ -124,7 +124,7 @@ export function UpdateDialog({ update, busy, install, close }: UpdateProps & { c
         <UpdateActions update={update} busy={busy} install={install} />
       </div>
       <footer>
-        {update.state === 'ready' && <span>选择稍后，更新将在下次正常退出时安装。</span>}
+        {update.state === 'ready' && <span>选择稍后会保留下载；仅在点击“立即重启”后安装。</span>}
         <button disabled={update.installing} onClick={close}>
           稍后
         </button>

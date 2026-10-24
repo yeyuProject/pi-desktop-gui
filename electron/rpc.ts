@@ -38,7 +38,11 @@ export class LfJsonDecoder {
           throw new Error('缺少事件类型');
         this.emit(record);
       } catch (e) {
-        this.invalid(new Error(`Pi 输出不是有效 JSONL：${(e as Error).message}`));
+        this.invalid(
+          new Error('无法读取 Pi 返回的内容。请重新连接；如果仍然失败，请检查 Pi 版本是否兼容。', {
+            cause: e,
+          }),
+        );
       }
     }
     if (start < text.length) {
@@ -49,7 +53,7 @@ export class LfJsonDecoder {
     if (this.length > 128 * 1024 * 1024) {
       this.fragments = [];
       this.length = 0;
-      this.invalid(new Error('Pi 单条协议记录超过 128 MiB'));
+      this.invalid(new Error('Pi 一次返回的内容过大。请在终端导出会话，再重新连接。'));
     }
   }
 }
@@ -154,7 +158,11 @@ export class PiRpc extends EventEmitter {
     return new Promise((resolve, reject) => {
       const timer = setTimeout(() => {
         this.pending.delete(id);
-        reject(new Error(`${type} 超时，请检查 Pi 状态`));
+        reject(
+          new Error('Pi 响应超时，请检查任务状态；若持续无响应，请重新连接。', {
+            cause: new Error(`Pi request timed out: ${type}`),
+          }),
+        );
       }, timeout);
       this.pending.set(id, { command: type, resolve, reject, timer });
       this.write({ id, type, ...values }).catch((e) => {

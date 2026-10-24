@@ -75,5 +75,9 @@ test('manual release retains every test gate, pins checkouts and cannot overwrit
   const names = steps.map((step) => step.name);
   assert.ok(names.indexOf('Verify updater metadata and download hashes') < names.indexOf(createTag.name));
   assert.ok(names.indexOf('Generate release checksums') < names.indexOf(createTag.name));
-  assert.ok(names.indexOf(createTag.name) < names.indexOf('Publish installers and checksums'));
+  const stage = steps.find(
+    (step) => step.name === 'Stage unsigned installers for independent release signing',
+  );
+  assert.ok(names.indexOf(createTag.name) < names.indexOf(stage.name));
+  assert.match(stage.run, /--draft/);
 });

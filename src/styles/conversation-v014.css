@@ -79,7 +79,7 @@
   padding: 0 10px;
   border-bottom: 1px solid var(--line);
   color: var(--muted);
-  font-size: 11px;
+  font-size: calc(11px * var(--font-scale));
 }
 .code-header > div {
   display: flex;
@@ -94,7 +94,7 @@
   padding: 3px 5px;
   border: 0;
   background: transparent;
-  font-size: 11px;
+  font-size: calc(11px * var(--font-scale));
 }
 .code-header button[aria-pressed='true'] {
   color: var(--accent);
@@ -133,7 +133,7 @@
 }
 .session-find span {
   white-space: nowrap;
-  font-size: 11px;
+  font-size: calc(11px * var(--font-scale));
   color: var(--muted);
 }
 .session-find button {
@@ -149,7 +149,7 @@
   scroll-margin-top: 60px;
 }
 .search-snippet {
-  font-size: 11px;
+  font-size: calc(11px * var(--font-scale));
   color: var(--muted);
   background: var(--rail);
   padding: 6px 10px;
@@ -173,7 +173,7 @@ mark,
 .tool-group > summary {
   padding: 10px 12px;
   color: var(--muted);
-  font-size: 12px;
+  font-size: calc(12px * var(--font-scale));
   cursor: pointer;
 }
 .tool-group > summary small {
@@ -189,7 +189,7 @@ mark,
   flex-wrap: wrap;
 }
 .tool-rerun button {
-  font-size: 10px;
+  font-size: calc(10px * var(--font-scale));
   padding: 3px 5px;
   white-space: nowrap;
 }
@@ -213,7 +213,7 @@ mark,
   background: transparent;
   min-height: 14px;
   padding: 4px 2px;
-  font-size: 11px;
+  font-size: calc(11px * var(--font-scale));
   text-align: left;
 }
 .turn-outline button > i {
@@ -291,7 +291,7 @@ mark,
   padding-top: 8px;
 }
 .pasted-snippets button {
-  font-size: 11px;
+  font-size: calc(11px * var(--font-scale));
 }
 .snippet-preview pre {
   max-height: 55vh;
@@ -299,7 +299,7 @@ mark,
   white-space: pre-wrap;
 }
 .attachment-capacity {
-  font-size: 10px;
+  font-size: calc(10px * var(--font-scale));
   color: var(--muted);
   text-align: right;
 }
@@ -329,13 +329,13 @@ mark,
   flex: 1;
 }
 .prompt-arguments label > span {
-  font-size: 11px;
+  font-size: calc(11px * var(--font-scale));
   color: var(--muted);
 }
 .prompt-arguments input {
   width: 100%;
   padding: 6px 8px;
-  font-size: 12px;
+  font-size: calc(12px * var(--font-scale));
 }
 .context-actions {
   position: relative;
@@ -362,7 +362,7 @@ mark,
 }
 .context-popover > span {
   color: var(--muted);
-  font-size: 11px;
+  font-size: calc(11px * var(--font-scale));
 }
 .context-popover > span > strong {
   color: var(--ink);
@@ -370,7 +370,7 @@ mark,
 }
 .context-popover button {
   text-align: left;
-  font-size: 12px;
+  font-size: calc(12px * var(--font-scale));
   padding: 6px 8px;
 }
 .lightbox {
@@ -429,7 +429,7 @@ mark,
 .lightbox-help {
   padding: 12px;
   text-align: center;
-  font-size: 12px;
+  font-size: calc(12px * var(--font-scale));
   color: #c0c6cf;
 }
 .lightbox-prev,
@@ -447,7 +447,7 @@ mark,
 .retry-error-history {
   margin: -8px 0 16px 38px;
   color: var(--muted);
-  font-size: 12px;
+  font-size: calc(12px * var(--font-scale));
 }
 .retry-error-history > summary {
   cursor: pointer;

@@ -16,10 +16,43 @@ export async function locateExecutable(name: string): Promise<string> {
       windowsHide: true,
       timeout: 3000,
     });
-    return stdout.trim().split(/\r?\n/)[0] || '';
-  } catch {
-    return '';
+    const found = stdout.trim().split(/\r?\n/)[0];
+    if (found) return found;
+  } catch {}
+  if (isWindows) return '';
+  for (const directory of await commonExecutableDirectories()) {
+    const candidate = path.join(directory, name);
+    try {
+      await fs.access(candidate, fs.constants.X_OK);
+      return candidate;
+    } catch {}
   }
+  return '';
+}
+export async function commonExecutableDirectories(home = os.homedir()) {
+  const fixed = [
+    '/opt/homebrew/bin',
+    '/usr/local/bin',
+    path.join(home, '.local/bin'),
+    path.join(home, '.npm-global/bin'),
+    path.join(home, '.volta/bin'),
+    path.join(home, 'Library/pnpm'),
+    path.join(home, '.local/share/pnpm'),
+    path.join(home, '.nvm/current/bin'),
+  ];
+  const roots = [
+    [path.join(home, '.nvm/versions/node'), 'bin'],
+    [path.join(home, '.fnm/node-versions'), 'installation/bin'],
+    [path.join(home, '.local/share/fnm/node-versions'), 'installation/bin'],
+    [path.join(home, 'Library/Application Support/fnm/node-versions'), 'installation/bin'],
+  ];
+  for (const [root, bin] of roots) {
+    const versions = (await fs.readdir(root).catch(() => [] as string[]))
+      .filter((name) => /^v?\d+\.\d+\.\d+$/.test(name))
+      .sort((a, b) => b.localeCompare(a, undefined, { numeric: true }));
+    fixed.push(...versions.map((version) => path.join(root, version, bin)));
+  }
+  return fixed;
 }
 export async function shellCandidates(git?: string, configured?: string) {
   return (
@@ -264,25 +297,38 @@ export async function openWithApp(editor: string, file: string) {
  * nvm, Homebrew or similar are invisible. Read the PATH from the user's login shell once.
  */
 let loginShellPath: Promise<void> | undefined;
-export function loadLoginShellPath() {
-  return (loginShellPath ??= readLoginShellPath());
+let shellRetryAfter = 0;
+export function loadLoginShellPath(retry = false) {
+  if (!loginShellPath && !retry && Date.now() < shellRetryAfter) return Promise.resolve();
+  return (loginShellPath ??= readLoginShellPath().then((ok) => {
+    // A timeout or a shell prompt must not poison future manual environment checks.
+    if (!ok) {
+      loginShellPath = undefined;
+      shellRetryAfter = Date.now() + 30000;
+    }
+  }));
 }
 async function readLoginShellPath() {
-  if (isWindows || process.env.PI_DESKTOP_SKIP_SHELL_PATH) return;
+  if (isWindows || process.env.PI_DESKTOP_SKIP_SHELL_PATH) return true;
   const shell = process.env.SHELL || (isMac ? '/bin/zsh' : '/bin/bash');
   try {
     const marker = '__PI_DESKTOP_PATH__';
-    const { stdout } = await exec(shell, ['-ilc', `printf '${marker}%s${marker}' "$PATH"`], {
+    const command = exec(shell, ['-ilc', `printf '${marker}%s${marker}' "$PATH"`], {
       timeout: 5000,
       env: { ...process.env, DISABLE_AUTO_UPDATE: 'true' },
     });
+    command.child?.stdin?.end();
+    const { stdout } = await command;
     const found = new RegExp(`${marker}(.*?)${marker}`).exec(stdout)?.[1];
-    if (!found) return;
+    if (!found) return false;
     const merged = [...new Set([...found.split(':'), ...(process.env.PATH ?? '').split(':')])].filter(
       Boolean,
     );
     process.env.PATH = merged.join(':');
-  } catch {}
+    return true;
+  } catch {
+    return false;
+  }
 }
 
 export const fileManagerName = isWindows ? '资源管理器' : isMac ? '访达' : '文件管理器';

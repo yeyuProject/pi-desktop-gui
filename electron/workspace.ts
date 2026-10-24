@@ -363,6 +363,9 @@ export class Workspace {
   nextCheckpointTurn(sessionId: string) {
     return this.checkpoints.nextTurn(sessionId);
   }
+  removeSession(sessionId: string) {
+    return this.checkpoints.removeSession(sessionId);
+  }
   captureCheckpoint(project: Project, sessionId: string, turn: number, timestamp?: number) {
     return this.checkpoints.capture(project, sessionId, turn, timestamp);
   }

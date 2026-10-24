@@ -30,12 +30,12 @@
 .native-titlebar-brand {
   font-family: Georgia, serif;
   color: var(--accent);
-  font-size: 22px;
+  font-size: calc(22px * var(--font-scale));
   padding: 0 10px;
 }
 .native-titlebar button {
   -webkit-app-region: no-drag;
-  font-size: 12px;
+  font-size: calc(12px * var(--font-scale));
   min-height: 26px;
   padding: 2px 10px;
   border: 0;
@@ -48,14 +48,14 @@
 }
 .native-titlebar-title {
   flex: 1;
-  font-size: 12px;
+  font-size: calc(12px * var(--font-scale));
   padding: 0 16px;
   overflow: hidden;
   white-space: nowrap;
   text-overflow: ellipsis;
 }
 .native-titlebar-error {
-  font-size: 12px;
+  font-size: calc(12px * var(--font-scale));
   color: var(--red);
 }
 [data-app-dialog] > .modal-backdrop {

@@ -29,6 +29,7 @@ export async function resolvePi(
   settings: Settings,
   developmentRoot?: string,
 ): Promise<{ spec: CommandSpec; entry: string; node?: string }> {
+  await loadLoginShellPath();
   let entry = settings.piPath || (await locateExecutable('pi'));
   if (!entry && developmentRoot) {
     const local = path.join(
@@ -43,6 +44,8 @@ export async function resolvePi(
     if (await exists(local)) entry = local;
   }
   if (!entry || !(await exists(entry))) throw new Error('未找到 Pi。请安装 Pi 或在设置中选择入口。');
+  // npm links have no extension; resolve them so an explicitly chosen Node runtime is honored.
+  if (process.platform !== 'win32') entry = await fs.realpath(entry);
   if (/\.(cmd|ps1|bat)$/i.test(entry) || (!path.extname(entry) && isWindows)) {
     const base = path.dirname(entry);
     const candidates = [
@@ -182,7 +185,7 @@ function startInspection(settings: Settings, developmentRoot?: string) {
 
 /** An explicit environment check always probes again and refreshes the startup cache. */
 export async function detectEnvironment(settings: Settings, developmentRoot?: string): Promise<Environment> {
-  await loadLoginShellPath();
+  await loadLoginShellPath(true);
   return (await startInspection(settings, developmentRoot).result).environment;
 }
 

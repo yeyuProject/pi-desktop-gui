@@ -10,7 +10,7 @@ import {
 } from '../../shared/approval';
 import { type ExtensionDialog, type ApprovalMode } from '../../shared/types';
 import '../styles/management.css';
-import { useLayer } from '../hooks/useLayer';
+import { useLayer, topLayer } from '../hooks/useLayer';
 
 export const approvalModes: [ApprovalMode, string, string][] = [
   ['auto', '全自动', 'Pi 直接修改文件、执行命令'],
@@ -122,6 +122,33 @@ export function ApprovalCard({
   useEffect(() => {
     if (first && document.activeElement === document.body) allow.current?.focus({ preventScroll: false });
   }, [first]);
+  useEffect(() => {
+    if (!first) return;
+    const key = (event: KeyboardEvent) => {
+      if (
+        event.defaultPrevented ||
+        event.isComposing ||
+        event.repeat ||
+        !(event.metaKey || event.ctrlKey) ||
+        !event.shiftKey ||
+        event.altKey ||
+        topLayer()?.kind === 'dialog' ||
+        topLayer()?.kind === 'menu'
+      )
+        return;
+      if (event.code === 'KeyA') {
+        event.preventDefault();
+        // First jump from the composer for review; only an already-focused card may approve.
+        if (document.activeElement === allow.current) respond(APPROVAL_ALLOW);
+        else allow.current?.focus({ preventScroll: false });
+      } else if (event.code === 'KeyD') {
+        event.preventDefault();
+        setReason('');
+      }
+    };
+    window.addEventListener('keydown', key);
+    return () => window.removeEventListener('keydown', key);
+  }, [first, respond]);
   const lines = a.detail?.split('\n') ?? [];
   return (
     <section
@@ -181,7 +208,13 @@ export function ApprovalCard({
       )}
       {reason === null ? (
         <div className="approval-actions">
-          <button ref={allow} className="primary" onClick={() => respond(APPROVAL_ALLOW)}>
+          <button
+            ref={allow}
+            className="primary"
+            aria-keyshortcuts="Control+Shift+A Meta+Shift+A"
+            title="⌘/Ctrl+Shift+A：先定位审核，再按一次允许"
+            onClick={() => respond(APPROVAL_ALLOW)}
+          >
             <Check size={14} />
             允许
           </button>
@@ -190,7 +223,12 @@ export function ApprovalCard({
               {grantActionLabel(a.grant)}
             </button>
           )}
-          <button className="deny" onClick={() => setReason('')}>
+          <button
+            className="deny"
+            aria-keyshortcuts="Control+Shift+D Meta+Shift+D"
+            title="⌘/Ctrl+Shift+D：填写拒绝原因"
+            onClick={() => setReason('')}
+          >
             拒绝…
           </button>
         </div>

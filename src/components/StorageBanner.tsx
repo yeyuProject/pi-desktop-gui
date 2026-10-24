@@ -10,6 +10,7 @@ export function StorageBanner({
   openDirectory: () => void;
 }) {
   const [dismissed, setDismissed] = useState<string>();
+  const [retrying, setRetrying] = useState(false);
   const recovery = storage.recovery;
   const recoveryId =
     recovery && JSON.stringify([recovery.corruptFile, recovery.recoveredFrom, recovery.backupAt]);
@@ -45,6 +46,22 @@ export function StorageBanner({
         {recovery?.corruptFile && <p>损坏的原文件已保留在数据目录。</p>}
       </div>
       <button onClick={openDirectory}>打开数据目录</button>
+      {storage.retryable && (
+        <button
+          disabled={retrying}
+          onClick={async () => {
+            setRetrying(true);
+            try {
+              await window.desktop.invoke('retryStorage');
+            } catch {
+            } finally {
+              setRetrying(false);
+            }
+          }}
+        >
+          {retrying ? '正在保存…' : '重试保存'}
+        </button>
+      )}
       {storage.writable && <button onClick={() => setDismissed(recoveryId)}>知道了</button>}
     </section>
   );

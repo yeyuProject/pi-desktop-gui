@@ -4,6 +4,7 @@ import { type AppState, type Session, type PiSessionInfo, type SessionMatch } fr
 import { shortcut } from '../lib/platform';
 import { relativeTime } from '../lib/format';
 import { Modal } from './Modal';
+import { workbenchShortcuts } from '../../shared/workbench-actions';
 const api = window.desktop;
 
 export function QuickSwitch({
@@ -21,7 +22,7 @@ export function QuickSwitch({
   select: (s: Session) => void;
   openFile: (file: string) => void;
 }) {
-  const [scope, setScope] = useState<'desktop' | 'pi'>('desktop'),
+  const [scope, setScope] = useState<'desktop' | 'pi' | 'actions'>('desktop'),
     [matches, setMatches] = useState<SessionMatch[]>([]),
     [external, setExternal] = useState<PiSessionInfo[] | undefined>(),
     [index, setIndex] = useState(0);
@@ -69,43 +70,59 @@ export function QuickSwitch({
     snippet?: string;
     run: () => void;
   }[] =
-    scope === 'desktop'
-      ? [
-          ...titleHits.map((s) => ({
-            key: s.id,
-            icon: s.pinned ? <Pin size={15} /> : <MessageSquare size={15} />,
-            title: s.title,
-            meta: projectName(s.projectId) + ' · ' + relativeTime(s.updatedAt),
-            run: () => select(s),
-          })),
-          ...contentHits.flatMap((m) => {
-            const s = state.sessions.find((x) => x.id === m.sessionId);
-            return s
-              ? [
-                  {
-                    key: 'c' + s.id,
-                    icon: <TextSearch size={15} />,
-                    title: s.title,
-                    meta: projectName(s.projectId) + ' · 内容匹配',
-                    snippet: m.snippet,
-                    run: () => select(s),
-                  },
-                ]
-              : [];
-          }),
-        ]
-      : (external ?? [])
-          .filter((x) => `${x.name ?? ''} ${x.preview} ${x.cwd}`.toLowerCase().includes(q))
-          .map((x) => ({
-            key: x.file,
-            icon: <History size={15} />,
-            title: x.name || x.preview || '未命名会话',
-            meta: x.cwd + ' · ' + relativeTime(x.updatedAt),
-            snippet: x.name ? x.preview : undefined,
-            run: () => openFile(x.file),
-          }));
+    scope === 'actions'
+      ? workbenchShortcuts
+          .filter((binding) => binding.action !== 'search' && binding.label.includes(q))
+          .map((binding) => ({
+            key: binding.action,
+            icon: <ChevronRight size={15} />,
+            title: binding.label,
+            meta: 'mod' in binding ? shortcut(binding.key.toUpperCase()) : `Alt+${binding.key}`,
+            run: () => {
+              close();
+              setTimeout(
+                () => window.dispatchEvent(new CustomEvent('pi:action', { detail: binding.action })),
+                0,
+              );
+            },
+          }))
+      : scope === 'desktop'
+        ? [
+            ...titleHits.map((s) => ({
+              key: s.id,
+              icon: s.pinned ? <Pin size={15} /> : <MessageSquare size={15} />,
+              title: s.title,
+              meta: projectName(s.projectId) + ' · ' + relativeTime(s.updatedAt),
+              run: () => select(s),
+            })),
+            ...contentHits.flatMap((m) => {
+              const s = state.sessions.find((x) => x.id === m.sessionId);
+              return s
+                ? [
+                    {
+                      key: 'c' + s.id,
+                      icon: <TextSearch size={15} />,
+                      title: s.title,
+                      meta: projectName(s.projectId) + ' · 内容匹配',
+                      snippet: m.snippet,
+                      run: () => select(s),
+                    },
+                  ]
+                : [];
+            }),
+          ]
+        : (external ?? [])
+            .filter((x) => `${x.name ?? ''} ${x.preview} ${x.cwd}`.toLowerCase().includes(q))
+            .map((x) => ({
+              key: x.file,
+              icon: <History size={15} />,
+              title: x.name || x.preview || '未命名会话',
+              meta: x.cwd + ' · ' + relativeTime(x.updatedAt),
+              snippet: x.name ? x.preview : undefined,
+              run: () => openFile(x.file),
+            }));
   return (
-    <Modal title="快速切换" subtitle={`搜索会话标题与内容 · ${shortcut('K')}`} close={close}>
+    <Modal title="快速切换" subtitle={`搜索会话与操作 · ${shortcut('K')}`} close={close}>
       <div className="modal-body quick-switch">
         <div className="search-input">
           <Search size={18} />
@@ -126,10 +143,19 @@ export function QuickSwitch({
                 rows[index].run();
               }
             }}
-            placeholder={scope === 'desktop' ? '会话名称、项目或消息内容…' : '搜索 Pi 保存的历史会话…'}
+            placeholder={
+              scope === 'actions'
+                ? '搜索操作，例如新建、变更、设置…'
+                : scope === 'desktop'
+                  ? '会话名称、项目或消息内容…'
+                  : '搜索 Pi 保存的历史会话…'
+            }
           />
         </div>
         <div className="scope-tabs" role="tablist">
+          <button role="tab" aria-selected={scope === 'actions'} onClick={() => setScope('actions')}>
+            操作
+          </button>
           <button role="tab" aria-selected={scope === 'desktop'} onClick={() => setScope('desktop')}>
             桌面会话
           </button>

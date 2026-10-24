@@ -207,7 +207,7 @@ jobs:
           gh api --method POST "repos/$GH_REPO/git/refs" \
             -f "ref=refs/tags/$RELEASE_TAG" -f "sha=$GITHUB_SHA"
           test "$(git ls-remote origin "refs/tags/$RELEASE_TAG" | cut -f1)" = "$GITHUB_SHA"
-      - name: Publish installers and checksums
+      - name: Stage unsigned installers for independent release signing
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           GH_REPO: ${{ github.repository }}
@@ -215,6 +215,7 @@ jobs:
         run: |
           set -euo pipefail
           gh release create "$RELEASE_TAG" release-assets/* \
+            --draft \
             --verify-tag \
             --title "Pi Desktop $RELEASE_TAG" \
             --notes-file "docs/releases/$RELEASE_TAG.md"

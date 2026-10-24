@@ -11,7 +11,7 @@ import {
   Menu,
   Notification,
   screen,
-  net,
+  session as electronSession,
   powerMonitor,
   type Rectangle,
 } from 'electron';
@@ -53,9 +53,13 @@ import { detectEnvironment, requireSupportedPi, resolvePi, agentDirectory } from
 import { Configuration } from './configuration';
 import { toggleResourceSetting } from './resources-config';
 import { canonicalWritePath, isWithinDirectory } from './approval-paths';
-import { UpdateService, updateInstallation, fetchLatestRelease, fetchReleaseNotes } from './updater';
+import { UpdateService, updateInstallation } from './updater';
 import { createNativeUpdateDriver } from './update-driver';
+import { updateFeed, updateProxy } from './update-network';
+import { readSignedUpdate } from './signed-update-provider';
 import { UpdateAttemptFile } from './update-attempt';
+import { acknowledgeUpdateHealth } from './update-health';
+import { removeSessionScratch, clearDesktopRecords } from './local-data';
 import { readImageAttachment, validateImages } from './images';
 import { listPiSessions, searchSessionContents } from './history';
 import {
@@ -145,6 +149,7 @@ const send = (
   if (event.type === 'state') void watchSelectedProject();
 };
 let appDialogsReady = false;
+let workbenchReady = false;
 let rendererResponsive = true;
 const appDialogs = new AppDialogRequests((value) => send({ type: 'appDialog', dialog: value }));
 function cancelAppDialogs() {
@@ -219,27 +224,46 @@ const save = async () => {
   send({ type: 'state', state: store.state });
 };
 const attention = new Map<string, { status: string; dialogs: number }>();
+function updateAttentionBadge() {
+  const count = [...attention.values()].reduce((sum, item) => sum + item.dialogs, 0);
+  app.setBadgeCount(count);
+  if (process.platform === 'win32' && window && !window.isDestroyed()) {
+    window.setOverlayIcon(
+      count ? nativeImage.createFromPath(path.join(app.getAppPath(), 'build/icon.png')) : null,
+      count ? `${count} 项等待回复` : '',
+    );
+  }
+}
 let lastToast: Notification | undefined;
 function notifyAttention(runtime: Runtime) {
   if (!runtime.sessionId) return;
   const previous = attention.get(runtime.sessionId);
   attention.set(runtime.sessionId, { status: runtime.status, dialogs: runtime.dialogs.length });
-  if (!window || window.isDestroyed() || window.isFocused()) return;
+  updateAttentionBadge();
+  if (
+    !window ||
+    window.isDestroyed() ||
+    (window.isFocused() && store.state.selectedSessionId === runtime.sessionId)
+  )
+    return;
   if (!previous) return;
-  if (!store.state.settings.notifyOnFinish || !Notification.isSupported()) return;
+  if (!Notification.isSupported()) return;
   const session = store.state.sessions.find((s) => s.id === runtime.sessionId);
   if (!session) return;
   const finished = busy(previous.status) && !busy(runtime.status);
   let title = '',
     body = '';
   if (runtime.dialogs.length > previous.dialogs) {
+    if (store.state.settings.notifyOnApproval === false) return;
     title = 'Pi 需要你的回复';
     body = runtime.dialogs.at(-1)?.title || session.title;
   } else if (finished && runtime.status === 'completed') {
+    if (!store.state.settings.notifyOnFinish) return;
     title = '任务已完成 · ' + session.title;
     const last = runtime.messages.findLast((m) => m.role === 'assistant');
     body = (last ? messageText(last) : '').replace(/\s+/g, ' ').trim().slice(0, 120) || '点击查看结果';
   } else if (finished && (runtime.status === 'error' || runtime.status === 'interrupted')) {
+    if (store.state.settings.notifyOnError === false) return;
     title = '任务未完成 · ' + session.title;
     body = redact(runtime.error || '执行失败，点击查看详情').slice(0, 160);
   } else return;
@@ -260,7 +284,7 @@ function notifyAttention(runtime: Runtime) {
   window.flashFrame(true);
 }
 const windowFile = () => path.join(store.dir, 'window.json');
-async function loadWindowState(): Promise<{ bounds?: Rectangle; maximized: boolean }> {
+async function loadWindowState(): Promise<{ bounds?: Rectangle; maximized: boolean; zoom?: number }> {
   try {
     const value = JSON.parse(await fs.readFile(windowFile(), 'utf8'));
     const b = value?.bounds;
@@ -281,6 +305,7 @@ async function loadWindowState(): Promise<{ bounds?: Rectangle; maximized: boole
           }
         : undefined,
       maximized: value.maximized === true,
+      zoom: Number.isFinite(value.zoom) ? Math.max(0.5, Math.min(2, value.zoom)) : 1,
     };
   } catch {
     return { maximized: false };
@@ -291,7 +316,11 @@ let windowWrite = Promise.resolve();
 function writeWindowState() {
   if (!store.storage.writable) return windowWrite;
   if (!window || window.isDestroyed() || window.isMinimized() || window.isFullScreen()) return windowWrite;
-  const contents = JSON.stringify({ bounds: window.getNormalBounds(), maximized: window.isMaximized() });
+  const contents = JSON.stringify({
+    bounds: window.getNormalBounds(),
+    maximized: window.isMaximized(),
+    zoom: window.webContents.getZoomFactor(),
+  });
   // Keep the final close snapshot behind any in-flight resize save.
   windowWrite = windowWrite.then(() => fs.writeFile(windowFile(), contents, 'utf8')).catch(() => {});
   return windowWrite;
@@ -303,6 +332,13 @@ function rememberWindow() {
     windowTimer = undefined;
     void writeWindowState();
   }, 400);
+}
+function changeZoom(direction: number) {
+  if (!window || window.isDestroyed()) return;
+  window.webContents.setZoomFactor(
+    direction === 0 ? 1 : Math.max(0.5, Math.min(2, window.webContents.getZoomFactor() + direction * 0.1)),
+  );
+  rememberWindow();
 }
 function text(value: unknown, max = 1024 * 1024): asserts value is string {
   if (typeof value !== 'string' || value.length > max || value.includes('\0'))
@@ -510,9 +546,46 @@ async function saveText(title: string, contents: string, defaultName: string) {
   return picked.filePath;
 }
 const handlers: Record<keyof ApiMap, (...args: any[]) => any> = {
+  rendererReady: () => {
+    workbenchReady = true;
+    if (appDialogsReady) void acknowledgeUpdateHealth(app.getVersion()).catch(() => {});
+  },
+  retryStorage: () => store.retrySave(),
+  clearLocalData: async () => {
+    if (service.hasPendingWork || activeOperations > 1) throw new Error('请先停止所有任务并完成待处理操作');
+    for (const session of store.state.sessions) await assertTerminalClosed(session.id);
+    const result = await showAppDialog({
+      type: 'warning',
+      message: '清除桌面本地数据并重启？',
+      detail: `将永久清除 ${store.dir} 中的会话索引、草稿、草稿图片、备份、代码快照、桌面会话文件和独立对话工作目录。外部项目源码、Pi 外部历史和供应商登录凭据不在此范围内。请先导出需要保留的内容。`,
+      buttons: ['取消', '清除并重启'],
+      defaultId: 0,
+      cancelId: 0,
+    });
+    if (result.response !== 1) return;
+    if (service.hasPendingWork || activeOperations > 1) throw new Error('任务状态已变化，请停止任务后重试');
+    quitting = true;
+    try {
+      for (const session of store.state.sessions) await assertTerminalClosed(session.id);
+      store.stopRecovery();
+      await service.dispose();
+      await workspaceCleanup;
+      await configurationWrites;
+      await store.flush().catch(() => {}); // Explicit erasure also works after an unrecoverable save failure.
+      await clearDesktopRecords(store.dir);
+      await window?.webContents.session.clearStorageData();
+      await window?.webContents.session.clearCache();
+      app.relaunch();
+      app.exit(0);
+    } catch (error) {
+      quitting = false;
+      throw error;
+    }
+  },
   appDialogsReady: () => {
     appDialogsReady = true;
     rendererResponsive = true;
+    if (workbenchReady) void acknowledgeUpdateHealth(app.getVersion()).catch(() => {});
   },
   respondAppDialog: (id, response) => {
     text(id, 100);
@@ -674,7 +747,9 @@ const handlers: Record<keyof ApiMap, (...args: any[]) => any> = {
     const result = await showAppDialog({
       type: 'warning',
       message: `删除会话“${s.title}”？`,
-      detail: s.file ? 'Pi 会话文件会移到回收站，可从回收站恢复。' : '这个会话还没有内容，将直接移除。',
+      detail:
+        (s.file ? 'Pi 会话文件会移到回收站，可从回收站恢复。' : '会话将从列表移除。') +
+        '此会话的检查点、临时草稿和备份草稿将永久清理。',
       buttons: ['取消', '删除'],
       defaultId: 0,
       cancelId: 0,
@@ -698,6 +773,8 @@ const handlers: Record<keyof ApiMap, (...args: any[]) => any> = {
         removedFile = true;
       }
     }
+    await workspace.removeSession(id);
+    await removeSessionScratch(store.dir, id);
     store.removeSessions([id]);
     if (store.state.selectedSessionId === id) {
       const next =
@@ -707,6 +784,7 @@ const handlers: Record<keyof ApiMap, (...args: any[]) => any> = {
       store.selectSession(next.id);
     }
     await save();
+    await store.purgeDeletedSession(id);
     return { trashed: removedFile };
   },
   pinSession: async (id, pinned) => {
@@ -980,6 +1058,8 @@ const handlers: Record<keyof ApiMap, (...args: any[]) => any> = {
       'provider',
       'modelId',
       'thinking',
+      'updateProxy',
+      'updateMirror',
     ] as const)
       if (key in value) {
         text(value[key], 4096);
@@ -1001,6 +1081,10 @@ const handlers: Record<keyof ApiMap, (...args: any[]) => any> = {
       }
     if (typeof value.onboardingDone === 'boolean') next.onboardingDone = value.onboardingDone;
     if (typeof value.notifyOnFinish === 'boolean') next.notifyOnFinish = value.notifyOnFinish;
+    if (typeof value.notifyOnApproval === 'boolean') next.notifyOnApproval = value.notifyOnApproval;
+    if (typeof value.notifyOnError === 'boolean') next.notifyOnError = value.notifyOnError;
+    updateFeed(next.updateMirror);
+    updateProxy(next.updateProxy, {});
     if (value.autoDownloadUpdates !== undefined) {
       if (typeof value.autoDownloadUpdates !== 'boolean') throw new Error('自动下载更新设置无效');
       next.autoDownloadUpdates = value.autoDownloadUpdates;
@@ -1559,6 +1643,7 @@ async function createWindow() {
     ]).popup({ window });
   });
   const rendererLost = () => {
+    workbenchReady = false;
     activeDiff?.controller.abort();
     appDialogsReady = false;
     cancelAppDialogs();
@@ -1587,6 +1672,7 @@ async function createWindow() {
     });
   }
   window.once('ready-to-show', () => {
+    window?.webContents.setZoomFactor(saved.zoom ?? 1);
     if (saved.maximized) window?.maximize();
     window?.show();
     if (!closing && !quitting && store.storage.writable)
@@ -1599,6 +1685,7 @@ async function createWindow() {
   });
   for (const event of ['resize', 'move', 'maximize', 'unmaximize'] as const)
     window.on(event as 'resize', () => void rememberWindow());
+  window.webContents.on('zoom-changed', (_event, direction) => changeZoom(direction === 'in' ? 1 : -1));
   window.on('focus', () => window?.flashFrame(false));
   window.webContents.setWindowOpenHandler(() => ({ action: 'deny' }));
   window.webContents.on('will-navigate', (event) => event.preventDefault());
@@ -1668,6 +1755,7 @@ async function createWindow() {
         }
         // Cancellation must start before waiting for accepted native/agent work:
         // a queued model read can otherwise wait for a dialog that disposal closes.
+        store.stopRecovery();
         await service.dispose();
         await waitForOperations();
         await configurationWrites;
@@ -1740,7 +1828,11 @@ else {
         send({ type: 'runtimePatch', patch });
       });
       service.on('attention', notifyAttention);
-      service.on('runtimeRemoved', (sessionId) => send({ type: 'runtimeRemoved', sessionId }));
+      service.on('runtimeRemoved', (sessionId) => {
+        attention.delete(sessionId);
+        updateAttentionBadge();
+        send({ type: 'runtimeRemoved', sessionId });
+      });
       service.on('state', (state) => send({ type: 'state', state }));
       store.on('storage', (storage) => send({ type: 'storage', storage }));
       const installation = updateInstallation(process.platform, app.isPackaged, process.env);
@@ -1759,10 +1851,22 @@ else {
         recordAttempt: updateAttempts ? (attempt) => updateAttempts.record(attempt) : undefined,
         driver:
           updateEnabled && (installation === 'nsis' || installation === 'appimage' || installation === 'mac')
-            ? createNativeUpdateDriver(installation)
+            ? createNativeUpdateDriver(installation, () => store.state.settings)
             : undefined,
-        fetchRelease: () => fetchLatestRelease(net.fetch),
-        fetchNotes: (version) => fetchReleaseNotes(version, net.fetch),
+        fetchRelease: async () => {
+          const session = electronSession.fromPartition('electron-updater');
+          await session.setProxy(updateProxy(store.state.settings.updateProxy));
+          await session.closeAllConnections();
+          const info = await readSignedUpdate(
+            updateFeed(store.state.settings.updateMirror),
+            process.platform,
+            session.fetch.bind(session),
+          );
+          return {
+            version: info.version,
+            notes: typeof info.releaseNotes === 'string' ? info.releaseNotes : '',
+          };
+        },
         busy: () => service.hasPendingWork || updatingConfiguration || activeOperations > 0,
         beforeInstall: async () => {
           if (closing || sessionEnding) throw new Error('应用正在退出，请下次启动后重试更新');
@@ -1817,6 +1921,9 @@ else {
           )
             throw new Error('正在准备重启更新，请稍候');
           const readOnlyMethods: (keyof ApiMap)[] = [
+            'clearLocalData',
+            'rendererReady',
+            'retryStorage',
             'appDialogsReady',
             'respondAppDialog',
             'showAppMenu',
@@ -1912,6 +2019,7 @@ else {
           const engineOperation =
             changesEngineSettings ||
             [
+              'clearLocalData',
               'connect',
               'readModels',
               'recover',
@@ -2087,9 +2195,9 @@ else {
             id: 'view',
             label: '视图',
             submenu: [
-              { role: 'resetZoom', label: '重置缩放' },
-              { role: 'zoomIn', label: '放大' },
-              { role: 'zoomOut', label: '缩小' },
+              { label: '重置缩放', accelerator: 'CmdOrCtrl+0', click: () => changeZoom(0) },
+              { label: '放大', accelerator: 'CmdOrCtrl+Plus', click: () => changeZoom(1) },
+              { label: '缩小', accelerator: 'CmdOrCtrl+-', click: () => changeZoom(-1) },
               { role: 'togglefullscreen', label: '全屏' },
             ],
           },
