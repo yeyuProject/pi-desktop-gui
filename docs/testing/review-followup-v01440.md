@@ -24,6 +24,7 @@
 - 新增主进程界面验收 `scripts/test-review-followup-ui.mjs` 通过：确认前命令未运行、取消返回 false、实际执行参数正确、文件不能交给系统作为目录打开、配置可修复且保留备份、部分撤销失败触发刷新、Bash 缺失提示。测试包管理命令使用记录参数的隔离夹具，不安装外部资源包。记录：`test-results/review-followup-final-ui.log`。
 - 干净 `npm ci`、CI 同版本 Node 22.22.0 的 ESLint、合法 TypeScript 与不可达代码反例、全库 lint/格式检查通过。现有依赖版本保持不变；lint 的编译器 API 兼容处理只作用于本仓库的 lint 依赖。记录：`test-results/review-followup-npm-ci.log`、`test-results/review-followup-lint-node22.log`、`test-results/review-followup-final-lint.log`。
 - `npm run package:dir` 通过，macOS 签名完整性通过；ASAR 版本为 0.14.40，确认不含 ESLint、TypeScript 或 lint 工作区。记录：`test-results/review-followup-package.log`。
+- macOS 原生更新往返通过：拒绝篡改及不匹配安装包、并发替换保护、安装后校验失败回滚、正常重启升级、新版本启动失败自动恢复、退出不安装，均保留会话草稿与审批设置。记录：`test-results/review-followup-update.log`、`test-results/update-roundtrip.json`。
 - README 三张截图已从当前构建重新生成并检查；新增就绪提示截图为 `test-results/review-followup-ui.png`。
 
 ## 明确限制
