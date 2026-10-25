@@ -165,8 +165,28 @@ try {
   );
   await modal.getByRole('textbox', { name: '资源包来源' }).fill(pkg);
   await modal.getByRole('button', { name: '安装', exact: true }).click();
+  const installDialog = page.getByRole('dialog', {
+    name: '安装资源包并允许执行其代码？',
+    exact: true,
+  });
+  await installDialog.waitFor();
+  assert.ok((await installDialog.textContent()).includes(pkg));
+  assert.ok((await installDialog.textContent()).includes('npm 安装脚本'));
+  await installDialog.getByRole('button', { name: '取消', exact: true }).click();
+  assert.equal(await modal.getByRole('textbox', { name: '资源包来源' }).inputValue(), pkg);
+  assert.ok(
+    !(await page.evaluate(() => window.desktop.invoke('bootstrap'))).runtime.commands.some(
+      (command) => command.name === 'desktop-test-prompt',
+    ),
+  );
+  await modal.getByRole('button', { name: '安装', exact: true }).click();
+  await installDialog.getByRole('button', { name: '安装并允许执行', exact: true }).click();
   await waitForState((b) => b.runtime.commands.some((c) => c.name === 'desktop-test-prompt'));
   await modal.getByRole('button', { name: '更新资源包', exact: true }).click();
+  await page
+    .getByRole('dialog', { name: '更新资源包并允许执行其代码？', exact: true })
+    .getByRole('button', { name: '更新并允许执行', exact: true })
+    .click();
   await modal.getByRole('button', { name: '移除', exact: true }).click();
   await page
     .getByRole('dialog')
