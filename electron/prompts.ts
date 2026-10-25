@@ -226,7 +226,7 @@ export async function savePromptTemplate(
       await fs.writeFile(target, raw, { flag: 'wx', mode: 0o600 });
     } catch (error) {
       if ((error as NodeJS.ErrnoException).code === 'EEXIST')
-        throw new Error('同名模板已存在，请编辑已有模板或换一个名称');
+        throw new Error('同名模板已存在，请编辑已有模板或换一个名称', { cause: error });
       throw error;
     }
   } else {

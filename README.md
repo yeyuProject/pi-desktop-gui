@@ -162,19 +162,19 @@ The Windows installer is also unsigned for now, so SmartScreen may warn on first
 <details>
 <summary><b>Is read-only mode a sandbox?</b></summary>
 
-No. Approval modes control tool calls made through Pi. Read-only allows built-in read and search tools only for verified paths inside the current project, and blocks manual `!` / `!!` commands. Confirm mode asks separately for each outside or unverifiable read; remembered shell approvals match only the complete command text. Project-wide write approval excludes `.git`, `.pi`, `.gitattributes`, and `.gitmodules`. These controls cannot restrict code that an installed extension runs by itself.
+No. Approval modes control tool calls made through Pi. Read-only allows built-in read and search tools only for verified paths inside the current project, and blocks manual `!` / `!!` commands. Confirm mode asks separately for each outside or unverifiable read; remembered shell approvals match only the complete command text. Project-wide write approval excludes `.git`, `.pi`, `.gitattributes`, and `.gitmodules`. These controls cannot restrict code that an installed extension runs by itself. Installing or updating resource packages requires a separate confirmation that names the source and affected scopes and explains installation scripts. Detached background services may survive stopping Pi or quitting the app; stop those services from a terminal.
 </details>
 
 <details>
 <summary><b>What does undo cover?</b></summary>
 
-File contents (including binary files, original line endings and POSIX permissions) in Git projects, within limits on file count, 50 MiB per file, and total snapshot size. Files created during the undone turn are moved to the trash. External side effects of commands — network calls, databases, installed packages — cannot be undone.
+File contents (including binary files, original line endings and POSIX permissions) in Git projects, within limits on file count, 50 MiB per file, and total snapshot size. Files created during the undone turn are moved to the trash. The preview lists paths omitted by scan limits, including skipped subdirectories. Case-only file renames are restored without deleting the baseline file. If an undo stops partway through, the error reports completed files and refreshes the file list. External side effects of commands — network calls, databases, installed packages — cannot be undone.
 </details>
 
 <details>
 <summary><b>Where is my data stored? What happens after a crash?</b></summary>
 
-Conversations are Pi's own JSONL session files. The desktop keeps its index (projects, drafts, settings) in the app data folder with three rotating backups, and keeps a copy of the previous index before each upgrade. If Pi crashes, prompts are never resent automatically — queued messages go back to the draft.
+Conversations are Pi's own JSONL session files. The desktop keeps its index (projects, drafts, settings) in the app data folder with three rotating backups, and keeps a copy of the previous index before each upgrade. If Pi crashes, prompts are never resent automatically — queued messages go back to the draft with their original template command, file references and images. BOM-prefixed configuration is supported; malformed JSON can be repaired in the editor, with its path, a raw-content warning and a backup of the original.
 </details>
 
 <details>

@@ -222,3 +222,19 @@ test(
     }
   },
 );
+
+test('a normally exiting terminal command removes its lock without a later cleanup probe', async () => {
+  const dir = await sandbox();
+  const lock = path.join(dir, 'terminal.lock');
+  const pending = JSON.stringify({ pid: process.pid, launch: 'normal-exit' });
+  await fs.writeFile(lock, pending);
+  const script = terminalScript([process.execPath, '-e', 'process.exit(0)'], dir, {}, lock, pending);
+  if (process.platform === 'win32')
+    await exec('powershell.exe', [
+      '-NoProfile',
+      '-EncodedCommand',
+      Buffer.from(script, 'utf16le').toString('base64'),
+    ]);
+  else await exec('bash', ['-c', script]);
+  await assert.rejects(fs.stat(lock), { code: 'ENOENT' });
+});

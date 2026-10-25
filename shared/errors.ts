@@ -72,11 +72,26 @@ export function classifyModelError(text: string): ModelErrorDescription {
   return describeModelError(kind);
 }
 
-export const redact = (text: string) =>
-  text
-    .replace(/(Bearer\s+)[A-Za-z0-9._~+/=-]+/gi, '$1[已隐藏]')
-    .replace(/\b(sk-[a-zA-Z0-9_-]{12,}|gh[pousr]_[a-zA-Z0-9]{15,})\b/g, '[已隐藏]')
-    .replace(/((?:api[_-]?key|access_token|refresh_token|authorization)["'\s:=]+)[^\s,"'}]+/gi, '$1[已隐藏]');
+export function redact(text: string) {
+  return text
+    .replace(/-----BEGIN [A-Z0-9 ]*PRIVATE KEY-----[\s\S]*?-----END [A-Z0-9 ]*PRIVATE KEY-----/g, '[已隐藏]')
+    .replace(/(\b(?:https?|socks[45]h?):\/\/)[^/\s]*:[^/\s]*@/gi, '$1[已隐藏]@')
+    .replace(/((?:Bearer|Basic)\s+)[A-Za-z0-9._~+/=-]+/gi, '$1[已隐藏]')
+    .replace(
+      /\b(?:sk-[a-zA-Z0-9_-]{12,}|gh[pousr]_[a-zA-Z0-9]{15,}|github_pat_[A-Za-z0-9_]{20,}|hf_[A-Za-z0-9]{20,}|xox[baprs]-[A-Za-z0-9-]{10,}|AIza[A-Za-z0-9_-]{30,}|(?:AKIA|ASIA)[A-Z0-9]{16})\b/g,
+      '[已隐藏]',
+    )
+    .replace(/\beyJ[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}\b/g, '[已隐藏]')
+    .replace(/(^|\n)(\s*(?:set-cookie|cookie)\s*:\s*)[^\r\n]+/gi, '$1$2[已隐藏]')
+    .replace(
+      /(\b[\w.-]{0,64}(?:api[_-]?key|access[_-]?key(?:[_-]?id)?|token|secret|password|passwd|credential|authorization|signature|cookie)\b["']?\s*[:=]\s*)("(?:\\.|[^"\\])*"|'(?:\\.|[^'\\])*'|[^\s,"';&}\]]+)/gi,
+      (_match, prefix: string, value: string) => {
+        if (value === '""' || value === "''") return prefix + value;
+        const quote = value[0] === '"' || value[0] === "'" ? value[0] : '';
+        return prefix + quote + '[已隐藏]' + quote;
+      },
+    );
+}
 
 export function redactMessageError<T extends { errorMessage?: string }>(message: T): T {
   return message.errorMessage ? { ...message, errorMessage: redact(message.errorMessage) } : message;

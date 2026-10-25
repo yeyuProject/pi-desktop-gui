@@ -983,6 +983,7 @@ try {
   const cleanupError = await cleanupApp();
   await provider.close();
   if (cleanupError) {
+    // eslint-disable-next-line no-unsafe-finally -- Preserve the original failure; fail teardown only after a successful test.
     if (!testError) throw cleanupError;
     console.warn('Cleanup after the original failure:', cleanupError.message);
   }

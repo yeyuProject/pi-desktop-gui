@@ -207,13 +207,14 @@ async function matcher(root: string) {
   } catch {}
   return ig;
 }
-export async function listDirectory(project: Project, directory: string): Promise<FileItem[]> {
+export async function listDirectory(project: Project, directory: string, limit = 1000): Promise<FileItem[]> {
   const real = await safePath(project.path, directory, true);
+  const root = await fs.realpath(project.path);
   const ig = await matcher(project.path);
   const entries = await fs.readdir(real, { withFileTypes: true });
   const result: FileItem[] = [];
   for (const e of entries) {
-    const rel = path.relative(project.path, path.join(real, e.name)).replaceAll('\\', '/');
+    const rel = path.relative(root, path.join(real, e.name)).replaceAll('\\', '/');
     if (
       excluded.has(e.name) ||
       sensitive(rel) ||
@@ -225,9 +226,13 @@ export async function listDirectory(project: Project, directory: string): Promis
   }
   return result
     .sort((a, b) => Number(b.directory) - Number(a.directory) || a.name.localeCompare(b.name))
-    .slice(0, 1000);
+    .slice(0, limit);
 }
 export async function allFiles(project: Project): Promise<string[]> {
+  return (await fileInventory(project)).files;
+}
+/** Bound snapshot work while recording every excluded path (or unvisited subtree). */
+export async function fileInventory(project: Project): Promise<{ files: string[]; omitted: string[] }> {
   try {
     const raw = await git(project, [
       'ls-files',
@@ -238,22 +243,38 @@ export async function allFiles(project: Project): Promise<string[]> {
       '--',
       '.',
     ]);
-    return [...new Set(raw.split('\0').filter(Boolean))]
-      .filter((n) => !sensitive(n) && !n.split('/').some((p) => excluded.has(p)))
-      .slice(0, 20000);
+    const names = [...new Set(raw.split('\0').filter(Boolean))].filter(
+      (n) => !sensitive(n) && !n.split('/').some((p) => excluded.has(p)),
+    );
+    return { files: names.slice(0, 20000), omitted: names.slice(20000) };
   } catch {
     const files: string[] = [];
+    const omitted: string[] = [];
     async function walk(rel: string, depth: number) {
-      if (depth > 15 || files.length >= 10000) return;
-      for (const item of await listDirectory(project, rel)) {
+      if (depth > 15 || files.length >= 10000) {
+        omitted.push(rel ? rel + '/**' : '**');
+        return;
+      }
+      for (const item of await listDirectory(project, rel, Infinity)) {
+        if (files.length >= 10000) {
+          omitted.push(item.path + (item.directory ? '/**' : ''));
+          continue;
+        }
         if (item.directory) await walk(item.path, depth + 1);
         else files.push(item.path);
-        if (files.length >= 10000) break;
       }
     }
     await walk('', 0);
-    return files;
+    return { files, omitted };
   }
+}
+function omittedPaths(omitted: string[]) {
+  const entries = new Set(omitted);
+  return (name: string) => {
+    if (entries.has(name) || entries.has('**')) return true;
+    const parts = name.split('/');
+    return parts.some((_, index) => entries.has(parts.slice(0, index + 1).join('/') + '/**'));
+  };
 }
 // Snapshot and restore ordinary files only. Resolving a link is safe for a preview,
 // but would make an undo operate on the link's target instead of the named file.
@@ -430,7 +451,8 @@ export class Workspace {
       return;
     }
     const changes = await this.changes(project);
-    const { files, omitted } = await snapshotCandidates(project.path, await allFiles(project));
+    const inventory = await fileInventory(project);
+    const { files, omitted } = await snapshotCandidates(project.path, inventory.files);
     const time = Date.now();
     const dir = path.join(this.dataDir, 'baselines');
     const repo = `${project.id}-${time}.git`;
@@ -442,6 +464,7 @@ export class Workspace {
     );
     const baseline: Baseline = {
       version: 3,
+      inventoryComplete: true,
       projectId: project.id,
       fingerprint: meta.fingerprint,
       time,
@@ -449,7 +472,7 @@ export class Workspace {
       files: Object.fromEntries(files.map((f, i) => [f.name, ids[i]])),
       modes: Object.fromEntries(files.map((f) => [f.name, f.mode])),
       dirty: changes.files.map((f) => f.path),
-      omitted,
+      omitted: [...inventory.omitted, ...omitted],
     };
     this.baselines.set(project.id, baseline);
     await fs.writeFile(path.join(dir, `${project.id}.json`), JSON.stringify(baseline), { mode: 0o600 });
@@ -616,27 +639,58 @@ export class Workspace {
         });
       }
       if (mode === 'run' && valid) {
-        const skip = new Set(baseline!.omitted);
-        const names = [...new Set([...(await allFiles(project)), ...Object.keys(baseline!.files)])].filter(
-          (n) => !skip.has(n),
+        const inventory = await fileInventory(project);
+        result.omitted = [...new Set([...result.omitted, ...inventory.omitted])];
+        const skip = omittedPaths(result.omitted);
+        const names = [...new Set([...inventory.files, ...Object.keys(baseline!.files)])].filter(
+          (n) => !skip(n),
         );
         const { now, omitted, modes } = await this.current(project, names);
         result.omitted.push(...omitted.filter((n) => !result.omitted.includes(n)));
+        // On a case-insensitive volume both spellings resolve to the same ordinary file.
+        // Recover its baseline identity before treating an unrecognised spelling as newly created.
+        const renamed = new Map<string, string>();
+        const aliases = new Set<string>();
+        const root = await fs.realpath(project.path);
+        const baselineNames = new Map(Object.keys(baseline!.files).map((name) => [name.toLowerCase(), name]));
+        const candidates = names.filter((name) => baseline!.files[name] !== now.get(name));
+        for (const candidate of candidates) {
+          const name = baselineNames.get(candidate.toLowerCase());
+          if (!name) continue;
+          if (!now.get(name)) continue;
+          const actual = path.relative(root, await fs.realpath(path.join(root, name))).replaceAll('\\', '/');
+          if (actual === name || actual.toLowerCase() !== name.toLowerCase()) continue;
+          renamed.set(actual, name);
+          aliases.add(name);
+          if (!now.has(actual)) {
+            names.push(actual);
+            now.set(actual, now.get(name));
+            modes.set(actual, modes.get(name)!);
+          }
+        }
         const files: Change[] = [];
         for (const name of names) {
-          if (!now.has(name)) continue;
+          if (!now.has(name) || aliases.has(name)) continue;
+          const oldPath = renamed.get(name);
           const after = now.get(name),
-            before = baseline!.files[name];
+            before = baseline!.files[oldPath ?? name];
+          if (before === undefined && !baseline!.inventoryComplete) {
+            // Older snapshots silently truncated their inventory. They cannot prove this file is new.
+            if (!result.omitted.includes(name)) result.omitted.push(name);
+            continue;
+          }
           const existed = before !== undefined,
             present = after !== undefined;
-          const modeChanged = !isWindows && existed && present && baseline!.modes[name] !== modes.get(name);
-          if (before === after && !modeChanged) continue;
+          const modeChanged =
+            !isWindows && existed && present && baseline!.modes[oldPath ?? name] !== modes.get(name);
+          if (before === after && !modeChanged && !oldPath) continue;
           files.push({
             path: name,
-            status: !present ? '删除' : !existed ? '新增' : '修改',
+            ...(oldPath ? { oldPath } : {}),
+            status: oldPath ? '重命名' : !present ? '删除' : !existed ? '新增' : '修改',
             staged: false,
             unstaged: true,
-            existedBeforeRun: baseline!.dirty.includes(name),
+            existedBeforeRun: baseline!.dirty.includes(oldPath ?? name),
           });
         }
         result.files = files;
@@ -661,34 +715,66 @@ export class Workspace {
     if (changes.error) throw new Error(`无法确认本轮文件变化，未执行撤销：${changes.error}`);
     const changed = changes.files.map((f) => f.path);
     const targets = only ? changed.filter((p) => only.includes(p)) : changed;
+    const previousName = (name: string) => changes.files.find((file) => file.path === name)?.oldPath ?? name;
     if (only && targets.length !== new Set(only).size)
       throw new Error('部分文件已不在本轮变更中，请刷新后再试');
     // Read every original first so a missing blob cannot leave a half-reverted run.
     const originals = new Map<string, Buffer>();
-    for (const name of targets)
-      if (name in baseline.files)
-        originals.set(name, await readBlob(this.repoPath(baseline), project.path, baseline.files[name]));
+    for (const name of targets) {
+      const originalName = previousName(name);
+      if (path.dirname(originalName) !== path.dirname(name))
+        throw new Error(
+          '父目录的大小写已经变化，请先在文件管理器中恢复目录名称，再刷新撤销清单。未修改任何文件。',
+        );
+      if (originalName in baseline.files)
+        originals.set(
+          name,
+          await readBlob(this.repoPath(baseline), project.path, baseline.files[originalName]),
+        );
+    }
     // Check again only after reading every original, immediately before any disk writes.
     if (
       context?.revision &&
       context.revision !== checkpointRevision(await this.checkpoints.scan(project, changed), changed)
     )
       throw new Error('确认清单显示后文件又有变化，未执行撤销。请重新查看清单后再试');
-    for (const name of targets) await snapshotPath(project.path, name, name in baseline.files);
+    for (const name of targets) {
+      await snapshotPath(project.path, name, previousName(name) in baseline.files);
+      if (previousName(name) !== name) await snapshotPath(project.path, previousName(name));
+      if (!originals.has(name)) {
+        const alias = Object.keys(baseline.files).find((entry) => entry.toLowerCase() === name.toLowerCase());
+        if (alias) {
+          const oldReal = await fs.realpath(path.join(project.path, alias)).catch(() => undefined);
+          if (oldReal && oldReal === (await fs.realpath(path.join(project.path, name))))
+            throw new Error('文件名的大小写已经变化，不能把原文件作为新文件删除。请刷新撤销清单。');
+        }
+      }
+    }
     const reverted: string[] = [];
     for (const name of targets) {
       if (baseline.omitted.includes(name) || sensitive(name)) continue;
-      const absolute = await snapshotPath(project.path, name, name in baseline.files);
-      const original = originals.get(name);
-      if (original) {
-        await fs.mkdir(path.dirname(absolute), { recursive: true });
-        await snapshotPath(project.path, name, true);
-        await fs.writeFile(absolute, original);
-        if (!isWindows && baseline.modes[name] !== undefined) await fs.chmod(absolute, baseline.modes[name]);
-      } else {
-        await remove(absolute);
+      try {
+        const originalName = previousName(name);
+        const absolute = await snapshotPath(project.path, name, originalName in baseline.files);
+        const original = originals.get(name);
+        if (original) {
+          await fs.mkdir(path.dirname(absolute), { recursive: true });
+          await snapshotPath(project.path, name, true);
+          await fs.writeFile(absolute, original);
+          if (!isWindows && baseline.modes[originalName] !== undefined)
+            await fs.chmod(absolute, baseline.modes[originalName]);
+          if (originalName !== name)
+            await fs.rename(absolute, await snapshotPath(project.path, originalName));
+        } else {
+          await remove(absolute);
+        }
+        reverted.push(name);
+      } catch (error) {
+        throw new Error(
+          `撤销在“${name}”处中断。已恢复 ${reverted.length} 个文件${reverted.length ? `（${reverted.slice(0, 5).join('、') + (reverted.length > 5 ? '等' : '')}）` : ''}；当前文件也可能已部分改变，其余文件尚未处理。文件列表已刷新，请检查后重新选择要恢复的文件。原因：${error instanceof Error ? error.message : String(error)}`,
+          { cause: error },
+        );
       }
-      reverted.push(name);
     }
     return reverted;
   }
@@ -712,7 +798,7 @@ export class Workspace {
     const baseline = await this.baseline(project.id, context);
     if (mode === 'run' && (!baseline || !this.validBaseline(baseline, meta)))
       return { ...result, unavailable: '运行基线不可用或 Git 分支已经变化' };
-    if (mode === 'run' && baseline!.omitted.includes(relative))
+    if (mode === 'run' && omittedPaths(baseline!.omitted)(relative))
       return { ...result, unavailable: '该文件未包含在运行基线中' };
     try {
       const f = await previewFile(project, relative);
@@ -723,7 +809,21 @@ export class Workspace {
       if ((e as NodeJS.ErrnoException).code !== 'ENOENT') throw e;
     }
     if (mode === 'run') {
-      const id = baseline!.files[relative];
+      let originalName = relative;
+      if (!(relative in baseline!.files)) {
+        const alias = Object.keys(baseline!.files).find(
+          (name) => name.toLowerCase() === relative.toLowerCase(),
+        );
+        if (alias) {
+          const [before, after] = await Promise.all(
+            [alias, relative].map((name) =>
+              fs.realpath(path.join(project.path, name)).catch(() => undefined),
+            ),
+          );
+          if (before && before === after) originalName = alias;
+        }
+      }
+      const id = baseline!.files[originalName];
       if (id) {
         const original = await readBlob(this.repoPath(baseline!), project.path, id);
         if (original.length > MiB || original.subarray(0, 8192).includes(0))

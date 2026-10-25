@@ -13,6 +13,9 @@ await fs.writeFile(
   path.join(f.agentDir, 'extensions', 'recovery-startup.js'),
   `export default (pi) => pi.on('session_start', (_event, ctx) => ctx.ui.notify('RECOVERY_STARTUP_NOTICE'));`,
 );
+await fs.mkdir(path.join(f.agentDir, 'prompts'), { recursive: true });
+await fs.writeFile(path.join(f.agentDir, 'prompts/review-queue.md'), 'EXPANDED_TEMPLATE $ARGUMENTS');
+await fs.writeFile(path.join(f.projectDir, 'queued-context.txt'), 'CRASH_ATTACHMENT_BODY');
 const service = new AgentService(f.store, new Workspace(f.dataDir));
 const until = async (check: () => boolean, timeout = 25000) => {
   const start = Date.now();
@@ -29,7 +32,8 @@ async function crash(queue = false) {
   if (queue) {
     const session = f.store.session(f.sessionId);
     session.draft = 'UNSENT_STEERING';
-    await service.send(f.sessionId, session.draft, [], 'steer');
+    session.attachments = ['queued-context.txt'];
+    await service.send(f.sessionId, session.draft, session.attachments, 'steer');
     const images = [
       {
         id: 'queued-image',
@@ -38,7 +42,7 @@ async function crash(queue = false) {
         mimeType: 'image/png',
       },
     ];
-    session.draft = 'UNSENT_FOLLOWUP';
+    session.draft = '/review-queue UNSENT_FOLLOWUP';
     session.images = images;
     await service.send(f.sessionId, session.draft, [], 'followUp', images);
   }
@@ -70,8 +74,10 @@ try {
   assert.deepEqual(service.runtime.notices, ['RECOVERY_STARTUP_NOTICE']);
   assert.equal(service.runtime.crash, undefined);
   assert.equal(provider.requests.length, requests, 'reconnect alone must not send anything to the model');
-  assert.match(f.store.session(f.sessionId).draft, /UNSENT_STEERING\n\nUNSENT_FOLLOWUP/);
+  assert.match(f.store.session(f.sessionId).draft, /UNSENT_STEERING\n\n\/review-queue UNSENT_FOLLOWUP/);
   assert.equal(f.store.session(f.sessionId).images?.[0].id, 'queued-image');
+  assert.deepEqual(f.store.session(f.sessionId).attachments, ['queued-context.txt']);
+  assert.doesNotMatch(f.store.session(f.sessionId).draft, /CRASH_ATTACHMENT_BODY|EXPANDED_TEMPLATE/);
   await f.store.flush();
   const persisted = JSON.parse(await fs.readFile(path.join(f.dataDir, 'state.json'), 'utf8'));
   assert.equal(persisted.sessions.find((s: any) => s.id === f.sessionId).images[0].id, 'queued-image');

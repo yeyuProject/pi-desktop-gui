@@ -26,7 +26,8 @@ export function ReadinessChecklist({
   const connected = ownRuntime && runtime.connected;
   const piReady = connected || environment.supported;
   const modelReady = connected ? Boolean(runtime.model) : Boolean(modelLabel);
-  if (piReady && modelReady) return null;
+  const shellReady = Boolean(environment.bash);
+  if (piReady && modelReady && shellReady) return null;
   const chooseModel = () => document.querySelector<HTMLButtonElement>('.model-pill')?.click();
   const steps: { done: boolean; title: string; detail: string; action?: [string, () => void] }[] = [
     {
@@ -61,9 +62,23 @@ export function ReadinessChecklist({
               : ['登录供应商', providers],
     },
   ];
+  steps.push({
+    done: shellReady,
+    title: shellReady
+      ? '已找到命令执行环境'
+      : window.desktop.platform === 'win32'
+        ? '安装 Git Bash'
+        : '安装 bash',
+    detail:
+      environment.bash ||
+      (window.desktop.platform === 'win32'
+        ? '未检测到 Git Bash，执行命令会失败。请安装 Git for Windows，或在 Pi 配置中设置 shellPath，然后重新检查。'
+        : '未检测到 bash，执行命令会失败。请安装 bash 或在 Pi 配置中设置 shellPath，然后重新检查。'),
+    action: shellReady ? undefined : ['重新检查运行环境', checkEnvironment],
+  });
   return (
     <div className="readiness" role="region" aria-label="开始前检查">
-      <strong>开始前还差一步</strong>
+      <strong>开始前检查</strong>
       {!piReady && <PiCompatibilityNotice environment={environment} />}
       {steps.map((s, i) => (
         <div key={i} className={'readiness-step' + (s.done ? ' done' : '')}>

@@ -78,7 +78,17 @@ export function CheckpointDialog({
               {!preview.files.length && <p className="empty-small">没有需要恢复的文件。</p>}
             </div>
             {!!preview.omitted.length && (
-              <p className="empty-small">{preview.omitted.length} 个文件不在检查点范围内，不会恢复。</p>
+              <details className="omitted">
+                <summary>{preview.omitted.length} 个路径未纳入检查点，不会自动恢复</summary>
+                <p>包括超出扫描上限、无法安全保存或旧检查点未记录的路径；/** 表示整个子目录。</p>
+                <textarea
+                  className="input"
+                  rows={8}
+                  aria-label="未纳入检查点的路径"
+                  readOnly
+                  value={preview.omitted.join('\n')}
+                />
+              </details>
             )}
             <div className="modal-actions">
               <button onClick={onClose} disabled={pending}>

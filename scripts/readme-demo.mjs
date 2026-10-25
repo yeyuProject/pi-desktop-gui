@@ -527,6 +527,7 @@ try {
     path.dirname(path.resolve(dir)) !== path.resolve(os.tmpdir()) ||
     !path.basename(dir).startsWith('pi-demo-')
   )
+    // eslint-disable-next-line no-unsafe-finally -- Refuse cleanup outside the exact temporary directory, including after a failed render.
     throw new Error('演示帧目录不在预期临时目录中，已停止清理。');
   fs.rmSync(dir, { recursive: true, force: true });
 }

@@ -78,3 +78,29 @@ test('raw details redact credentials and remain readable', () => {
   assert.match(safe, /401/);
   assert.match(safe, /已隐藏/);
 });
+
+test('diagnostics hide custom credential fields, URL passwords, cookies, JWTs and provider keys', () => {
+  const values = [
+    'custom secret with spaces',
+    'encoded-password',
+    'cookie-session-value',
+    'github_pat_' + 'A'.repeat(30),
+    'AIza' + 'B'.repeat(35),
+    'ASIA' + 'C'.repeat(16),
+    'eyJ' + 'D'.repeat(20) + '.' + 'E'.repeat(20) + '.' + 'F'.repeat(20),
+    'opaque-query-value',
+    'opaque-client-value',
+    'cHJpdmF0ZS1jcmVkZW50aWFs',
+  ];
+  const raw = `HTTP 401 at service.example: {"client_secret":"${values[0]}","my_provider_token":"${values[8]}"}\nhttps://user:${values[1]}@service.example/path?token=${values[7]}&mode=test\nCookie: session=${values[2]}; another=also-private\nAuthorization: Basic ${values[9]}\n${values.slice(3, 7).join(' ')}\n-----BEGIN PRIVATE KEY-----\nprivate-key-body\n-----END PRIVATE KEY-----`;
+  const safe = redact(raw);
+  for (const value of [...values, 'also-private', 'private-key-body'])
+    assert.ok(!safe.includes(value), value);
+  assert.match(safe, /HTTP 401/);
+  assert.match(safe, /service\.example/);
+  assert.match(safe, /mode=test/);
+  assert.equal(
+    redact('max_tokens=2000 tokenCount=3 token_limit=5'),
+    'max_tokens=2000 tokenCount=3 token_limit=5',
+  );
+});

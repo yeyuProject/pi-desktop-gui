@@ -19,7 +19,8 @@ export async function canonicalWritePath(target: string): Promise<string> {
     } catch (error) {
       if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error;
       try {
-        if ((await fs.lstat(current)).isSymbolicLink()) throw new Error('文件路径包含失效的符号链接');
+        if ((await fs.lstat(current)).isSymbolicLink())
+          throw new Error('文件路径包含失效的符号链接', { cause: error });
       } catch (statError) {
         if ((statError as NodeJS.ErrnoException).code !== 'ENOENT') throw statError;
       }

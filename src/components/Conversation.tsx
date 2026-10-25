@@ -1,4 +1,4 @@
-import { LoaderCircle, ArrowDown, ArrowUp, CircleHelp, Search, X } from 'lucide-react';
+import { ArrowDown, ArrowUp, CircleHelp, Search, X } from 'lucide-react';
 import { ThinkingBlock } from './conversation/ThinkingBlock';
 import { ToolCard } from './conversation/ToolCard';
 import { ApprovalCard } from './Approval';
@@ -68,7 +68,6 @@ export function Conversation(
     pending,
     setFeatureTab,
     expanded,
-    messageLimit,
     setMessageLimit,
     newContent,
     setNewContent,
@@ -87,7 +86,6 @@ export function Conversation(
     attempt,
     persistDraft,
     focusComposer,
-    selectSession,
     openSettings,
     connect,
     inspectFile,

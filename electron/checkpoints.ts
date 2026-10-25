@@ -10,7 +10,7 @@ import {
   storeBlobs,
   updateSnapshotIndex,
 } from './snapshot';
-import { allFiles, info, snapshotCandidates, snapshotStorageBytes } from './workspace';
+import { allFiles, fileInventory, info, snapshotCandidates, snapshotStorageBytes } from './workspace';
 import { isWindows } from './platform';
 import { normalizePiToolPath } from './pi/tool-path';
 import { canonicalWritePath, isWithinDirectory } from './approval-paths';
@@ -25,6 +25,8 @@ export interface SnapshotData {
   modes: Record<string, number>;
   dirty: string[];
   omitted: string[];
+  /** All skipped paths/subtrees were recorded, so absence can safely mean a new file. */
+  inventoryComplete?: boolean;
 }
 export interface CheckpointRecord extends SnapshotData {
   id: string;
@@ -87,7 +89,10 @@ export class Checkpoints {
   private tools = new Map<string, ToolBoundary>();
   private operation: Promise<unknown> = Promise.resolve();
   private cached?: { sessionId: string; records: CheckpointRecord[] };
-  private hashes?: { sessionId: string; files: Map<string, { stamp: string; id: string; mode: number }> };
+  private hashes = new Map<
+    string,
+    { root: string; files: Map<string, { stamp: string; id: string; mode: number }> }
+  >();
   // Observed hashes need not exist in the object store. Never use them to skip storeBlobs in capture.
   private scanHashes = new Map<string, { root: string; files: Map<string, { stamp: string; id: string }> }>();
   private storage?: { bytes: number; files: Map<string, number> };
@@ -156,7 +161,7 @@ export class Checkpoints {
       state = JSON.parse(await fs.readFile(this.statePath(sessionId), 'utf8')) as SessionTracking;
     } catch (error) {
       if ((error as NodeJS.ErrnoException).code !== 'ENOENT')
-        throw new Error('检查点的轮次记录无法读取，请先保留数据并重新打开会话');
+        throw new Error('检查点的轮次记录无法读取，请先保留数据并重新打开会话', { cause: error });
     }
     state ??= { lastTurn: 0, cursor: 0, known: {}, activity: [] };
     this.tracking.set(sessionId, state);
@@ -342,11 +347,13 @@ export class Checkpoints {
       if (this.storage)
         await snapshotStorageBytes(path.join(this.directory, repo), (file, size) => this.account(file, size));
     }
+    const previousHashes = this.hashes.get(sessionId);
     const cached =
-      this.hashes?.sessionId === sessionId
-        ? this.hashes.files
+      previousHashes?.root === project.path
+        ? previousHashes.files
         : new Map<string, { stamp: string; id: string; mode: number }>();
-    const names = await allFiles(project);
+    const inventory = await fileInventory(project);
+    const names = inventory.files;
     // Git's private raw-byte index performs the full native stat scan. POSIX still needs lstat for
     // permission bits that Git does not track; Windows uses the changed-path list for safe path checks.
     const changedNames =
@@ -393,7 +400,7 @@ export class Checkpoints {
         : []),
       ...candidates.files,
     ];
-    const omitted = candidates.omitted;
+    const omitted = [...inventory.omitted, ...candidates.omitted];
     const changed = files.filter(
       (file) =>
         !cached.has(file.name) || cached.get(file.name)?.stamp !== file.stamp || changedNames?.has(file.name),
@@ -422,13 +429,13 @@ export class Checkpoints {
       !cached.size,
     );
     await this.measureFiles([path.join(this.directory, repo, 'index')]);
-    this.hashes = {
-      sessionId,
-      files: new Map(
-        files.map((file, index) => [file.name, { stamp: file.stamp, id: ids[index], mode: file.mode }]),
-      ),
-    };
-    this.scanHashes.set(sessionId, { root: project.path, files: this.hashes.files });
+    const cachedFiles = new Map(
+      files.map((file, index) => [file.name, { stamp: file.stamp, id: ids[index], mode: file.mode }]),
+    );
+    this.hashes.delete(sessionId);
+    this.hashes.set(sessionId, { root: project.path, files: cachedFiles });
+    while (this.hashes.size > 8) this.hashes.delete(this.hashes.keys().next().value!);
+    this.scanHashes.set(sessionId, { root: project.path, files: cachedFiles });
     const now = Object.fromEntries(files.map((file, i) => [file.name, fingerprint(ids[i], file.mode)]));
     if (state.lastTurn) await this.observe(sessionId, now, 'manual');
     else state.known = now;
@@ -446,6 +453,7 @@ export class Checkpoints {
     }
     const record: CheckpointRecord = {
       version: 3,
+      inventoryComplete: true,
       id: `${sessionId}-${turn}`,
       projectId: project.id,
       sessionId,
@@ -635,7 +643,7 @@ export class Checkpoints {
       }
       this.tracking.delete(sessionId);
       if (this.cached?.sessionId === sessionId) this.cached = undefined;
-      if (this.hashes?.sessionId === sessionId) this.hashes = undefined;
+      this.hashes.delete(sessionId);
       this.scanHashes.delete(sessionId);
     });
   }
@@ -677,7 +685,7 @@ export class Checkpoints {
         const repo = this.repoPath(group[0]);
         if (!live.length) {
           await this.removeStored(repo, true);
-          if (this.hashes?.sessionId === sessionId) this.hashes = undefined;
+          this.hashes.delete(sessionId);
           this.scanHashes.delete(sessionId);
           const state = await this.state(sessionId);
           state.known = {};

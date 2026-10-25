@@ -109,3 +109,33 @@ test('the native Pi file lock prevents a config save from overwriting a concurre
   await rejected;
   assert.equal(JSON.parse(await fs.readFile(f.file, 'utf8')).nativeUpdate, true);
 });
+
+test('BOM config files remain readable and save without losing masked credentials', async (t) => {
+  const f = await fixture(t);
+  await fs.writeFile(f.file, '\uFEFF' + f.original);
+  const document = await f.config.read(f.session.id, 'settings', false);
+  assert.equal(document.error, undefined);
+  assert.ok(!document.text.includes('private-fixture-secret'));
+  await f.config.save(f.session.id, 'settings', false, document);
+  assert.equal(JSON.parse(await fs.readFile(f.file, 'utf8')).apiKey, 'private-fixture-secret');
+  assert.equal(await fs.readFile(f.file + '.desktop-backup', 'utf8'), '\uFEFF' + f.original);
+});
+
+test('malformed config exposes its repair document and path, retaining backup and revision protection', async (t) => {
+  const f = await fixture(t);
+  const broken = '{"unknownSetting":true, "client_secret":"local-test-value",}';
+  await fs.writeFile(f.file, broken);
+  const document = await f.config.read(f.session.id, 'settings', false);
+  assert.equal(document.path, f.file);
+  assert.equal(document.text, broken);
+  assert.match(document.error!, /原文.*密钥/);
+  await assert.rejects(f.config.save(f.session.id, 'settings', false, document), /有效的 JSON/);
+  assert.equal(await fs.readFile(f.file, 'utf8'), broken);
+  await f.config.save(f.session.id, 'settings', false, { ...document, text: broken.replace(',}', '}') });
+  assert.equal(await fs.readFile(f.file + '.desktop-backup', 'utf8'), broken);
+  assert.equal(JSON.parse(await fs.readFile(f.file, 'utf8')).client_secret, 'local-test-value');
+  await assert.rejects(
+    f.config.save(f.session.id, 'settings', false, { ...document, text: '{}' }),
+    /其他程序修改/,
+  );
+});

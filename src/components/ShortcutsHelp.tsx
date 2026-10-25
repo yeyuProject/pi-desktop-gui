@@ -17,7 +17,7 @@ export const shortcutGroups: [string, [string[], string][]][] = [
   [
     '运行',
     [
-      [['Esc', 'Esc'], '执行中连按两次，停止当前会话并把队列恢复到草稿'],
+      [['Esc', 'Esc'], '执行中连按两次，停止当前会话并恢复队列草稿；已脱离 Pi 的后台服务需单独停止'],
       [[modKey, 'Shift', 'A'], '定位当前审批的允许按钮；审核后再按一次允许'],
       [[modKey, 'Shift', 'D'], '填写当前审批的拒绝原因'],
       [['Alt', 'PageUp / PageDown'], '在变更面板中查看上一个或下一个文件'],

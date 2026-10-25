@@ -1,3 +1,5 @@
+import { splitUserContent } from '../shared/message-content';
+import { composeDraftText, type DraftSnippet } from '../shared/draft';
 import fs from 'node:fs/promises';
 import path from 'node:path';
 import os from 'node:os';
@@ -91,6 +93,16 @@ const sessionActivityEvents = new Set([
   'auto_retry_end',
   'agent_settled',
 ]);
+interface QueuedDraft {
+  text: string;
+  original: string;
+  attachments: string[];
+  images: ImageAttachment[];
+  snippets: DraftSnippet[];
+  mode: SendMode;
+  observed: boolean;
+}
+
 export class AgentService extends EventEmitter {
   runtime: Runtime = emptyRuntime();
   private rpc?: PiRpc;
@@ -114,7 +126,10 @@ export class AgentService extends EventEmitter {
   private probe?: PiRpc;
   private probing = false;
   private stopEpoch = 0;
-  private queuedImages: { text: string; images: ImageAttachment[] }[] = [];
+  private historyRevision = 0;
+  private reconciledHistoryRevision = 0;
+  private queuedDrafts: QueuedDraft[] = [];
+  private pendingDraft?: QueuedDraft;
   private notificationId = 0;
   private crashTimes = new Map<string, number>();
   private crashCleanup = Promise.resolve();
@@ -454,6 +469,7 @@ export class AgentService extends EventEmitter {
       case 'message_update': {
         let m = r.messages.at(-1);
         if (!m || m.role !== 'assistant') {
+          this.historyRevision++;
           m = { role: 'assistant', content: [], timestamp: Date.now() };
           r.messages.push(m);
         }
@@ -533,15 +549,41 @@ export class AgentService extends EventEmitter {
         );
         break;
       }
-      case 'queue_update':
+      case 'queue_update': {
+        const previous = { steer: r.steering, followUp: r.followUp };
         r.steering = record.steering ?? [];
         r.followUp = record.followUp ?? [];
-        this.queuedImages = this.queuedImages.filter((q) => [...r.steering, ...r.followUp].includes(q.text));
+        const current = { steer: r.steering, followUp: r.followUp };
+        const pending = this.pendingDraft;
+        if (pending && !pending.observed) {
+          const before = previous[pending.mode],
+            after = current[pending.mode];
+          if (after.length > before.length && before.every((text, index) => after[index] === text)) {
+            // Pi reports expanded template text before acknowledging the queued prompt.
+            pending.text = after.at(-1)!;
+            pending.observed = true;
+            this.queuedDrafts.push(pending);
+          }
+        }
+        const remaining = { steer: [...r.steering], followUp: [...r.followUp] };
+        this.queuedDrafts = this.queuedDrafts
+          .slice()
+          .reverse()
+          .filter((draft) => {
+            const queue = remaining[draft.mode];
+            const index = queue.lastIndexOf(draft.text);
+            if (index < 0) return false;
+            queue.splice(index, 1);
+            return true;
+          })
+          .reverse();
         break;
+      }
       case 'compaction_start':
         if (!this.stopRequested) this.status('compacting');
         break;
       case 'compaction_end':
+        this.historyRevision++;
         if (record.errorMessage) this.notify(`上下文压缩失败：${record.errorMessage}`, 'warning');
         if (!this.stopRequested)
           this.status(record.reason === 'manual' && !record.willRetry ? 'idle' : 'running');
@@ -586,7 +628,9 @@ export class AgentService extends EventEmitter {
             t.status = 'error';
             t.output += '\n执行已结束但未收到工具结果';
           }
-        void this.refresh().catch((e) => this.diagnostic(errorText(e)));
+        void this.refresh(r.messages.at(-1)?.role !== 'assistant' || !last?.stopReason).catch((e) =>
+          this.diagnostic(errorText(e)),
+        );
         const sessionId = r.sessionId;
         void this.exclusive(async () => {
           if (sessionId) await this.checkpointRecorder.finish(sessionId);
@@ -730,7 +774,7 @@ export class AgentService extends EventEmitter {
       this.status(this.connecting ? 'starting' : 'running');
     this.publish(true);
   }
-  private async refresh() {
+  private async refresh(reconcile = true) {
     const rpc = this.rpc;
     const runtime = this.runtime;
     if (!rpc || rpc.closed || this.switchEvents) return;
@@ -746,23 +790,27 @@ export class AgentService extends EventEmitter {
       this.save();
     }
     if (!busy(this.runtime.status)) {
-      const before = runtime.messages,
-        count = before.length,
-        last = before.at(-1);
-      const context = await rpc.request('get_messages');
-      const messages = await this.readTranscript(state.sessionFile, context.messages);
-      if (
-        this.rpc === rpc &&
-        this.runtime === runtime &&
-        !this.switchEvents &&
-        !busy(runtime.status) &&
-        runtime.messages === before &&
-        before.length === count &&
-        before.at(-1) === last
-      ) {
-        runtime.messages = messages;
-        // Completion is a reconciliation point: also repair a renderer that missed a live patch.
-        this.resync();
+      if (reconcile || this.historyRevision !== this.reconciledHistoryRevision) {
+        const revision = this.historyRevision;
+        const before = runtime.messages,
+          count = before.length,
+          last = before.at(-1);
+        const context = await rpc.request('get_messages');
+        const messages = await this.readTranscript(state.sessionFile, context.messages);
+        if (
+          this.rpc === rpc &&
+          this.runtime === runtime &&
+          !this.switchEvents &&
+          !busy(runtime.status) &&
+          runtime.messages === before &&
+          before.length === count &&
+          before.at(-1) === last
+        ) {
+          runtime.messages = messages;
+          this.reconciledHistoryRevision = revision;
+          // Reconcile after compaction, navigation or recovery; ordinary turns already arrive as events.
+          this.resync();
+        }
       }
       try {
         const stats = await rpc.request('get_session_stats');
@@ -1073,7 +1121,7 @@ export class AgentService extends EventEmitter {
     this.runtime = { ...emptyRuntime(), sessionId, cwd, crash, configurationPending };
     this.retryNotice = undefined;
     this.retryCancelled = false;
-    this.queuedImages = [];
+    this.queuedDrafts = [];
     this.stopRequested = false;
     this.fullOutput = '';
   }
@@ -1124,10 +1172,10 @@ export class AgentService extends EventEmitter {
       this.runtime.connected = false;
       this.clearDialogs();
       const last = this.runtime.tools.findLast((tool) => tool.status === 'running');
-      this.restoreQueuedDrafts([...this.runtime.steering, ...this.runtime.followUp], this.queuedImages);
+      this.restoreQueuedDrafts([...this.runtime.steering, ...this.runtime.followUp], this.queuedDrafts);
       this.runtime.steering = [];
       this.runtime.followUp = [];
-      this.queuedImages = [];
+      this.queuedDrafts = [];
       if (last) {
         this.unsafeExit = true;
         this.crashCleanup = rpc.treeTerminationConfirmed().then(async (confirmed) => {
@@ -1312,7 +1360,7 @@ export class AgentService extends EventEmitter {
     if (images.length && !this.runtime.model?.input?.includes('image'))
       throw new Error('当前模型未声明图片能力，请切换到支持图片的模型');
     const isActive = busy(this.runtime.status);
-    if (isActive && images.length) validateImages([...this.queuedImages.flatMap((q) => q.images), ...images]);
+    if (isActive && images.length) validateImages([...this.queuedDrafts.flatMap((q) => q.images), ...images]);
     if (shellCommand && isActive) throw new Error('请等待当前任务完成后再执行命令');
     if (!isActive) {
       this.stopRequested = false;
@@ -1376,20 +1424,37 @@ export class AgentService extends EventEmitter {
         await this.refresh();
         await this.syncApprovalMode();
         await this.applyPendingConfiguration();
-      } else
-        result = await this.rpc!.request(
-          'prompt',
-          {
-            message: prompt,
-            ...(isActive ? { streamingBehavior: mode } : {}),
-            ...(images.length
-              ? { images: images.map(({ data, mimeType }) => ({ type: 'image', data, mimeType })) }
-              : {}),
-          },
-          text.startsWith('/') ? 600000 : 30000,
-        );
-      if (result?.disposition === 'queued' && images.length)
-        this.queuedImages.push({ text: prompt, images: structuredClone(images) });
+      } else {
+        const matches = this.store.matchesDraft(session, text, attachments, images);
+        const draft: QueuedDraft = {
+          text: prompt,
+          original: matches ? session.draft : text,
+          attachments: [...attachments],
+          images: structuredClone(images),
+          snippets: matches ? structuredClone(session.draftSnippets ?? []) : [],
+          mode,
+          observed: false,
+        };
+        this.pendingDraft = draft;
+        try {
+          result = await this.rpc!.request(
+            'prompt',
+            {
+              message: prompt,
+              ...(isActive ? { streamingBehavior: mode } : {}),
+              ...(images.length
+                ? { images: images.map(({ data, mimeType }) => ({ type: 'image', data, mimeType })) }
+                : {}),
+            },
+            text.startsWith('/') ? 600000 : 30000,
+          );
+          if (result?.disposition === 'queued' && !draft.observed) this.queuedDrafts.push(draft);
+          if (result?.disposition !== 'queued')
+            this.queuedDrafts = this.queuedDrafts.filter((item) => item !== draft);
+        } finally {
+          if (this.pendingDraft === draft) this.pendingDraft = undefined;
+        }
+      }
       if (result?.disposition === 'handled' && !this.stopRequested) {
         const state = await this.rpc!.request('get_state');
         if (!state.isStreaming && !state.isCompacting && !state.pendingMessageCount) this.status('idle');
@@ -1620,8 +1685,7 @@ export class AgentService extends EventEmitter {
     );
     const session = this.store.session(id);
     if (action === 'regenerate') return this.send(id, restored.text, [], 'steer', restored.images);
-    const cut = restored.text.indexOf('\n\n<project_file path=');
-    session.draft = cut >= 0 ? restored.text.slice(0, cut) : restored.text;
+    session.draft = splitUserContent(restored.text).text;
     session.draftSnippets = [];
     session.attachments = [];
     session.images = restored.images;
@@ -1631,40 +1695,69 @@ export class AgentService extends EventEmitter {
   }
   async clearQueue() {
     if (!this.rpc || this.rpc.closed) return;
-    const queuedImages = [...this.queuedImages];
+    const queuedDrafts = [...this.queuedDrafts];
     const result = await this.rpc.request('clear_queue');
     const returned = [...(result?.steering ?? []), ...(result?.followUp ?? [])];
-    this.restoreQueuedDrafts(returned, queuedImages);
+    this.restoreQueuedDrafts(returned, queuedDrafts);
     this.runtime.steering = [];
     this.runtime.followUp = [];
-    this.queuedImages = [];
+    this.queuedDrafts = [];
     // Stopping remains available even after disk failure; recovered drafts remain visible in memory.
     await this.store.save().catch((error) => this.diagnostic(errorText(error)));
     this.emit('state', this.store.state);
     this.publish(true);
   }
-  private restoreQueuedDrafts(returned: string[], queuedImages: typeof this.queuedImages) {
-    if (returned.length && this.runtime.sessionId) {
-      const s = this.store.session(this.runtime.sessionId);
-      const selectedId = this.store.state.selectedSessionId;
-      const restored = [...returned];
-      for (const q of queuedImages.filter((q) => returned.includes(q.text))) {
-        try {
-          this.store.appendDraftImages(s, q.images);
-        } catch {
-          const recovered = this.store.createSession(s.projectId);
-          if (!s.projectId) recovered.cwd = this.runtime.cwd;
-          recovered.title = '已恢复的图片消息';
-          recovered.draft = q.text;
-          recovered.images = q.images;
-          const index = restored.indexOf(q.text);
-          if (index >= 0) restored.splice(index, 1);
-          this.runtime.notices.push('未发送的图片已保存在“已恢复的图片消息”中。');
-        }
+  private restoreQueuedDrafts(returned: string[], queuedDrafts: QueuedDraft[]) {
+    if (!returned.length || !this.runtime.sessionId) return;
+    const session = this.store.session(this.runtime.sessionId);
+    const selectedId = this.store.state.selectedSessionId;
+    // clear_queue returns steering first, followed by follow-ups. Match each occurrence once.
+    const candidates = [...queuedDrafts].sort(
+      (a, b) => Number(a.mode === 'followUp') - Number(b.mode === 'followUp'),
+    );
+    for (const expanded of returned) {
+      const index = candidates.findIndex((draft) => draft.text === expanded);
+      const draft = index < 0 ? undefined : candidates.splice(index, 1)[0];
+      const text = draft?.original ?? splitUserContent(expanded).text;
+      const attachments = [...new Set([...session.attachments, ...(draft?.attachments ?? [])])];
+      const separator =
+        (session.draft || session.draftSnippets?.length) && (text || draft?.snippets.length) ? '\n\n' : '';
+      const offset = session.draft.length + separator.length;
+      try {
+        if (
+          attachments.length > 20 ||
+          Buffer.byteLength(
+            composeDraftText(session.draft, session.draftSnippets ?? []) +
+              separator +
+              composeDraftText(text, draft?.snippets ?? []),
+            'utf8',
+          ) >
+            1024 * 1024
+        )
+          throw new Error('草稿容量不足');
+        this.store.appendDraftImages(session, draft?.images ?? []);
+        session.draft += separator + text;
+        session.attachments = attachments;
+        session.draftSnippets = [
+          ...(session.draftSnippets ?? []),
+          ...(draft?.snippets ?? []).map((snippet) => ({
+            ...snippet,
+            id: randomUUID(),
+            offset: offset + snippet.offset,
+          })),
+        ];
+      } catch {
+        const recovered = this.store.createSession(session.projectId);
+        if (!session.projectId) recovered.cwd = this.runtime.cwd;
+        recovered.title = draft?.images.length ? '已恢复的图片消息' : '已恢复的待发送消息';
+        recovered.draft = text;
+        recovered.images = draft?.images ?? [];
+        recovered.attachments = draft?.attachments ?? [];
+        recovered.draftSnippets = draft?.snippets ?? [];
+        this.runtime.notices.push('未发送的消息已保存在新的恢复会话中。');
       }
-      if (selectedId) this.store.selectSession(selectedId);
-      s.draft = [s.draft, ...restored].filter(Boolean).join('\n\n');
     }
+    if (selectedId) this.store.selectSession(selectedId);
   }
   private async refreshCapabilities() {
     if (!this.rpc || this.rpc.closed) return;
@@ -1812,7 +1905,7 @@ export class AgentService extends EventEmitter {
     next.thinking = old.thinking;
     next.approvalMode = old.approvalMode;
     if (result.message) {
-      next.draft = messageText(result.message);
+      next.draft = splitUserContent(messageText(result.message)).text;
       next.images = (Array.isArray(result.message.content) ? result.message.content : [])
         .filter((b: any) => b.type === 'image')
         .map((b: any, i: number) => ({
@@ -1859,7 +1952,7 @@ export class AgentService extends EventEmitter {
       : this.idleTask.bind(this);
     return task(id, async (rpc) => {
       const result = await rpc.bridge(method, params);
-      if (['login', 'logout', 'reload', 'toggle_resource'].includes(method)) await this.refreshCapabilities();
+      if (['login', 'logout', 'reload'].includes(method)) await this.refreshCapabilities();
       return result;
     });
   }
@@ -1895,7 +1988,7 @@ export class AgentService extends EventEmitter {
       raw = await fs.readFile(file, 'utf8');
     } catch (error) {
       if ((error as NodeJS.ErrnoException).code === 'ENOENT' && freshEmpty && isFreshEmpty())
-        throw new Error('会话尚未产生可导出的内容');
+        throw new Error('会话尚未产生可导出的内容', { cause: error });
       throw error;
     }
     if (this.runtime === runtime && this.freshSessionFile === file) this.freshSessionFile = undefined;
@@ -2100,7 +2193,10 @@ export class AgentService extends EventEmitter {
             answer = messageText(e.message);
             if (e.message.stopReason === 'error') failure = e.message.errorMessage ?? '模型连接失败';
           }
-          if (e.type === 'agent_settled') failure ? reject(new Error(failure)) : resolve();
+          if (e.type === 'agent_settled') {
+            if (failure) reject(new Error(failure));
+            else resolve();
+          }
         });
         probe.on('fault', reject);
         probe.on('exit', () => reject(new Error('连接测试进程已退出')));

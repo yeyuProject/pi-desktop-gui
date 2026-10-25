@@ -57,7 +57,7 @@ export async function createAgentRules(project: Project): Promise<AgentRulesFile
     await fs.writeFile(path.join(root, 'AGENTS.md'), content, { flag: 'wx', mode: 0o644 });
   } catch (error) {
     if ((error as NodeJS.ErrnoException).code === 'EEXIST')
-      throw new Error('AGENTS.md 已存在，未覆盖原文件，请直接打开编辑');
+      throw new Error('AGENTS.md 已存在，未覆盖原文件，请直接打开编辑', { cause: error });
     throw error;
   }
   return { relativePath: 'AGENTS.md', size: Buffer.byteLength(content) };
