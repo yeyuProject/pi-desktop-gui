@@ -84,7 +84,7 @@ export function redact(text: string) {
     .replace(/\beyJ[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}\b/g, '[已隐藏]')
     .replace(/(^|\n)(\s*(?:set-cookie|cookie)\s*:\s*)[^\r\n]+/gi, '$1$2[已隐藏]')
     .replace(
-      /(\b[\w.-]{0,64}(?:api[_-]?key|access[_-]?key(?:[_-]?id)?|token|secret|password|passwd|credential|authorization|signature|cookie)\b["']?\s*[:=]\s*)("(?:\\.|[^"\\])*"|'(?:\\.|[^'\\])*'|[^\s,"';&}\]]+)/gi,
+      /(\b[\w.-]{0,64}(?:api[_-]?key|access[_-]?key(?:[_-]?id)?|token|secret|password|passwd|credential|authorization|signature|cookie)\b["']?\s*[:=]\s*)(\[已隐藏\]|"(?:\\.|[^"\\])*"|'(?:\\.|[^'\\])*'|[^\s,"';&}\]]+)/gi,
       (_match, prefix: string, value: string) => {
         if (value === '""' || value === "''") return prefix + value;
         const quote = value[0] === '"' || value[0] === "'" ? value[0] : '';

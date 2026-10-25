@@ -598,7 +598,11 @@ try {
     (value) => value === 'before  after',
     'Native Cut did not edit the focused textarea',
   );
-  assert.equal(await app.evaluate(({ clipboard }) => clipboard.readText()), 'SELECTED');
+  await eventually(
+    () => app.evaluate(({ clipboard }) => clipboard.readText()),
+    (value) => value === 'SELECTED',
+    'Native Cut did not populate the system clipboard',
+  );
   assert.deepEqual(await editor.evaluate((node) => [node.selectionStart, node.selectionEnd]), [7, 7]);
   await editRole('paste');
   await eventually(

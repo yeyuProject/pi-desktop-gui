@@ -104,3 +104,19 @@ test('diagnostics hide custom credential fields, URL passwords, cookies, JWTs an
     'max_tokens=2000 tokenCount=3 token_limit=5',
   );
 });
+
+test('redacted errors stay stable across history, IPC and display boundaries', () => {
+  for (const raw of [
+    'apiKey=opaque-test-secret',
+    'Cookie: session=opaque-test-secret; another=also-private',
+    'Authorization: Bearer opaque-test-secret',
+    'https://service.example/?access_token=opaque-test-secret&mode=test',
+    '{"apiKey":"opaque-test-secret"}',
+  ]) {
+    const saved = redact(raw);
+    assert.ok(!saved.includes('opaque-test-secret'));
+    assert.equal(redact(redact(saved)), saved);
+  }
+  assert.equal(redact('Cookie: session=opaque-test-secret'), 'Cookie: [已隐藏]');
+  assert.deepEqual(JSON.parse(redact('{"apiKey":"opaque-test-secret"}')), { apiKey: '[已隐藏]' });
+});
