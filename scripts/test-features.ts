@@ -5,12 +5,15 @@ import { createLocalProvider, prepareRealPiFixture } from '../tests/support/loca
 import { AgentService } from '../electron/agent';
 import { Workspace } from '../electron/workspace';
 import { Configuration } from '../electron/configuration';
+import { toggleResourceSetting } from '../electron/resources-config';
 import { messageText, busy } from '../shared/types';
 process.env.PI_OFFLINE = '1';
 process.env.OPENAI_API_KEY = '';
 process.env.MINIMAX_API_KEY = 'local-env-test-only';
 const provider = await createLocalProvider();
 const f = await prepareRealPiFixture(provider.baseUrl, 'features');
+await fs.mkdir(path.join(f.agentDir, 'prompts'), { recursive: true });
+await fs.writeFile(path.join(f.agentDir, 'prompts/review-queue.md'), 'EXPANDED_TEMPLATE $ARGUMENTS');
 const s = new AgentService(f.store, new Workspace(f.dataDir));
 const config = new Configuration(f.store);
 const png = (await fs.readFile(path.resolve('build/icon.png'))).toString('base64');
@@ -168,9 +171,17 @@ try {
   const resources = await s.admin(f.sessionId, 'resources');
   const extension = resources.resources.find((r: any) => r.path.endsWith('gui-e2e.js'));
   assert.ok(extension);
-  await s.admin(f.sessionId, 'toggle_resource', { resource: extension, enabled: false });
+  const toggle = async (enabled: boolean) => {
+    const document = await config.read(f.sessionId, 'settings', false);
+    await config.save(f.sessionId, 'settings', false, {
+      ...document,
+      text: JSON.stringify(toggleResourceSetting(JSON.parse(document.text), extension, enabled)),
+    });
+    assert.equal(await s.scheduleReload(), true);
+  };
+  await toggle(false);
   assert.ok(!s.runtime.commands.some((c) => c.name === 'gui-select'));
-  await s.admin(f.sessionId, 'toggle_resource', { resource: extension, enabled: true });
+  await toggle(true);
   assert.ok(s.runtime.commands.some((c) => c.name === 'gui-select'));
   console.log('PASS actual extension disable/re-enable and reload');
   assert.match(
@@ -216,13 +227,40 @@ try {
   console.log('PASS standalone shell tools and extension dialogs');
   await s.send(chat.id, 'E2E_SLOW', [], 'steer');
   await until(() => s.runtime.status === 'running');
-  await s.send(chat.id, 'QUEUED_IMAGE', [], 'followUp', [
+  await s.send(chat.id, '/review-queue QUEUED_IMAGE', [], 'followUp', [
     { id: 'queued-image', name: 'image.png', data: png, mimeType: 'image/png' },
   ]);
   await s.stop();
   assert.equal(f.store.session(chat.id).images?.[0]?.id, 'queued-image');
-  assert.match(f.store.session(chat.id).draft, /QUEUED_IMAGE/);
+  assert.equal(f.store.session(chat.id).draft, '/review-queue QUEUED_IMAGE');
+  assert.doesNotMatch(f.store.session(chat.id).draft, /EXPANDED_TEMPLATE/);
   console.log('PASS stop restores queued image with its text');
+  await s.connect(f.sessionId);
+  await fs.writeFile(
+    path.join(f.projectDir, 'queued-context.txt'),
+    'ATTACHMENT_BODY_SHOULD_NOT_BECOME_A_DRAFT',
+  );
+  await s.send(f.sessionId, 'E2E_SLOW', [], 'steer');
+  await until(() => s.runtime.status === 'running');
+  originalSession.draft = 'REVIEW_QUEUED_FILE';
+  originalSession.attachments = ['queued-context.txt'];
+  originalSession.images = [];
+  await s.send(f.sessionId, originalSession.draft, originalSession.attachments, 'followUp');
+  assert.ok(s.runtime.followUp.some((text) => text.includes('ATTACHMENT_BODY_SHOULD_NOT_BECOME_A_DRAFT')));
+  await s.stop();
+  assert.equal(originalSession.draft, 'REVIEW_QUEUED_FILE');
+  assert.deepEqual(originalSession.attachments, ['queued-context.txt']);
+  await s.send(f.sessionId, originalSession.draft, originalSession.attachments, 'steer');
+  await until(() => !s.hasPendingWork);
+  const branchEntry = (await s.tree(f.sessionId)).findLast(
+    (entry) => entry.role === 'user' && entry.text.includes('REVIEW_QUEUED_FILE'),
+  )!;
+  assert.ok(branchEntry);
+  await s.branch(f.sessionId, 'fork', branchEntry.id);
+  assert.equal(f.store.session(f.store.state.selectedSessionId!).draft, 'REVIEW_QUEUED_FILE');
+  console.log(
+    'PASS stop restores original attachment input, and a fork never inserts file contents into the draft',
+  );
   console.log('Features integration PASS:', f.dir);
 } finally {
   await s.dispose();

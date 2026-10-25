@@ -132,7 +132,9 @@ async function inspectEnvironment(settings: Settings, developmentRoot?: string):
   result.git = await locateExecutable('git');
   let shellPath: string | undefined;
   try {
-    const config = JSON.parse(await fs.readFile(path.join(result.agentDir, 'settings.json'), 'utf8'));
+    const config = JSON.parse(
+      (await fs.readFile(path.join(result.agentDir, 'settings.json'), 'utf8')).replace(/^\uFEFF/, ''),
+    );
     if (typeof config.shellPath === 'string' && (await exists(config.shellPath)))
       shellPath = config.shellPath;
   } catch {}

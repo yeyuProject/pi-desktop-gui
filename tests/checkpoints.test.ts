@@ -7,7 +7,7 @@ import { randomBytes, randomUUID } from 'node:crypto';
 import childProcess, { execFile } from 'node:child_process';
 import { syncBuiltinESMExports } from 'node:module';
 import { promisify } from 'node:util';
-import { snapshotStorageBytes, Workspace } from '../electron/workspace';
+import { fileInventory, snapshotStorageBytes, Workspace } from '../electron/workspace';
 import type { Project } from '../shared/types';
 
 const exec = promisify(execFile);
@@ -683,3 +683,165 @@ test(
     assert.equal((await fs.stat(file)).mode & 0o777, 0o600);
   },
 );
+
+test('case-only renames on insensitive volumes restore spelling and content without trashing the file', async (t) => {
+  const { project, workspace, sessionId, directory, git, write } = await fixture(t);
+  await write('Foo.ts', 'original');
+  if (!(await fs.stat(path.join(directory, 'foo.ts')).catch(() => undefined))) {
+    t.skip('This volume is case-sensitive');
+    return;
+  }
+  await git(['add', 'Foo.ts']);
+  await git(['commit', '-m', 'case rename baseline']);
+  const checkpoint = (await workspace.captureCheckpoint(project, sessionId, 1))!;
+  await git(['mv', 'Foo.ts', 'foo.ts']);
+  await write('foo.ts', 'modified');
+  const preview = await workspace.checkpointPreview(project, sessionId, checkpoint.id);
+  assert.equal(preview.files.length, 1);
+  assert.equal(preview.files[0].path, 'foo.ts');
+  assert.equal(preview.files[0].oldPath, 'Foo.ts');
+  assert.equal(preview.files[0].status, '重命名');
+  assert.equal(
+    (await workspace.diff(project, 'foo.ts', 'run', { sessionId, checkpointId: checkpoint.id })).before,
+    'original',
+  );
+  await workspace.revert(
+    project,
+    ['foo.ts'],
+    async () => {
+      throw new Error('must not trash the baseline file');
+    },
+    {
+      sessionId,
+      checkpointId: checkpoint.id,
+      revision: preview.revision,
+    },
+  );
+  assert.equal(await fs.readFile(path.join(directory, 'Foo.ts'), 'utf8'), 'original');
+  assert.ok((await fs.readdir(directory)).includes('Foo.ts'));
+  assert.ok(!(await fs.readdir(directory)).includes('foo.ts'));
+});
+
+test('capture hash caches retain unchanged blobs when alternating between chats', async (t) => {
+  const { project, workspace, sessionId, write } = await fixture(t);
+  const other = randomUUID();
+  await write('shared.txt', 'unchanged');
+  await workspace.captureCheckpoint(project, sessionId, 1);
+  await workspace.captureCheckpoint(project, other, 1);
+  const hashes = trackHashes(t);
+  await workspace.captureCheckpoint(project, sessionId, 2);
+  await workspace.captureCheckpoint(project, other, 2);
+  assert.equal(hashes.filter((call) => call.stored && call.ids.length).length, 0);
+});
+
+test('partial undo reports completed paths and leaves remaining files untouched', async (t) => {
+  const { project, workspace, sessionId, directory, write } = await fixture(t);
+  for (const name of ['a.txt', 'b.txt', 'c.txt']) await write(name, 'before');
+  const checkpoint = (await workspace.captureCheckpoint(project, sessionId, 1))!;
+  for (const name of ['a.txt', 'b.txt', 'c.txt']) await write(name, 'after');
+  const blocked = path.join(await fs.realpath(directory), 'b.txt');
+  const original = fs.writeFile;
+  t.mock.method(fs, 'writeFile', (...args: Parameters<typeof fs.writeFile>) => {
+    if (String(args[0]) === blocked) return Promise.reject(new Error('fixture write denied'));
+    return original(...args);
+  });
+  await assert.rejects(
+    workspace.revert(project, ['a.txt', 'b.txt', 'c.txt'], undefined, {
+      sessionId,
+      checkpointId: checkpoint.id,
+    }),
+    /已恢复 1 个文件（a.txt）.*其余文件尚未处理/,
+  );
+  assert.equal(await fs.readFile(path.join(directory, 'a.txt'), 'utf8'), 'before');
+  assert.equal(await fs.readFile(path.join(directory, 'c.txt'), 'utf8'), 'after');
+});
+
+test('older checkpoints never delete a path they cannot prove was absent before the run', async (t) => {
+  const { project, workspace, sessionId, data, directory, write } = await fixture(t);
+  await write('existing.txt', 'before');
+  const checkpoint = (await workspace.captureCheckpoint(project, sessionId, 1))!;
+  const metadata = path.join(data, 'baselines', 'checkpoints', checkpoint.id + '.json');
+  const record = JSON.parse(await fs.readFile(metadata, 'utf8'));
+  delete record.inventoryComplete;
+  await fs.writeFile(metadata, JSON.stringify(record));
+  await write('possibly-omitted.txt', 'must survive');
+  const reopened = new Workspace(data);
+  const preview = await reopened.checkpointPreview(project, sessionId, checkpoint.id);
+  assert.ok(preview.omitted.includes('possibly-omitted.txt'));
+  assert.ok(!preview.files.some((file) => file.path === 'possibly-omitted.txt'));
+  await reopened.revert(project, null, undefined, { sessionId, checkpointId: checkpoint.id });
+  assert.equal(await fs.readFile(path.join(directory, 'possibly-omitted.txt'), 'utf8'), 'must survive');
+});
+
+test('large Git inventories report clipped paths and never undo files omitted from the baseline', async (t) => {
+  const { project, workspace, sessionId, directory, git, write } = await fixture(t);
+  await write('seed.txt', 'seed');
+  const blob = (await git(['hash-object', '-w', 'seed.txt'])).stdout.trim();
+  const names = Array.from({ length: 20005 }, (_, index) => `entry-${String(index).padStart(5, '0')}.txt`);
+  await new Promise<void>((resolve, reject) => {
+    const child = childProcess.spawn('git', ['update-index', '--index-info'], {
+      cwd: directory,
+      stdio: ['pipe', 'ignore', 'pipe'],
+    });
+    child.on('error', reject);
+    child.on('close', (code) => (code === 0 ? resolve() : reject(new Error('fixture index failed'))));
+    child.stdin.end(names.map((name) => `100644 ${blob}\t${name}\n`).join(''));
+  });
+  const inventory = await fileInventory(project);
+  assert.equal(inventory.files.length, 20000);
+  assert.equal(inventory.files.length + inventory.omitted.length, names.length + 1);
+  const omitted = inventory.omitted[0];
+  await write(omitted, 'already existed outside capture range');
+  const checkpoint = (await workspace.captureCheckpoint(project, sessionId, 1))!;
+  await write(omitted, 'must not be treated as a new file');
+  const preview = await workspace.checkpointPreview(project, sessionId, checkpoint.id);
+  assert.ok(preview.omitted.includes(omitted));
+  assert.ok(!preview.files.some((file) => file.path === omitted));
+  await workspace.revert(project, null, undefined, { sessionId, checkpointId: checkpoint.id });
+  assert.equal(await fs.readFile(path.join(directory, omitted), 'utf8'), 'must not be treated as a new file');
+});
+
+test('fallback inventories include wide directories and report depth-limited subtrees', async (t) => {
+  const { project, root } = await fixture(t);
+  project.path = path.join(root, 'without-git');
+  await fs.mkdir(project.path);
+  await Promise.all(
+    Array.from({ length: 1005 }, (_, index) =>
+      fs.writeFile(path.join(project.path, `file-${index}.txt`), ''),
+    ),
+  );
+  const deep = path.join(project.path, ...Array.from({ length: 17 }, (_, index) => `nested-${index}`));
+  await fs.mkdir(deep, { recursive: true });
+  await fs.writeFile(path.join(deep, 'excluded.txt'), 'kept');
+  const inventory = await fileInventory(project);
+  assert.equal(inventory.files.length, 1005);
+  assert.ok(inventory.omitted.some((name) => name.endsWith('/**')));
+});
+
+test('parent-directory case changes refuse all undo writes before touching selected siblings', async (t) => {
+  const { project, workspace, sessionId, directory, git, write } = await fixture(t);
+  await fs.mkdir(path.join(directory, 'Src'));
+  await write('Src/file.txt', 'before');
+  await write('sibling.txt', 'before');
+  if (!(await fs.stat(path.join(directory, 'src')).catch(() => undefined))) {
+    t.skip('This volume is case-sensitive');
+    return;
+  }
+  await git(['add', '.']);
+  await git(['commit', '-m', 'directory case fixture']);
+  const checkpoint = (await workspace.captureCheckpoint(project, sessionId, 1))!;
+  // Git on macOS cannot move a directory onto its case-insensitive alias directly.
+  await git(['mv', 'Src', 'case-change-temp']);
+  await git(['mv', 'case-change-temp', 'src']);
+  await write('src/file.txt', 'after');
+  await write('sibling.txt', 'after');
+  await assert.rejects(
+    workspace.revert(project, ['sibling.txt', 'src/file.txt'], undefined, {
+      sessionId,
+      checkpointId: checkpoint.id,
+    }),
+    /父目录的大小写.*未修改任何文件/,
+  );
+  assert.equal(await fs.readFile(path.join(directory, 'sibling.txt'), 'utf8'), 'after');
+  assert.equal(await fs.readFile(path.join(directory, 'src/file.txt'), 'utf8'), 'after');
+});

@@ -35,6 +35,7 @@ const runtime: Runtime = {
 const noPreference = { provider: '', modelId: '' };
 const environment: Environment = {
   piPath: '/pi',
+  bash: '/bin/bash',
   supported: true,
   compatibility: 'verified',
   version: '1.1.0',
@@ -213,4 +214,19 @@ test('a disabled model entry gives its reason and cannot expose a stale open pic
   assert.match(html, /title="会话切换中…"/);
   assert.match(html, /aria-expanded="false"/);
   assert.doesNotMatch(html, /role="dialog"|role="option"/);
+});
+
+test('Windows readiness still reports missing Git Bash with a connected Pi and chosen model', () => {
+  const desktop = (globalThis as any).window.desktop;
+  const previousPlatform = desktop.platform;
+  desktop.platform = 'win32';
+  try {
+    const selection = sessionModelState({ ...runtime, sessionId: session.id }, session, noPreference);
+    const html = checklist(selection, true, { ...environment, bash: undefined });
+    assert.match(html, /安装 Git Bash/);
+    assert.match(html, /执行命令会失败/);
+    assert.match(html, /重新检查运行环境/);
+  } finally {
+    desktop.platform = previousPlatform;
+  }
 });

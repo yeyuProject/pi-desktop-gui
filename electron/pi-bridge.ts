@@ -13,8 +13,6 @@ import type {
   ExtensionContext,
 } from '@earendil-works/pi-coding-agent';
 import fs from 'node:fs/promises';
-import path from 'node:path';
-import { toggleResourceSetting } from './resources-config';
 import {
   DESKTOP_BRIDGE_COMMAND,
   DESKTOP_BRIDGE_PROTOCOL,
@@ -374,31 +372,6 @@ export default function desktopBridge(pi: ExtensionAPI) {
               tools: pi.getAllTools().map((t) => ({ name: t.name, description: t.description })),
               activeTools: pi.getActiveTools(),
             };
-            break;
-          }
-          case 'toggle_resource': {
-            const r = p.resource;
-            if (!['extensions', 'skills', 'prompts', 'themes'].includes(r.kind))
-              throw new Error('资源类型无效');
-            if (r.metadata.scope === 'project' && !ctx.isProjectTrusted()) throw new Error('请先信任项目');
-            const file = path.join(
-              r.metadata.scope === 'project' ? path.join(ctx.cwd, '.pi') : getAgentDir(),
-              'settings.json',
-            );
-            const raw = await fs.readFile(file, 'utf8').catch((e) => {
-              if (e.code === 'ENOENT') return '{}';
-              throw e;
-            });
-            const config = toggleResourceSetting(JSON.parse(raw), r, p.enabled);
-            await fs.mkdir(path.dirname(file), { recursive: true });
-            await fs.writeFile(file + '.desktop-backup', raw, { mode: 0o600 });
-            await fs.writeFile(file + '.desktop-tmp', JSON.stringify(config, null, 2) + '\n', {
-              mode: 0o600,
-            });
-            await fs.rename(file + '.desktop-tmp', file);
-            emit({ type: 'desktop_result', id, data: { reloading: true } });
-            replied = true;
-            await ctx.reload();
             break;
           }
           default:

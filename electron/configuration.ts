@@ -29,6 +29,7 @@ function restore(value: any, original: any): any {
   return value;
 }
 const revision = (s: string) => createHash('sha256').update(s).digest('hex');
+const parseConfig = (text: string) => JSON.parse(text.replace(/^\uFEFF/, ''));
 export class Configuration {
   constructor(private store: Store) {}
   private async file(id: string, kind: ConfigKind, local: boolean) {
@@ -53,7 +54,17 @@ export class Configuration {
   async read(id: string, kind: ConfigKind, local: boolean): Promise<ConfigDocument> {
     const file = await this.file(id, kind, local),
       raw = await this.raw(file);
-    return { text: JSON.stringify(mask(JSON.parse(raw)), null, 2), revision: revision(raw), path: file };
+    try {
+      return { text: JSON.stringify(mask(parseConfig(raw)), null, 2), revision: revision(raw), path: file };
+    } catch {
+      return {
+        text: raw.replace(/^\uFEFF/, ''),
+        revision: revision(raw),
+        path: file,
+        error:
+          '配置不是有效的 JSON，已载入原文供修复。原文可能包含密钥，请勿分享截图或复制到公开位置。修正括号、逗号和引号后可保存；保存前会备份原文件。',
+      };
+    }
   }
   async saveAndApply(
     id: string,
@@ -94,13 +105,19 @@ export class Configuration {
     if (document.revision !== revision(raw)) throw new Error('配置已被其他程序修改，请重新读取后再保存');
     let parsed: any;
     try {
-      parsed = JSON.parse(document.text);
+      parsed = parseConfig(document.text);
     } catch (error) {
       throw new Error('配置不是有效的 JSON，请检查括号、逗号和引号', { cause: error });
     }
     if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed))
       throw new Error('配置必须是 JSON 对象');
-    const value = restore(parsed, JSON.parse(raw));
+    let original: unknown;
+    try {
+      original = parseConfig(raw);
+    } catch {
+      /* Invalid input is deliberately repaired by this save. */
+    }
+    const value = restore(parsed, original);
     if (
       kind === 'models' &&
       value.providers !== undefined &&

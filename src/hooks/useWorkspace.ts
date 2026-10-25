@@ -17,7 +17,7 @@ interface WorkspaceOptions {
 }
 
 export function useWorkspace(options: WorkspaceOptions) {
-  const { selected, project, runtime, ownRunning, setInspector, attempt, action, setNotice } = options;
+  const { selected, project, runtime, setInspector, attempt, action, setNotice } = options;
   const [tab, setTab] = useState<'changes' | 'files' | 'output'>('changes');
   const [changeMode, setChangeMode] = useState<'all' | 'run'>('all');
   const [changes, setChanges] = useState<Changes>();
@@ -315,7 +315,20 @@ export function useWorkspace(options: WorkspaceOptions) {
     const preview = checkpointPreview,
       sessionId = selected.id;
     await action(async () => {
-      const restored = await api.invoke('revertCheckpoint', sessionId, preview.id, paths, revision);
+      let restored: string[];
+      try {
+        restored = await api.invoke('revertCheckpoint', sessionId, preview.id, paths, revision);
+      } catch (error) {
+        const current = await api.invoke('checkpointPreview', sessionId, preview.id).catch(() => undefined);
+        if (latest.current.selected?.id === sessionId) {
+          setCheckpointPreview(current);
+          setSelectedFile('');
+          setFileDiff(undefined);
+          setFilePreview(undefined);
+        }
+        await refreshChanges();
+        throw error;
+      }
       if (latest.current.selected?.id !== sessionId) return;
       setCheckpointRestoredCount(restored.length);
       setNotice(`已把 ${restored.length} 个文件恢复到第 ${preview.turn} 轮之前`);

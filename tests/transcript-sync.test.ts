@@ -58,7 +58,10 @@ async function fixture(t: TestContext) {
       throw new Error('Unexpected command ' + type);
     },
   };
-  const internal = service as unknown as { rpc: typeof rpc | undefined; refresh(): Promise<void> };
+  const internal = service as unknown as {
+    rpc: typeof rpc | undefined;
+    refresh(reconcile?: boolean): Promise<void>;
+  };
   internal.rpc = rpc;
   t.after(async () => {
     internal.rpc = undefined;
@@ -138,4 +141,31 @@ test('a completion refresh cannot replace messages from a newly started run', as
   await refreshing;
   assert.equal(f.service.runtime.messages.at(-1)?.content, 'NEXT_REQUEST');
   assert.equal(f.service.runtime.status, 'running');
+});
+
+test('ordinary turn refresh preserves event history without reading or resending the whole transcript', async (t) => {
+  const f = await fixture(t);
+  const rpc = f.internal.rpc!;
+  const original = rpc.request;
+  const calls: string[] = [];
+  rpc.request = async (type) => {
+    calls.push(type);
+    return original(type);
+  };
+  const messages = f.service.runtime.messages;
+  let resyncs = 0;
+  const internal = f.service as unknown as { resync(): void; historyRevision: number };
+  t.mock.method(internal, 'resync', () => {
+    resyncs++;
+  });
+  await f.internal.refresh(false);
+  assert.ok(!calls.includes('get_messages'));
+  assert.equal(f.service.runtime.messages, messages);
+  assert.equal(resyncs, 0);
+  internal.historyRevision++;
+  await f.internal.refresh(false);
+  assert.equal(calls.filter((type) => type === 'get_messages').length, 1);
+  assert.equal(resyncs, 1);
+  await f.internal.refresh(false);
+  assert.equal(calls.filter((type) => type === 'get_messages').length, 1);
 });

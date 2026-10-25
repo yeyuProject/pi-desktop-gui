@@ -1,0 +1,12 @@
+{
+  "name": "@pi-desktop/lint-tools",
+  "private": true,
+  "version": "0.0.0",
+  "devDependencies": {
+    "eslint": "10.13.0",
+    "@eslint/js": "10.0.1",
+    "globals": "17.13.0",
+    "typescript": "6.0.3",
+    "typescript-eslint": "8.72.0"
+  }
+}

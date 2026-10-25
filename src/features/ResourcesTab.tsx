@@ -421,7 +421,7 @@ export function ResourcesTab({
           title={idleReason || (!source.trim() ? '请填写资源包来源' : '')}
           onClick={() =>
             void run(async () => {
-              await api.invoke('packageAction', session.id, 'install', source, local);
+              if (!(await api.invoke('packageAction', session.id, 'install', source, local))) return;
               setSource('');
               await refresh();
             })

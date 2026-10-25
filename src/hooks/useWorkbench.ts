@@ -153,31 +153,17 @@ export function useWorkbench() {
     attachments,
     images,
     sendMode,
-    setSendMode,
-    fileQuery,
     setFileQuery,
-    fileResults,
     setFileResults,
-    commandIndex,
-    setCommandIndex,
     setHideCommands,
     recall,
     input,
-    commandList,
-    commandOptions,
-    activeCommand,
-    completeCommand,
     persistDraft,
-    onDraft,
     focusComposer,
-    addAttachment,
-    chooseImages,
-    acceptDrop,
     composeDraft,
     flushDraft,
     isReadingAttachments,
     getDraftRevision,
-    snippets,
   } = draftState;
   const workspace = useWorkspace({
     state,
@@ -190,7 +176,7 @@ export function useWorkbench() {
     action,
     setNotice,
   });
-  const { tab, setTab, selectTab, inspectFile, checkpoints, openCheckpoint } = workspace;
+  const { selectTab, inspectFile, checkpoints, openCheckpoint } = workspace;
   const [checkpointRevision, setCheckpointRevision] = useState(0);
   useEffect(() => {
     setCheckpointRevision((value) => value + 1);

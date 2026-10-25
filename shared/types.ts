@@ -191,6 +191,7 @@ export interface ConfigDocument {
   text: string;
   revision: string;
   path: string;
+  error?: string;
 }
 /** Returned only after the configuration file has been persisted successfully. */
 export interface ConfigSaveResult {
@@ -490,7 +491,7 @@ export interface ApiMap {
   usageSummary: { args: []; result: LocalUsageSummary };
   cleanupEmptySessions: { args: []; result: number };
   toggleResource: { args: [string, ResourceItem, boolean]; result: void };
-  packageAction: { args: [string, 'install' | 'remove' | 'update', string, boolean]; result: void };
+  packageAction: { args: [string, 'install' | 'remove' | 'update', string, boolean]; result: boolean };
   providers: { args: [string]; result: ProviderInfo[] };
   login: { args: [string, string, 'oauth' | 'api_key']; result: void };
   logout: { args: [string, string]; result: boolean };

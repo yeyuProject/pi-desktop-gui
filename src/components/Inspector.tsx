@@ -93,18 +93,13 @@ export function Inspector(
     selectedFile,
     setSelectedFile,
     filePreview,
-    setFilePreview,
     fileDiff,
     setFileDiff,
     split,
     setSplit,
     inspectorPanel,
     project,
-    ownRunning,
-    diffLines,
     attempt,
-    persistDraft,
-    focusComposer,
     addAttachment,
     copy,
     revert,
@@ -499,10 +494,15 @@ export function Inspector(
                   </div>
                   {changes.omitted.length > 0 && (
                     <details className="omitted">
-                      <summary>{changes.omitted.length} 个文件未纳入运行基线</summary>
-                      {changes.omitted.map((p) => (
-                        <div key={p}>{p}</div>
-                      ))}
+                      <summary>{changes.omitted.length} 个路径未纳入运行基线</summary>
+                      <p>包含超过扫描上限或无法安全恢复的路径；/** 表示整个子目录。</p>
+                      <textarea
+                        className="input"
+                        rows={8}
+                        aria-label="未纳入运行基线的路径"
+                        readOnly
+                        value={changes.omitted.join('\n')}
+                      />
                     </details>
                   )}
                   {changes.error && <p className="inline-error">{changes.error}</p>}

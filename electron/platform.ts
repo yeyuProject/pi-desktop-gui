@@ -67,9 +67,13 @@ export async function shellCandidates(git?: string, configured?: string) {
   ).filter(Boolean);
 }
 export function piShellEnvironment(bash?: string): NodeJS.ProcessEnv {
-  if (!isWindows || !bash) return {};
+  if (!isWindows) return {};
   const key = Object.keys(process.env).find((key) => key.toLowerCase() === 'path') ?? 'PATH';
-  return { [key]: path.dirname(bash) + path.delimiter + (process.env[key] ?? '') };
+  return {
+    PYTHONUTF8: '1',
+    PYTHONIOENCODING: 'utf-8',
+    ...(bash ? { [key]: path.dirname(bash) + path.delimiter + (process.env[key] ?? '') } : {}),
+  };
 }
 
 export const pathKey = (p: string) => {
@@ -179,8 +183,8 @@ export function terminalScript(
     Object.entries(env)
       .map(([k, v]) => `export ${k}=${posixQuote(v)}\n`)
       .join('') +
-    // exec keeps this PID for Pi itself. If the terminal is killed, the next check removes its dead lock.
-    `exec ${command.map(posixQuote).join(' ')}\n`
+    // Keep the shell alive while Pi owns the terminal so EXIT can remove its lock.
+    `${command.map(posixQuote).join(' ')}\n`
   );
 }
 
@@ -199,7 +203,7 @@ export async function openTerminal(
     await fs.writeFile(lockFile, pending, { flag: 'wx' });
   } catch (error) {
     if ((error as NodeJS.ErrnoException).code === 'EEXIST')
-      throw new Error('Pi 终端正在打开或运行，请稍后重试。');
+      throw new Error('Pi 终端正在打开或运行，请稍后重试。', { cause: error });
     throw error;
   }
   let scriptFile: string | undefined;

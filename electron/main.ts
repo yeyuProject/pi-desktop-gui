@@ -78,7 +78,6 @@ import {
   type AppEvent,
   type ApiMap,
   type Runtime,
-  type Session,
   type StateSnapshot,
   type Settings,
 } from '../shared/types';
@@ -234,7 +233,8 @@ function updateAttentionBadge() {
     );
   }
 }
-let lastToast: Notification | undefined;
+// Retain the native notification while its click handler may still be used.
+let _lastToast: Notification | undefined;
 function notifyAttention(runtime: Runtime) {
   if (!runtime.sessionId) return;
   const previous = attention.get(runtime.sessionId);
@@ -251,8 +251,7 @@ function notifyAttention(runtime: Runtime) {
   const session = store.state.sessions.find((s) => s.id === runtime.sessionId);
   if (!session) return;
   const finished = busy(previous.status) && !busy(runtime.status);
-  let title = '',
-    body = '';
+  let title: string, body: string;
   if (runtime.dialogs.length > previous.dialogs) {
     if (store.state.settings.notifyOnApproval === false) return;
     title = 'Pi 需要你的回复';
@@ -280,7 +279,7 @@ function notifyAttention(runtime: Runtime) {
     }
   });
   toast.show();
-  lastToast = toast;
+  _lastToast = toast;
   window.flashFrame(true);
 }
 const windowFile = () => path.join(store.dir, 'window.json');
@@ -928,14 +927,16 @@ const handlers: Record<keyof ApiMap, (...args: any[]) => any> = {
     if (!files.length || !revision) throw new Error('请重新查看检查点并选择要撤销的文件');
     const session = store.session(id);
     if (!session.projectId) throw new Error('独立对话没有项目检查点');
-    const result = await workspace.revert(
-      store.project(session.projectId),
-      files,
-      (file) => shell.trashItem(file),
-      { sessionId: id, checkpointId, revision },
-    );
-    send({ type: 'workspaceChanged', projectId: session.projectId, changedPaths: result });
-    return result;
+    try {
+      return await workspace.revert(
+        store.project(session.projectId),
+        files,
+        (file) => shell.trashItem(file),
+        { sessionId: id, checkpointId, revision },
+      );
+    } finally {
+      send({ type: 'workspaceChanged', projectId: session.projectId });
+    }
   },
   setEntryLabel: async (id, entryId, label) => {
     text(id, 100);
@@ -968,7 +969,11 @@ const handlers: Record<keyof ApiMap, (...args: any[]) => any> = {
     });
     if (result.response !== 1) return [];
     if (service.projectBusy(projectId)) throw new Error('任务正在执行，请停止后再撤销');
-    return workspace.revert(project, only, (file) => shell.trashItem(file), context);
+    try {
+      return await workspace.revert(project, only, (file) => shell.trashItem(file), context);
+    } finally {
+      send({ type: 'workspaceChanged', projectId });
+    }
   },
   saveDraft: async (id, draft, attachments, images, snippets) => {
     text(id, 100);
@@ -1259,6 +1264,7 @@ const handlers: Record<keyof ApiMap, (...args: any[]) => any> = {
     const local = found.metadata.scope === 'project';
     const config = new Configuration(store);
     const document = await config.read(id, 'settings', local);
+    if (document.error) throw new Error(`配置格式有误，请在完整 Pi 配置中修复：${document.path}`);
     const values = toggleResourceSetting(JSON.parse(document.text), found, enabled);
     await config.save(id, 'settings', local, { ...document, text: JSON.stringify(values) });
     await service.reloadConfiguration(id, local);
@@ -1266,12 +1272,15 @@ const handlers: Record<keyof ApiMap, (...args: any[]) => any> = {
   packageAction: async (id, action, source, local) => {
     text(id, 100);
     text(source, 4096);
+    if (typeof local !== 'boolean') throw new Error('请选择资源包的作用范围');
+    source = source.trim();
     if (!['install', 'remove', 'update'].includes(action)) throw new Error('包操作无效');
     if (action !== 'update' && (!source.trim() || source.startsWith('-')))
       throw new Error('请输入有效包来源');
     if (source.startsWith('-')) throw new Error('包来源不能是命令参数');
     const s = store.session(id);
     if (local && (!s.projectId || !store.project(s.projectId).trusted)) throw new Error('请先启用项目');
+    const cwd = await store.sessionDirectory(id);
     if (action === 'remove') {
       const result = await showAppDialog({
         type: 'warning',
@@ -1281,7 +1290,24 @@ const handlers: Record<keyof ApiMap, (...args: any[]) => any> = {
         defaultId: 0,
         cancelId: 0,
       });
-      if (result.response !== 1) return;
+      if (result.response !== 1) return false;
+    } else {
+      // Pi updates configured packages in both scopes; --local applies only to install/remove.
+      const scope =
+        action === 'update'
+          ? `个人配置，以及工作目录（${cwd}）中 Pi 已信任的项目配置`
+          : local
+            ? `当前项目：${store.project(s.projectId!).path}`
+            : '个人配置（影响使用此配置的所有会话）';
+      const result = await showAppDialog({
+        type: 'warning',
+        message: action === 'install' ? '安装资源包并允许执行其代码？' : '更新资源包并允许执行其代码？',
+        detail: `来源：${source || '上述范围内所有已配置的资源包'}\n范围：${scope}\n\n安装和更新可能执行 npm 安装脚本，包内扩展也会以你的用户权限运行并访问文件和网络。请仅继续使用你信任的来源。`,
+        buttons: ['取消', action === 'install' ? '安装并允许执行' : '更新并允许执行'],
+        defaultId: 0,
+        cancelId: 0,
+      });
+      if (result.response !== 1) return false;
     }
     await requireSupportedPi(store.state.settings, developmentRoot);
     const pi = await resolvePi(store.state.settings, developmentRoot);
@@ -1290,11 +1316,11 @@ const handlers: Record<keyof ApiMap, (...args: any[]) => any> = {
       action,
       ...(action === 'update' ? ['--extensions'] : []),
       ...(source ? [source] : []),
-      ...(local ? ['--local'] : []),
+      ...(local && action !== 'update' ? ['--local'] : []),
     ];
-    await service.updatePackages(id, local, async () =>
+    await service.updatePackages(id, action === 'update' ? false : local, async () =>
       exec(pi.spec.command, args, {
-        cwd: await store.sessionDirectory(id),
+        cwd,
         windowsHide: true,
         timeout: 300000,
         maxBuffer: 4 * 1024 * 1024,
@@ -1302,6 +1328,7 @@ const handlers: Record<keyof ApiMap, (...args: any[]) => any> = {
       }),
     );
     await service.get(id).connect(id);
+    return true;
   },
   providers: async (id) => {
     text(id, 100);
@@ -1346,7 +1373,11 @@ const handlers: Record<keyof ApiMap, (...args: any[]) => any> = {
   },
   revealSessionDirectory: async (id) => {
     text(id, 100);
-    await shell.openPath(await store.sessionDirectory(id));
+    const directory = await store.sessionDirectory(id);
+    if (!(await fs.stat(directory)).isDirectory())
+      throw new Error('工作目录已变成文件，请在项目设置中选择有效目录');
+    const error = await shell.openPath(directory);
+    if (error) throw new Error(`无法打开工作目录：${error}`);
   },
   openPiTerminal: async (id) => {
     text(id, 100);
@@ -1399,7 +1430,8 @@ const handlers: Record<keyof ApiMap, (...args: any[]) => any> = {
     const result = await showAppDialog({
       type: 'warning',
       message: '停止所有会话的任务？',
-      detail: '所有正在运行的会话都将停止，未发送的队列内容会恢复到各自草稿。',
+      detail:
+        '所有正在运行的会话都将停止，未发送的队列内容会恢复到各自草稿。通过 nohup、后台运行等方式脱离 Pi 的服务可能继续运行，请到终端停止这些服务并释放端口。',
       buttons: ['取消', '停止所有会话'],
       defaultId: 0,
       cancelId: 0,
@@ -1415,7 +1447,8 @@ const handlers: Record<keyof ApiMap, (...args: any[]) => any> = {
     const result = await showAppDialog({
       type: 'warning',
       message: '强制结束当前 Pi 会话进程？',
-      detail: '正在执行的命令将被终止。已写入的项目文件将保留。',
+      detail:
+        '会尝试终止 Pi 及其子进程，已写入的项目文件将保留。已脱离进程树的后台服务可能继续占用端口，请到终端停止。',
       buttons: ['继续等待', '强制结束'],
       defaultId: 0,
       cancelId: 0,
@@ -1717,7 +1750,8 @@ async function createWindow() {
             {
               type: 'question',
               message: 'Pi 仍在执行任务',
-              detail: '停止并退出会清空后续队列，已写入文件将保留。',
+              detail:
+                '停止并退出会将未发送的队列内容恢复到草稿，已写入文件将保留。通过 nohup、后台运行等方式脱离 Pi 的服务可能继续运行，请到终端停止这些服务并释放端口。',
               buttons: ['留在窗口', '停止并退出'],
               defaultId: 0,
               cancelId: 0,
@@ -2130,6 +2164,7 @@ else {
           }
           return await execute();
         } catch (e) {
+          // eslint-disable-next-line preserve-caught-error -- The unsanitized cause must not cross the IPC boundary.
           throw new Error(redact(e instanceof Error ? e.message : String(e)));
         } finally {
           if (trackedOperation) finishOperation();

@@ -29,19 +29,8 @@ export function WorkspaceHeader(
     | 'selectSession'
   >,
 ) {
-  const {
-    setFeatureTab,
-    sidebar,
-    setSidebar,
-    compact,
-    inspector,
-    setInspector,
-    changes,
-    selected,
-    project,
-    ownRuntime,
-    running,
-  } = props;
+  const { setFeatureTab, sidebar, setSidebar, compact, inspector, setInspector, changes, selected, project } =
+    props;
   const waiting = props.state?.sessions.filter((session) => props.activities[session.id]?.pending > 0) ?? [];
 
   return (

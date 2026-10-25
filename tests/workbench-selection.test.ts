@@ -329,8 +329,7 @@ async function mainFixture(t: TestContext, phase: 'save' | 'reply', holdRender =
     id?: string;
     method?: string;
   }[] = [];
-  let navigation!: ReturnType<typeof createMainNavigation>,
-    creationCount = 0;
+  let creationCount = 0;
   if (phase === 'save') {
     const save = store.save.bind(store);
     let count = 0;
@@ -373,7 +372,7 @@ async function mainFixture(t: TestContext, phase: 'save' | 'reply', holdRender =
     },
   );
   f.deferStateCommit(holdRender);
-  navigation = createMainNavigation(store, agents, (event) => {
+  const navigation = createMainNavigation(store, agents, (event) => {
     if (event.type !== 'state') return;
     trace.push({ kind: 'state', id: event.state.selectedSessionId, revision: event.revision });
     f.receiveState(structuredClone(event.state), event.revision);

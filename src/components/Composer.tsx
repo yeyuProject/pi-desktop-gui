@@ -93,7 +93,6 @@ export function Composer(props: ComposerProps) {
     storage,
     environment,
     runtime,
-    error,
     setError,
     setNotice,
     pending,
@@ -122,7 +121,6 @@ export function Composer(props: ComposerProps) {
     attachmentBytes,
     inputMaxHeight,
     setInputMaxHeight,
-    setShortcutsOpen,
     stopArmed,
     dragging,
     setDragging,
@@ -148,7 +146,6 @@ export function Composer(props: ComposerProps) {
     chooseImages,
     acceptDrop,
     openSettings,
-    connect,
     readModels,
     setModel,
     setThinking,
@@ -624,7 +621,11 @@ export function Composer(props: ComposerProps) {
             {ownRunning && (
               <button
                 className={'stop-button' + (stopArmed ? ' armed' : '')}
-                title={connecting ? '取消本次连接（连按两次 Esc）' : '停止当前会话（连按两次 Esc）'}
+                title={
+                  connecting
+                    ? '取消本次连接（连按两次 Esc）'
+                    : '停止当前会话（连按两次 Esc）；已脱离 Pi 的后台服务需在终端单独停止'
+                }
                 onClick={() => selected && void attempt(() => api.invoke('stop', selected.id))}
                 disabled={runtime.status === 'stopping'}
               >

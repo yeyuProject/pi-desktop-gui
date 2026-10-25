@@ -253,8 +253,14 @@ export function usePiFeatures({
       <p className="settings-copy">
         {document?.path}
         <br />
-        已有密钥显示为占位符，保存时保留原值。修改前会保留备份；运行中可保存，相关会话空闲后加载。加载失败时保留配置并显示原因。
+        {!document?.error && '已有密钥显示为占位符，保存时保留原值。'}
+        修改前会保留备份；运行中可保存，相关会话空闲后加载。加载失败时保留配置并显示原因。
       </p>
+      {document?.error && (
+        <p className="environment-note" role="alert">
+          {document.error}
+        </p>
+      )}
       <textarea
         className="json-editor"
         aria-label="Pi 配置 JSON"

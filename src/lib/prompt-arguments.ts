@@ -1,5 +1,5 @@
 export const parseArgumentHint = (hint: string) =>
-  [...hint.matchAll(/<([^<>]+)>|\[([^\[\]]+)\]/g)].map((m) => ({
+  [...hint.matchAll(/<([^<>]+)>|\[([^[\]]+)\]/g)].map((m) => ({
     label: m[1] ?? m[2],
     required: Boolean(m[1]),
   }));
