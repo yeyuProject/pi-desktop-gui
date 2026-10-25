@@ -19,7 +19,8 @@
 
 本地为 macOS arm64；所有进程、配置、项目及更新安装测试使用隔离目录。真实 Pi 功能测试使用本地模拟模型服务，不读取用户凭据。
 
-- 全量单元测试 666 项：664 通过、0 失败、2 项平台跳过；覆盖原有行为及新增的大小写撤销、旧快照保护、20,005 个 Git 索引路径、宽目录/深目录遗漏、缓存、配置和脱敏场景。记录：`test-results/review-followup-final-unit.log`。
+- 最终全量单元测试 667 项：665 通过、0 失败、2 项平台跳过；覆盖原有行为及新增的大小写撤销、旧快照保护、20,005 个 Git 索引路径、宽目录/深目录遗漏、缓存、配置和脱敏场景。记录：`test-results/review-followup-redaction-unit.log`。
+- 脱敏占位符在历史、IPC 和界面边界重复处理后保持稳定，Cookie 与 JSON 格式保持可读；新增回归已验证修复前失败、修复后通过。记录：`test-results/review-followup-redaction-red.log`、`test-results/review-followup-redaction-green.log`。
 - `npm run test:integration` 与完整 `npm run test:features` 通过；包含真实 Pi 模板与图片排队、文件附件停止/崩溃恢复及分支草稿。记录：`test-results/review-followup-integration.log`、`test-results/review-followup-features-all.log`。
 - 新增主进程界面验收 `scripts/test-review-followup-ui.mjs` 通过：确认前命令未运行、取消返回 false、实际执行参数正确、文件不能交给系统作为目录打开、配置可修复且保留备份、部分撤销失败触发刷新、Bash 缺失提示。测试包管理命令使用记录参数的隔离夹具，不安装外部资源包。记录：`test-results/review-followup-final-ui.log`。
 - 干净 `npm ci`、CI 同版本 Node 22.22.0 的 ESLint、合法 TypeScript 与不可达代码反例、全库 lint/格式检查通过。现有依赖版本保持不变；lint 的编译器 API 兼容处理只作用于本仓库的 lint 依赖。记录：`test-results/review-followup-npm-ci.log`、`test-results/review-followup-lint-node22.log`、`test-results/review-followup-final-lint.log`。
