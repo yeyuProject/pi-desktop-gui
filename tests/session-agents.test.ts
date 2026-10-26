@@ -6,6 +6,7 @@ import path from 'node:path';
 import { SessionAgents } from '../electron/session-agents';
 import { Store } from '../electron/store';
 import { Workspace } from '../electron/workspace';
+import { PiRpc } from '../electron/rpc';
 import { busy, applyRuntimePatch, emptyRuntime, type Runtime, type RuntimePatch } from '../shared/types';
 
 async function fixture(t: TestContext, terminalOpen?: (id: string) => Promise<boolean>) {
@@ -292,6 +293,81 @@ test('approval and automatic step settings can change while running without stop
   assert.equal(other.runtime.autoRetry, true);
   assert.equal(other.runtime.autoCompaction, true);
   assert.equal(other.runtime.status, 'running');
+});
+
+test('configuration changes invalidate only matching metadata catalogs, including disconnected sessions', async (t) => {
+  const { agents, a, b, store, directory } = await fixture(t);
+  const first = agents.get(a.id),
+    other = agents.get(b.id);
+  await Promise.all([first.readModels(a.id), other.readModels(b.id)]);
+  assert.equal(first.runtime.modelsLoaded, true);
+  assert.equal(other.runtime.modelsLoaded, true);
+  assert.equal(first.runtime.connected, false);
+  await agents.reloadConfiguration(a.id, true);
+  assert.equal(first.runtime.modelsLoaded, false);
+  assert.equal(other.runtime.modelsLoaded, true, 'another working directory keeps its catalog');
+  await first.readModels(a.id);
+  await agents.reloadConfiguration(a.id, false);
+  assert.equal(first.runtime.modelsLoaded, false);
+  assert.equal(other.runtime.modelsLoaded, false);
+  const nextAgentDir = path.join(directory, 'next-agent');
+  await fs.mkdir(nextAgentDir);
+  store.state.settings.agentDir = nextAgentDir;
+  agents.invalidateModels();
+  await first.readModels(a.id);
+  assert.equal(first.configurationDirectory, nextAgentDir);
+  await agents.reloadConfiguration(a.id, false);
+  assert.equal(
+    first.runtime.modelsLoaded,
+    false,
+    'the new configuration directory owns the refreshed catalog',
+  );
+  assert.equal(first.runtime.messages.length, 0);
+  assert.equal(store.session(a.id).file, undefined);
+});
+
+test('a configuration save during model discovery cannot mark an older result as a valid cached catalog', async (t) => {
+  const { agents, a } = await fixture(t);
+  const agent = agents.get(a.id);
+  const request = PiRpc.prototype.request;
+  let enter!: () => void, finish!: () => void;
+  const entered = new Promise<void>((resolve) => (enter = resolve));
+  const finished = new Promise<void>((resolve) => (finish = resolve));
+  let blocked = false;
+  t.mock.method(PiRpc.prototype, 'request', function (this: PiRpc, ...args: Parameters<typeof request>) {
+    const result = Reflect.apply(request, this, args);
+    if (args[0] !== 'get_available_models' || blocked) return result;
+    blocked = true;
+    return result.then(async (value: unknown) => {
+      enter();
+      await finished;
+      return value;
+    });
+  } as typeof request);
+  const reading = agent.readModels(a.id);
+  await entered;
+  await agents.reloadConfiguration(a.id, false);
+  finish();
+  await reading;
+  assert.equal(agent.runtime.modelsLoaded, false);
+  assert.equal(agent.runtime.modelsLoading, false);
+  await agent.readModels(a.id);
+  assert.equal(agent.runtime.modelsLoaded, true);
+});
+
+test('a failed explicit model refresh remains retryable after a previously successful catalog read', async (t) => {
+  const { agents, a, store, directory } = await fixture(t);
+  const agent = agents.get(a.id);
+  await agent.readModels(a.id);
+  assert.equal(agent.runtime.modelsLoaded, true);
+  const nodePath = store.state.settings.nodePath;
+  store.state.settings.nodePath = path.join(directory, 'missing-node.exe');
+  await assert.rejects(agent.readModels(a.id));
+  assert.equal(agent.runtime.modelsLoaded, false);
+  assert.equal(agent.runtime.modelsLoading, false);
+  store.state.settings.nodePath = nodePath;
+  await agent.readModels(a.id);
+  assert.equal(agent.runtime.modelsLoaded, true);
 });
 
 test('saved configuration waits for each affected session to become safe', async (t) => {

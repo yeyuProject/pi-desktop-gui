@@ -1094,8 +1094,12 @@ const handlers: Record<keyof ApiMap, (...args: any[]) => any> = {
       if (typeof value.autoDownloadUpdates !== 'boolean') throw new Error('自动下载更新设置无效');
       next.autoDownloadUpdates = value.autoDownloadUpdates;
     }
+    const modelsChanged = (
+      ['piPath', 'nodePath', 'agentDir', 'provider', 'modelId', 'thinking'] as const
+    ).some((key) => next[key] !== store.state.settings[key]);
     store.state.settings = next;
     await save();
+    if (modelsChanged) service.invalidateModels();
     nativeTheme.themeSource = nativeThemeSource(next.theme);
     updateWindowTheme();
     updates.configure(next.autoDownloadUpdates);

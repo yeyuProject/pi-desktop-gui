@@ -107,6 +107,7 @@ export class AgentService extends EventEmitter {
   runtime: Runtime = emptyRuntime();
   private rpc?: PiRpc;
   private modelReader?: PiRpc;
+  private modelCatalogRevision = 0;
   private publishing?: NodeJS.Timeout;
   private savingState?: Promise<void>;
   private operation = Promise.resolve();
@@ -874,6 +875,11 @@ export class AgentService extends EventEmitter {
       }),
     );
   }
+  invalidateModels() {
+    this.modelCatalogRevision++;
+    this.runtime.modelsLoaded = false;
+    this.publish(true);
+  }
   /** Read Pi's real project/provider metadata without creating a conversation or loading the desktop bridge. */
   private async readModelCatalog(
     sessionId: string,
@@ -882,6 +888,7 @@ export class AgentService extends EventEmitter {
     requireModel = true,
   ) {
     const epoch = this.stopEpoch;
+    const catalogRevision = this.modelCatalogRevision;
     await this.crashCleanup;
     this.assertCommandsStopped();
     // An explicit model choice may have just promoted a placeholder. Its queued
@@ -900,6 +907,7 @@ export class AgentService extends EventEmitter {
     this.stopRequested = false;
     this.setError();
     this.runtime.modelsLoading = true;
+    this.runtime.modelsLoaded = false;
     this.publish(true);
     const reader = new PiRpc();
     this.modelReader = reader;
@@ -931,6 +939,7 @@ export class AgentService extends EventEmitter {
       }
       const { environment, resolved } = await preparePi(this.store.state.settings, this.developmentRoot);
       if (this.shutdown || this.stopRequested || epoch !== this.stopEpoch) throw new Error('读取模型已取消');
+      this.processAgentDir = agentDirectory(this.store.state.settings);
       reader.start(
         resolved.spec,
         cwd,
@@ -965,7 +974,7 @@ export class AgentService extends EventEmitter {
       ]);
       if (this.shutdown || this.stopRequested || epoch !== this.stopEpoch) throw new Error('读取模型已取消');
       this.runtime.models = available.models.map(displayModel).filter((item): item is Model => Boolean(item));
-      this.runtime.modelsLoaded = true;
+      this.runtime.modelsLoaded = catalogRevision === this.modelCatalogRevision;
       this.runtime.model = modelAvailable ? displayModel(state.model) : undefined;
       this.runtime.thinking = state.thinkingLevel;
       this.runtime.thinkingLevels = modelAvailable ? levels.levels : [];
@@ -2140,7 +2149,7 @@ export class AgentService extends EventEmitter {
       throw new Error('正在处理会话操作，请等待完成后再断开或修改运行环境。');
     if (busy(this.runtime.status) || this.probing) throw new Error('请先等待当前任务或连接测试结束');
     await this.closeRpc();
-    this.publish(true);
+    this.invalidateModels();
   }
   /** Serialize idle teardown with sends/connects, so a new request can safely reconnect. */
   releaseIdleProcess() {

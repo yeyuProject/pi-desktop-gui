@@ -92,7 +92,8 @@ export function ModelPicker({
             ),
           );
           setOpen(!open);
-          if (!open && canConnect && !runtime.connected) loadModels();
+          if (!open && canConnect && !runtime.connected && !runtime.modelsLoaded && !runtime.modelsLoading)
+            loadModels();
         }}
         title={disabledReason || '选择模型'}
         aria-label="选择模型"
@@ -212,6 +213,11 @@ export function ModelPicker({
               <span>请等待当前操作完成</span>
             ) : (
               <span>运行中修改将在下次发送新任务时生效；补充要求仍使用本轮设置</span>
+            )}
+            {!runtime.connected && (
+              <button disabled={!canConnect || locked || runtime.modelsLoading} onClick={loadModels}>
+                刷新模型列表
+              </button>
             )}
             <button
               onClick={() => {

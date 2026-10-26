@@ -20,6 +20,14 @@ export function sessionModelState(
     label,
     runtime: ownRuntime
       ? runtime
-      : { ...runtime, connected: false, model, thinking: session?.thinking, thinkingLevels: [] },
+      : {
+          ...runtime,
+          connected: false,
+          modelsLoaded: false,
+          modelsLoading: false,
+          model,
+          thinking: session?.thinking,
+          thinkingLevels: [],
+        },
   };
 }

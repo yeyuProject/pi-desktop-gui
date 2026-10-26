@@ -307,6 +307,8 @@
 .model-picker-foot button {
   border: 0;
   background: transparent;
+  flex-shrink: 0;
+  white-space: nowrap;
   min-height: 26px;
   padding: 3px 8px;
   color: var(--accent);

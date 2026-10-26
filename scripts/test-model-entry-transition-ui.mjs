@@ -250,6 +250,17 @@ try {
   console.log(
     'PASS quick new from an untrusted project disables the old entry and requires a fresh explicit click',
   );
+  await button.click();
+  await page.getByRole('dialog', { name: '模型与推理级别' }).waitFor();
+  await page.evaluate(
+    () => new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve))),
+  );
+  assert.deepEqual(
+    (await modelReadCalls()).map((call) => call.id),
+    [a],
+    'reopening a loaded catalog starts no new metadata reader',
+  );
+  await page.keyboard.press('Escape');
 
   // Keep the real closed-picker event callback to exercise a stale event after
   // B is ready. This must remain bound to A even after layout effects settle.
@@ -260,6 +271,7 @@ try {
   });
   await gate('reload-a', 'readModels', 'after', a);
   await button.click();
+  await page.getByRole('button', { name: '刷新模型列表', exact: true }).click();
   await entered('reload-a');
   await release('reload-a');
   await page.getByRole('dialog', { name: '模型与推理级别' }).waitFor();
@@ -603,6 +615,69 @@ try {
   assert.equal((await modelReadCalls()).length, 4);
   await capture('normal B/C/B IPC does not restore or lock the returned B target');
   console.log('PASS real B/C/B through normal IPC unlocks current C without following the returned B');
+
+  await select(b);
+  await expect(button).toBeEnabled();
+  await page.evaluate((id) => window.desktop.invoke('readModels', id), b);
+  await expect.poll(() => page.evaluate((id) => window.entryRuntimes.get(id)?.modelsLoaded, b)).toBe(true);
+  const beforeConfig = (await modelReadCalls()).length;
+  const document = await page.evaluate((id) => window.desktop.invoke('configRead', id, 'models', false), b);
+  const models = JSON.parse(document.text);
+  const modelProvider = Object.values(models.providers)[0];
+  modelProvider.models.push({
+    ...modelProvider.models[0],
+    id: 'catalog-cache-new',
+    name: 'Catalog cache refreshed',
+  });
+  await page.evaluate(
+    ({ id, document }) => window.desktop.invoke('configSave', id, 'models', false, document),
+    {
+      id: b,
+      document: { ...document, text: JSON.stringify(models) },
+    },
+  );
+  await expect.poll(() => page.evaluate((id) => window.entryRuntimes.get(id)?.modelsLoaded, b)).toBe(false);
+  await button.click();
+  await page.getByRole('option', { name: /Catalog cache refreshed/ }).waitFor();
+  await expect.poll(() => page.evaluate((id) => window.entryRuntimes.get(id)?.modelsLoaded, b)).toBe(true);
+  assert.equal((await modelReadCalls()).length, beforeConfig + 1);
+  await page.keyboard.press('Escape');
+  await button.click();
+  await page.getByRole('dialog', { name: '模型与推理级别' }).waitFor();
+  await page.evaluate(
+    () => new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve))),
+  );
+  assert.equal((await modelReadCalls()).length, beforeConfig + 1);
+  await page.keyboard.press('Escape');
+  const settings = await page.evaluate(() => window.entryState.settings);
+  await page.evaluate(
+    (thinking) => window.desktop.invoke('saveSettings', { thinking }),
+    settings.thinking === 'high' ? 'low' : 'high',
+  );
+  await expect.poll(() => page.evaluate((id) => window.entryRuntimes.get(id)?.modelsLoaded, b)).toBe(false);
+  await button.click();
+  await expect.poll(() => page.evaluate((id) => window.entryRuntimes.get(id)?.modelsLoaded, b)).toBe(true);
+  assert.equal((await modelReadCalls()).length, beforeConfig + 2);
+  const footerLines = await page.locator('.model-picker-foot button').evaluateAll((buttons) =>
+    buttons.map((button) => {
+      const range = document.createRange();
+      range.selectNodeContents(button);
+      return new Set(
+        [...range.getClientRects()]
+          .filter((rect) => rect.width && rect.height)
+          .map((rect) => Math.round(rect.top)),
+      ).size;
+    }),
+  );
+  assert.ok(
+    footerLines.every((lines) => lines === 1),
+    'refresh and connection controls remain on one line',
+  );
+  await page.screenshot({ path: path.join(output, 'cached-models-refresh.png') });
+  await page.keyboard.press('Escape');
+  console.log(
+    'PASS catalog reopening reuses metadata; explicit refresh and configuration/engine changes reload it without connecting',
+  );
 
   assert.equal(provider.requests.length, 0, 'navigation/model discovery must not send a model prompt');
   assert.deepEqual(
