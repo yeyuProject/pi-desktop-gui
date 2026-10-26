@@ -378,6 +378,10 @@ type Baseline = SnapshotData;
 export class Workspace {
   private baselines = new Map<string, Baseline>();
   private checkpoints: Checkpoints;
+  private currentHashes = new Map<
+    string,
+    { root: string; files: Map<string, { stamp: string; id: string }> }
+  >();
   constructor(private dataDir: string) {
     this.checkpoints = new Checkpoints(dataDir);
   }
@@ -520,14 +524,29 @@ export class Workspace {
     if ('sessionId' in b) return this.checkpoints.repoPath(b as CheckpointRecord);
     return path.join(this.dataDir, 'baselines', b.repo);
   }
-  /** Blob id of each named file as it is on disk now; undefined when missing. Unsafe paths throw. */
+  /** Recheck paths and stat stamps on every refresh; read content only for changed files. */
   private async current(project: Project, names: string[]) {
     const { files, omitted, missing } = await snapshotCandidates(project.path, names);
+    const previous = this.currentHashes.get(project.id);
+    const cached = previous?.root === project.path ? previous.files : undefined;
+    const changed = files.filter((file) => cached?.get(file.name)?.stamp !== file.stamp);
     const ids = await hashBlobs(
       project.path,
-      files.map((f) => f.name),
+      changed.map((file) => file.name),
     );
-    const now = new Map<string, string | undefined>(files.map((f, i) => [f.name, ids[i]]));
+    const updated = new Map(changed.map((file, index) => [file.name, ids[index]]));
+    const current = new Map(
+      files.map((file) => [
+        file.name,
+        { stamp: file.stamp, id: updated.get(file.name) ?? cached!.get(file.name)!.id },
+      ]),
+    );
+    this.currentHashes.delete(project.id);
+    this.currentHashes.set(project.id, { root: project.path, files: current });
+    while (this.currentHashes.size > 8) this.currentHashes.delete(this.currentHashes.keys().next().value!);
+    const now = new Map<string, string | undefined>(
+      files.map((file) => [file.name, current.get(file.name)!.id]),
+    );
     for (const m of missing) now.set(m, undefined);
     return { now, omitted, modes: new Map(files.map((f) => [f.name, f.mode])) };
   }

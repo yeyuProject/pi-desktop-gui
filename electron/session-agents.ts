@@ -239,6 +239,7 @@ export class SessionAgents extends EventEmitter {
     const affected = candidates
       .filter((item) => item.matches)
       .map(({ sessionId, agent }) => [sessionId, agent] as const);
+    for (const [, agent] of affected) agent.invalidateModels();
     const loaded = affected.filter(([, agent]) => agent.runtime.connected || agent.hasPendingWork);
     if (!loaded.length) return { applied: false, deferred: true };
     const results = await Promise.allSettled(loaded.map(([, agent]) => agent.scheduleReload()));
@@ -256,6 +257,10 @@ export class SessionAgents extends EventEmitter {
       if (samePath(target, cwd ?? directory)) deferred = true;
     }
     return { applied: !deferred, ...(deferred ? { deferred: true } : {}) };
+  }
+
+  invalidateModels() {
+    for (const agent of this.agents.values()) agent.invalidateModels();
   }
 
   resync() {

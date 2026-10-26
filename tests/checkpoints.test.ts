@@ -162,6 +162,72 @@ test('command boundaries hash only changed files and keep later checkpoints rest
   assert.equal(await fs.readFile(manualFile, 'utf8'), 'manual');
 });
 
+test('run-mode refresh hashes only changed files and still detects same-size edits, creation and deletion', async (t) => {
+  const { project, workspace, sessionId, directory, write } = await fixture(t);
+  await write('edited.txt', 'before');
+  await write('deleted.txt', 'before');
+  await write('unchanged.txt', 'before');
+  const checkpoint = (await workspace.captureCheckpoint(project, sessionId, 1))!;
+  const context = { sessionId, checkpointId: checkpoint.id };
+  const hashes = trackHashes(t);
+  assert.deepEqual((await workspace.changes(project, 'run', context)).files, []);
+  assert.equal(hashes.flatMap((call) => call.ids).length, 3, 'the first scan reads each current file');
+  hashes.length = 0;
+  assert.deepEqual((await workspace.changes(project, 'run', context)).files, []);
+  assert.equal(hashes.length, 0, 'unchanged refreshes read no file contents');
+  const edited = path.join(directory, 'edited.txt');
+  const stat = await fs.stat(edited);
+  await write('edited.txt', 'manual');
+  await fs.utimes(edited, stat.atime, stat.mtime);
+  await fs.unlink(path.join(directory, 'deleted.txt'));
+  await write('created.txt', 'new file');
+  const changes = await workspace.changes(project, 'run', context);
+  assert.deepEqual(
+    changes.files.map(({ path, status }) => ({ path, status })).sort((a, b) => a.path.localeCompare(b.path)),
+    [
+      { path: 'created.txt', status: '新增' },
+      { path: 'deleted.txt', status: '删除' },
+      { path: 'edited.txt', status: '修改' },
+    ],
+  );
+  assert.equal(hashes.flatMap((call) => call.ids).length, 2, 'only new and edited files are hashed');
+  hashes.length = 0;
+  await workspace.changes(project, 'run', context);
+  assert.equal(hashes.length, 0);
+  const preview = await workspace.checkpointPreview(project, sessionId, checkpoint.id);
+  await workspace.revert(
+    project,
+    changes.files.map((file) => file.path),
+    undefined,
+    { ...context, revision: preview.revision },
+  );
+  assert.equal(await fs.readFile(edited, 'utf8'), 'before');
+  assert.equal(await fs.readFile(path.join(directory, 'deleted.txt'), 'utf8'), 'before');
+  await assert.rejects(fs.access(path.join(directory, 'created.txt')));
+  assert.deepEqual((await workspace.changes(project, 'run', context)).files, []);
+});
+
+test('run-mode refresh reuses current hashes across checkpoint selections without reusing baseline comparisons', async (t) => {
+  const { project, workspace, sessionId, write } = await fixture(t);
+  await write('a.txt', 'original');
+  const first = (await workspace.captureCheckpoint(project, sessionId, 1))!;
+  await write('a.txt', 'changed content');
+  const second = (await workspace.captureCheckpoint(project, sessionId, 2))!;
+  const hashes = trackHashes(t);
+  const before = await workspace.changes(project, 'run', { sessionId, checkpointId: first.id });
+  assert.equal(before.files[0].path, 'a.txt');
+  hashes.length = 0;
+  assert.deepEqual(
+    (await workspace.changes(project, 'run', { sessionId, checkpointId: second.id })).files,
+    [],
+  );
+  assert.equal(
+    (await workspace.changes(project, 'run', { sessionId, checkpointId: first.id })).files[0].path,
+    'a.txt',
+  );
+  assert.equal(hashes.length, 0, 'changing the baseline does not change the current file contents');
+});
+
 test('command scan caches survive alternating sessions', async (t) => {
   const { project, workspace, sessionId, write } = await fixture(t);
   const other = randomUUID();
@@ -644,7 +710,8 @@ test('replacing an unchanged directory with a junction cannot reuse an unsafe ca
   await write('src/a.txt', 'unchanged bytes and timestamps');
   await git(['add', '.']);
   await git(['commit', '-m', 'tracked directory']);
-  await workspace.captureCheckpoint(project, sessionId, 1);
+  const first = (await workspace.captureCheckpoint(project, sessionId, 1))!;
+  await workspace.changes(project, 'run', { sessionId, checkpointId: first.id });
   const original = path.join(root, 'original-src');
   await fs.rename(path.join(directory, 'src'), original);
   try {
@@ -661,6 +728,8 @@ test('replacing an unchanged directory with a junction cannot reuse an unsafe ca
     throw error;
   }
   await assert.rejects(workspace.beginTool(project, sessionId, 'unsafe', 'bash', {}), /部分文件无法读取/);
+  const unsafe = await workspace.changes(project, 'run', { sessionId, checkpointId: first.id });
+  assert.ok(unsafe.omitted.includes('src') || unsafe.omitted.includes('src/a.txt'));
   const second = (await workspace.captureCheckpoint(project, sessionId, 2))!;
   const changes = await workspace.changes(project, 'run', { sessionId, checkpointId: second.id });
   assert.ok(changes.omitted.includes('src') || changes.omitted.includes('src/a.txt'));

@@ -165,22 +165,38 @@ async function capture(label) {
 async function modelMenu() {
   const before = await app.evaluate(() => globalThis.placeholderNavigation.length);
   const id = (await navigation()).selectedSessionId;
+  const { runtime } = await bootstrap();
+  const cached = runtime.sessionId === id && runtime.modelsLoaded;
   await page.getByRole('button', { name: '选择模型', exact: true }).click();
   const menu = page.getByRole('dialog', { name: '模型与推理级别' });
-  await expect
-    .poll(() =>
-      app.evaluate(
+  await menu.waitFor();
+  if (!cached)
+    await expect
+      .poll(() =>
+        app.evaluate(
+          (_electron, { before, id }) =>
+            globalThis.placeholderNavigation
+              .slice(before)
+              .some(
+                (entry) => entry.method === 'readModels' && entry.scope === id && entry.done && !entry.error,
+              ),
+          { before, id },
+        ),
+      )
+      .toBe(true);
+  await rendered();
+  if (cached)
+    assert.equal(
+      await app.evaluate(
         (_electron, { before, id }) =>
           globalThis.placeholderNavigation
             .slice(before)
-            .some(
-              (entry) => entry.method === 'readModels' && entry.scope === id && entry.done && !entry.error,
-            ),
+            .filter((entry) => entry.method === 'readModels' && entry.scope === id).length,
         { before, id },
       ),
-    )
-    .toBe(true);
-  await rendered();
+      0,
+      'a reused placeholder keeps its catalog without another metadata reader',
+    );
   await expect(menu.getByRole('option').first()).toBeEnabled();
   return menu;
 }

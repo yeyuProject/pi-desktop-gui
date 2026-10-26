@@ -110,6 +110,16 @@ test('the current live model and thinking take precedence over saved preferences
   assert.equal(checklist(selection, true), '');
 });
 
+test('another session model catalog is display metadata until the selected session loads its own', () => {
+  const loaded = { ...runtime, modelsLoaded: true, modelsLoading: true };
+  const selection = sessionModelState(loaded, session, noPreference);
+  assert.equal(selection.runtime.modelsLoaded, false);
+  assert.equal(selection.runtime.modelsLoading, false);
+  assert.deepEqual(selection.runtime.models, runtime.models);
+  const own = { ...loaded, sessionId: session.id, modelsLoading: false };
+  assert.equal(sessionModelState(own, session, noPreference).runtime.modelsLoaded, true);
+});
+
 test('actual missing models after connection still require selection despite cached choices', () => {
   const selection = sessionModelState(
     { ...runtime, sessionId: session.id, model: undefined },
