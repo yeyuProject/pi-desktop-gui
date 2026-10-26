@@ -117,6 +117,8 @@ const mock = ({ theme, approval }) => {
     {
       role: 'assistant',
       timestamp: t0 + 26000,
+      durationMs: 4000,
+      usage: { output: 200, totalTokens: 1200 },
       content:
         '已修复，6 个测试全部通过。\n\n- `validate.ts`：邮箱先去除首尾空白再判断，并新增格式校验\n- `validate.test.ts`：补充空白邮箱和格式错误两个用例\n\n如果希望错误文案和设计稿一致，可以把文案集中到 `messages.ts`。',
     },
