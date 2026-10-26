@@ -118,6 +118,7 @@ export interface Message {
   role: string;
   content: string | ContentBlock[];
   timestamp?: number;
+  durationMs?: number;
   toolCallId?: string;
   toolName?: string;
   nestedCalls?: NestedToolCalls;

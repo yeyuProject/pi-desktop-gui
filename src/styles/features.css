@@ -358,6 +358,12 @@
 .message:focus-within .reply-meta {
   opacity: 1;
 }
+.reply-speed {
+  margin-top: 8px;
+  color: var(--muted);
+  font-size: calc(11px * var(--font-scale));
+  font-variant-numeric: tabular-nums;
+}
 
 .change-controls .revert-all {
   min-height: 26px;

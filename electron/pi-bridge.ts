@@ -283,6 +283,34 @@ export default function desktopBridge(pi: ExtensionAPI) {
             replied = true;
             await ctx.reload();
             break;
+          case 'refresh_models': {
+            const controller = new AbortController();
+            const timeout = setTimeout(
+              () => controller.abort(new Error('刷新模型超过 15 秒，已取消。请检查供应商网络后重试。')),
+              15_000,
+            );
+            let result;
+            try {
+              result = await ctx.modelRegistry.refresh({ signal: controller.signal });
+              if (controller.signal.aborted) throw controller.signal.reason;
+            } catch (error) {
+              if (controller.signal.aborted) throw controller.signal.reason;
+              throw error;
+            } finally {
+              clearTimeout(timeout);
+            }
+            if (result.aborted) throw new Error('刷新模型已取消，请重试');
+            const error = ctx.modelRegistry.getError();
+            if (error) throw new Error(`刷新模型失败，请检查模型配置：${error}`);
+            if (result.errors.size)
+              throw new Error(
+                `部分供应商的模型刷新失败，请检查连接后重试：${[...result.errors]
+                  .map(([provider, error]) => `${provider}: ${error.message}`)
+                  .join('；')}`,
+              );
+            data = {};
+            break;
+          }
           case 'providers': {
             const m = await models(ctx);
             data = m.getProviders().map((v) => {

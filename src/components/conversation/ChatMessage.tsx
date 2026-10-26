@@ -5,7 +5,7 @@ import { time } from '../../lib/format';
 import { IconButton } from '../IconButton';
 import { RichText, MessageImages, UserMessage } from './Markdown';
 import { ToolCard } from './ToolCard';
-import { ReplyMeta } from './Usage';
+import { ReplyMeta, ReplySpeed } from './Usage';
 import type { SessionMatch } from '../../lib/session-search';
 import { ThinkingBlock } from './ThinkingBlock';
 import { AnsiOutput } from '../AnsiOutput';
@@ -186,6 +186,7 @@ export const ChatMessage = memo(
                 </div>
               ))}
         </div>
+        {m.role === 'assistant' && <ReplySpeed message={m} />}
       </article>
     );
   },
