@@ -1,6 +1,6 @@
 {
   "name": "pi-desktop-gui",
-  "version": "0.14.41",
+  "version": "0.14.42",
   "private": true,
   "description": "A local desktop workspace for the Pi coding agent",
   "author": "yeyuProject",
@@ -15,7 +15,7 @@
     "test": "node --import tsx --test --test-timeout=120000 tests/*.test.ts tests/*.test.mjs",
     "test:integration": "node --import tsx scripts/integration.ts",
     "test:ui": "node --import tsx scripts/test-ui.mjs && node --import tsx scripts/test-experience-ui.mjs && node --import tsx scripts/test-image-input-ui.mjs && node --import tsx scripts/test-transcript-ui.mjs && node --import tsx scripts/test-scroll-ui.mjs && node --import tsx scripts/test-placeholder-lifecycle-ui.mjs",
-    "test:chat-ui": "node --import tsx scripts/test-chat-ui.mjs && node --import tsx scripts/test-model-entry-transition-ui.mjs",
+    "test:chat-ui": "node --import tsx scripts/test-chat-ui.mjs && node --import tsx scripts/test-model-entry-transition-ui.mjs && node --import tsx scripts/test-reply-metrics-ui.mjs",
     "test:scroll-ui": "node --import tsx scripts/test-scroll-ui.mjs",
     "test:features": "node --import tsx scripts/test-features.ts && node --import tsx scripts/test-management.ts && node --import tsx scripts/test-workflow.ts && node --import tsx scripts/test-session-context.ts && node --import tsx scripts/test-model-errors.ts && node --import tsx scripts/test-coding.ts && node --import tsx scripts/test-approval.ts && node --import tsx scripts/test-recovery.ts && node --import tsx scripts/test-checkpoints.ts && node --import tsx scripts/test-retry.ts",
     "test:features-ui": "node --import tsx scripts/test-features-ui.mjs && node --import tsx scripts/test-coding-ui.mjs && node --import tsx scripts/test-approval-ui.mjs && node --import tsx scripts/test-recovery-ui.mjs && node --import tsx scripts/test-compatibility-ui.mjs && node --import tsx scripts/test-update-ui.mjs && node --import tsx scripts/test-model-errors-ui.mjs && node --import tsx scripts/test-model-switch-ui.mjs && npm run test:v014-ui && node --import tsx scripts/test-retry-ui.mjs && node --import tsx scripts/test-review-ui.mjs && node --import tsx scripts/test-review-followup-ui.mjs",

@@ -168,6 +168,7 @@
 }
 .model-search input {
   flex: 1;
+  min-width: 0;
   border: 0;
   background: transparent;
   padding: 9px 0;
@@ -176,6 +177,15 @@
 }
 .model-search input:focus {
   outline: none;
+}
+.model-refresh {
+  flex-shrink: 0;
+  gap: 5px;
+  border: 0;
+  background: transparent;
+  padding: 4px 6px;
+  color: var(--accent);
+  font-size: calc(11px * var(--font-scale));
 }
 .model-list {
   overflow-y: auto;

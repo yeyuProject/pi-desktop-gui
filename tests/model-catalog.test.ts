@@ -113,7 +113,10 @@ export default function(pi) {
   t.diagnostic(`First model catalog: ${Math.round(performance.now() - began)} ms`);
   assert.equal(service.runtime.connected, false);
   assert.equal(service.runtime.model?.id, 'reasoning', 'Pi applies project-level model defaults');
-  assert.equal(service.runtime.models.length, 3);
+  // Provider credentials inherited from the test host can expose additional built-in models.
+  const catalogModels = () =>
+    service.runtime.models.filter((model) => ['catalog', 'project-catalog'].includes(model.provider));
+  assert.equal(catalogModels().length, 3);
   assert.ok(service.runtime.models.some((model) => model.provider === 'project-catalog'));
   assert.doesNotMatch(JSON.stringify(service.runtime.models), /secret|Authorization|apiKey/);
   assert.equal(session.file, undefined, 'reading the model catalog creates no session log');
@@ -143,11 +146,7 @@ export default function(pi) {
   session.model = { provider: 'catalog', id: 'removed-model' };
   await service.readModels(session.id);
   assert.equal(service.runtime.modelsLoaded, true);
-  assert.equal(
-    service.runtime.models.length,
-    3,
-    'a retired preference does not prevent choosing another model',
-  );
+  assert.equal(catalogModels().length, 3, 'a retired preference does not prevent choosing another model');
   assert.equal(service.runtime.model, undefined, 'a missing saved model is not silently replaced');
   assert.equal(session.model.id, 'removed-model');
   await assert.rejects(service.setModel(session.id, 'catalog', 'missing-model'), /Model not found/);
@@ -250,4 +249,59 @@ export default function(pi) {
       assert.equal(await fs.readFile(imported.file!, 'utf8'), history);
     });
   }
+
+  await t.test(
+    'connected refresh loads new models without replacing the chat and can recover from bad config',
+    async () => {
+      await service.connect(session.id);
+      const connected = service.runtime;
+      const messages = connected.messages;
+      const selectedModel = connected.model;
+      const thinking = connected.thinking;
+      const pid = service.lastSwitch?.pid;
+      const modelsPath = path.join(agentDir, 'models.json');
+      const config = JSON.parse(await fs.readFile(modelsPath, 'utf8'));
+      config.providers.catalog.models.push({
+        ...config.providers.catalog.models[0],
+        id: 'added',
+        name: 'Added',
+      });
+      const updated = JSON.stringify(config);
+      await fs.writeFile(modelsPath, updated);
+
+      const loading: boolean[] = [];
+      const observe = (runtime: typeof connected) => loading.push(Boolean(runtime.modelsLoading));
+      service.on('runtime', observe);
+      await service.readModels(session.id);
+      service.off('runtime', observe);
+      assert.ok(loading.includes(true));
+      assert.equal(loading.at(-1), false);
+      assert.equal(service.runtime, connected);
+      assert.equal(service.runtime.messages, messages);
+      assert.equal(service.runtime.model, selectedModel);
+      assert.equal(service.runtime.thinking, thinking);
+      assert.equal(service.runtime.connected, true);
+      assert.equal(service.lastSwitch?.pid, pid);
+      assert.ok(service.runtime.models.some((model) => model.id === 'added'));
+      assert.doesNotMatch(await fs.readFile(observed, 'utf8'), /prompt/);
+      await service.setModel(session.id, 'catalog', 'added');
+      assert.equal(service.runtime.model?.id, 'added', 'the live Pi registry can select the new model');
+
+      const available = service.runtime.models;
+      await fs.writeFile(modelsPath, '{ invalid json');
+      await assert.rejects(service.readModels(session.id), /刷新模型失败/);
+      assert.equal(service.runtime.modelsLoading, false);
+      assert.equal(service.runtime.modelsLoaded, false);
+      assert.equal(service.runtime.models, available);
+      assert.equal(service.runtime.connected, true);
+      await fs.writeFile(modelsPath, updated);
+      await service.readModels(session.id);
+      assert.equal(service.runtime.modelsLoaded, true);
+      assert.equal(service.runtime.error, undefined);
+
+      service.runtime.status = 'running';
+      await assert.rejects(service.readModels(session.id), /请等待当前任务结束/);
+      service.runtime.status = 'idle';
+    },
+  );
 });

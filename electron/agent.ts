@@ -863,7 +863,32 @@ export class AgentService extends EventEmitter {
     // await I/O. Reading a catalog alone does not make a conversation permanent.
     return this.exclusive(() =>
       aroundRead(async () => {
-        if (this.runtime.connected && this.runtime.sessionId === sessionId) return;
+        if (this.runtime.connected && this.runtime.sessionId === sessionId) {
+          if (busy(this.runtime.status)) throw new Error('请等待当前任务结束后刷新模型列表');
+          this.assertCommandsStopped();
+          const rpc = this.rpc;
+          if (!rpc || rpc.closed) throw new Error('会话连接已断开，请重新连接后刷新模型列表');
+          const revision = this.modelCatalogRevision;
+          this.setError();
+          this.runtime.modelsLoading = true;
+          this.runtime.modelsLoaded = false;
+          this.publish(true);
+          try {
+            await rpc.bridge('refresh_models');
+            const available = await rpc.request('get_available_models');
+            this.runtime.models = available.models
+              .map(displayModel)
+              .filter((item): item is Model => Boolean(item));
+            this.runtime.modelsLoaded = revision === this.modelCatalogRevision;
+          } catch (error) {
+            this.setError(errorText(error));
+            throw error;
+          } finally {
+            this.runtime.modelsLoading = false;
+            this.publish(true);
+          }
+          return;
+        }
         const session = this.store.session(sessionId);
         const settings = this.store.state.settings;
         const wanted =
