@@ -64,6 +64,7 @@ export interface Settings {
   modelId: string;
   thinking: string;
   theme: Theme;
+  expandThinking: boolean;
   fontScale: number;
   sidebarWidth: number;
   inspectorWidth: number;

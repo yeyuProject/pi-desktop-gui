@@ -284,6 +284,7 @@ export function Conversation(
         <ThinkingBlock
           text={group.text}
           streaming={running && group.end === messages.length - 1}
+          defaultExpanded={state.settings.expandThinking}
           collapseKey={collapseThinking}
           match={part && activeMatch ? { ...activeMatch, start: part.offset + activeMatch.start } : undefined}
         />

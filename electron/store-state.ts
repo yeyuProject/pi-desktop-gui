@@ -11,6 +11,7 @@ export const defaultSettings: Settings = {
   modelId: '',
   thinking: '',
   theme: 'system',
+  expandThinking: false,
   fontScale: 1,
   sidebarWidth: 240,
   inspectorWidth: 380,
