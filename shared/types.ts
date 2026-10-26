@@ -64,6 +64,7 @@ export interface Settings {
   modelId: string;
   thinking: string;
   theme: Theme;
+  expandThinking: boolean;
   fontScale: number;
   sidebarWidth: number;
   inspectorWidth: number;
@@ -118,6 +119,7 @@ export interface Message {
   role: string;
   content: string | ContentBlock[];
   timestamp?: number;
+  durationMs?: number;
   toolCallId?: string;
   toolName?: string;
   nestedCalls?: NestedToolCalls;

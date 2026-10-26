@@ -283,6 +283,20 @@ export default function desktopBridge(pi: ExtensionAPI) {
             replied = true;
             await ctx.reload();
             break;
+          case 'refresh_models': {
+            const result = await ctx.modelRegistry.refresh();
+            if (result.aborted) throw new Error('刷新模型已取消，请重试');
+            const error = ctx.modelRegistry.getError();
+            if (error) throw new Error(`刷新模型失败，请检查模型配置：${error}`);
+            if (result.errors.size)
+              throw new Error(
+                `部分供应商的模型刷新失败，请检查连接后重试：${[...result.errors]
+                  .map(([provider, error]) => `${provider}: ${error.message}`)
+                  .join('；')}`,
+              );
+            data = {};
+            break;
+          }
           case 'providers': {
             const m = await models(ctx);
             data = m.getProviders().map((v) => {

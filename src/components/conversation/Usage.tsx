@@ -38,6 +38,32 @@ export function ReplyMeta({ message }: { message: Message }) {
     </span>
   );
 }
+
+export function ReplySpeed({ message }: { message: Message }) {
+  const output = (message.usage as { output?: number } | undefined)?.output;
+  const duration = message.durationMs;
+  if (
+    message.role !== 'assistant' ||
+    typeof output !== 'number' ||
+    !Number.isFinite(output) ||
+    output <= 0 ||
+    typeof duration !== 'number' ||
+    !Number.isFinite(duration) ||
+    duration <= 0
+  )
+    return null;
+  const tps = output / (duration / 1000);
+  if (!Number.isFinite(tps)) return null;
+  return (
+    <div
+      className="reply-speed"
+      title={`平均输出速度：${output.toLocaleString()} tokens ÷ ${(duration / 1000).toFixed(2)} 秒（含等待模型响应时间，不含工具执行时间）`}
+    >
+      {tps.toFixed(1)} TPS
+    </div>
+  );
+}
+
 export function ContextMeter({
   stats,
   open,

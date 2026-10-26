@@ -33,6 +33,7 @@ const draftKeys = [
   'agentDir',
   'editorPath',
   'theme',
+  'expandThinking',
   'fontScale',
   'sidebarWidth',
   'inspectorWidth',
@@ -459,6 +460,17 @@ export function SettingsModal(
                       setPrefs({ ...prefs, inspectorSplit });
                     }}
                   />
+                  <label className="check-row">
+                    <input
+                      type="checkbox"
+                      checked={prefs.expandThinking}
+                      onChange={(e) => setPrefs({ ...prefs, expandThinking: e.target.checked })}
+                    />
+                    <span>
+                      默认展开思考过程
+                      <small>开启后，运行中和已完成的思考过程默认展开，仍可手动收起</small>
+                    </span>
+                  </label>
                   <label className="field-label">
                     代码编辑器 <small>留空时在{platform.fileManager}中定位文件</small>
                   </label>

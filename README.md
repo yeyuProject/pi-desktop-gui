@@ -1,6 +1,6 @@
 <div align="center">
 
-<img src="build/icon-mac.png" width="96" height="96" alt="Pi Desktop icon" />
+<img src="build/icon-mac.png" width="128" height="128" alt="Pi Desktop icon" />
 
 # Pi Desktop
 
@@ -39,13 +39,13 @@ Sessions and workspaces stay on your machine. Model requests go to whichever pro
 ## Features
 
 - **Responsive long conversations** — Reuse completed Markdown sections during streaming and after replies finish. Browse and search history in pages, type without rerendering the conversation, and load draft image contents only for the selected chat. Environment setup and snapshot cleanup run after the window opens; idle chats stop updating their timers.
-- **Compact conversation history** — Thinking from one user turn shares a single collapsible section. Completed turns start collapsed; search reveals the original text, and you can collapse all thinking at once.
-- **Visible agent workflow** — Streamed thinking, tool calls with arguments and exit status, inline diffs for every edit, plus estimated current context/window capacity, clearly labeled cumulative session tokens, cache breakdown and estimated cost.
+- **Compact conversation history** — Thinking from one user turn shares a single collapsible section. Completed turns start collapsed by default (or stay expanded when **默认展开思考过程** is enabled in Settings); search reveals the original text, and you can collapse all thinking at once.
+- **Visible agent workflow** — Streamed thinking, tool calls with arguments and exit status, inline diffs for every edit, average reply output speed (`TPS`), plus estimated current context/window capacity, clearly labeled cumulative session tokens, cache breakdown and estimated cost.
 - **Image attachments** — Paste or drop images even when the system omits their file type; selecting a project image through `@` also attaches the image. Supports PNG, JPEG, WebP and GIF, up to 8 images, 8 MiB each and 16 MiB combined.
 - **Per-turn undo** — In Git projects, a snapshot is taken before each run (stored outside your repo's `.git`). Open either the repository root or a subdirectory as your project. Repeated run-change refreshes reuse hashes of unchanged files. Undo a whole turn or roll back individual files. Side effects of shell commands are not covered.
 - **Tool approval** — Choose _Auto_, _Confirm changes_ or _Read-only_ per session. Approve once, always allow for the session, or deny with a reason.
 - **Branching conversations** — Edit and resend any message, fork a new branch, or clone the active one to try a different approach.
-- **Ecosystem control center** — Manage model providers (API key / OAuth / any OpenAI-compatible endpoint), MCP servers, Skills, extensions and prompt templates without hand-editing config files. For a disconnected chat, reopening the model picker reuses its own catalog; relevant configuration changes invalidate it. Use **刷新模型列表** to refresh after external changes.
+- **Ecosystem control center** — Manage model providers (API key / OAuth / any OpenAI-compatible endpoint), MCP servers, Skills, extensions and prompt templates without hand-editing config files. For a disconnected chat, reopening the model picker reuses its own catalog; relevant configuration changes invalidate it. Use the model picker's **刷新** (**刷新模型列表**) button to reload models in either disconnected or idle connected chats after external changes.
 - **Quick chat or full project** — Start a standalone chat without a repository, or open a project to get the file tree, Git changes and snapshots.
 - **Concurrent conversations** — Each connected chat has its own Pi process. Switch chats while tasks continue. Model and reasoning changes apply to the next new user task; tool continuations and mid-run additions retain the current settings. A double <kbd>Esc</kbd> stops only the current chat.
 - **Steer while it runs** — Add instructions mid-run (steer) or queue follow-ups within each conversation.
@@ -199,6 +199,7 @@ npm run dev
 ## Acknowledgements
 
 - Built on [@earendil-works/pi-coding-agent](https://www.npmjs.com/package/@earendil-works/pi-coding-agent).
+- App icon character references are inspired by community fan designs for DeepSeek, Claude and ChatGPT by 上善无形 / [ZipZipPipe](https://www.pixiv.net/artworks/148186519) (see [build/icon-source-v2.prompt.txt](build/icon-source-v2.prompt.txt) for provenance and non-commercial attribution terms).
 - Pi Desktop is an independent, community-driven client and is not an official Pi release.
 
 ## License

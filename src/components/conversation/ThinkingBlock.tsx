@@ -6,22 +6,27 @@ import { SearchHighlight } from './SearchHighlight';
 export function ThinkingBlock({
   text,
   streaming,
+  defaultExpanded = false,
   match,
   collapseKey,
 }: {
   text: string;
   streaming: boolean;
+  defaultExpanded?: boolean;
   match?: SessionMatch;
   collapseKey?: number;
 }) {
   const details = useRef<HTMLDetailsElement>(null);
+  const previousCollapseKey = useRef(collapseKey);
   useLayoutEffect(() => {
-    if (match && details.current) details.current.open = true;
-  }, [match?.query, match?.start]);
+    if (details.current) details.current.open = defaultExpanded || Boolean(match);
+  }, [defaultExpanded, match?.query, match?.start]);
   useEffect(() => {
-    if (details.current && !streaming && !match) details.current.open = false;
-  }, [streaming, match]);
+    if (details.current && !streaming && !match && !defaultExpanded) details.current.open = false;
+  }, [streaming, match, defaultExpanded]);
   useEffect(() => {
+    if (previousCollapseKey.current === collapseKey) return;
+    previousCollapseKey.current = collapseKey;
     if (details.current && !match) details.current.open = false;
   }, [collapseKey]);
   const output = useRef<HTMLPreElement>(null);
@@ -56,7 +61,7 @@ export function ThinkingBlock({
   }, []);
 
   return (
-    <details ref={details} className="thinking" open={match ? true : undefined}>
+    <details ref={details} className="thinking">
       <summary>思考过程</summary>
       <pre
         ref={output}

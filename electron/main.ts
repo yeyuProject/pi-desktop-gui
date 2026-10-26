@@ -1085,6 +1085,7 @@ const handlers: Record<keyof ApiMap, (...args: any[]) => any> = {
         next[key] = Math.max(min, Math.min(max, value[key]));
       }
     if (typeof value.onboardingDone === 'boolean') next.onboardingDone = value.onboardingDone;
+    if (typeof value.expandThinking === 'boolean') next.expandThinking = value.expandThinking;
     if (typeof value.notifyOnFinish === 'boolean') next.notifyOnFinish = value.notifyOnFinish;
     if (typeof value.notifyOnApproval === 'boolean') next.notifyOnApproval = value.notifyOnApproval;
     if (typeof value.notifyOnError === 'boolean') next.notifyOnError = value.notifyOnError;

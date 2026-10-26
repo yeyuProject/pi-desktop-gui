@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
-import { ChevronDown, Search, Check, LoaderCircle } from 'lucide-react';
+import { ChevronDown, Search, Check, LoaderCircle, RefreshCw } from 'lucide-react';
 import { type Runtime } from '../../shared/types';
 import { contextLabel } from '../lib/format';
 import { useFocusScope } from '../hooks/useFocusScope';
@@ -129,6 +129,19 @@ export function ModelPicker({
                 }
               }}
             />
+            <button
+              className="model-refresh"
+              aria-label="刷新模型列表"
+              title={!canConnect || locked ? '请等待当前操作完成后刷新模型列表' : '刷新模型列表'}
+              disabled={!canConnect || locked || runtime.modelsLoading}
+              onClick={() => {
+                setIndex(0);
+                loadModels();
+              }}
+            >
+              <RefreshCw size={14} className={runtime.modelsLoading ? 'spin' : undefined} />
+              {runtime.modelsLoading ? '刷新中…' : '刷新'}
+            </button>
           </div>
           <div className="model-list" role="listbox" aria-label="可用模型" ref={list}>
             {!runtime.models.length ? (
@@ -213,11 +226,6 @@ export function ModelPicker({
               <span>请等待当前操作完成</span>
             ) : (
               <span>运行中修改将在下次发送新任务时生效；补充要求仍使用本轮设置</span>
-            )}
-            {!runtime.connected && (
-              <button disabled={!canConnect || locked || runtime.modelsLoading} onClick={loadModels}>
-                刷新模型列表
-              </button>
             )}
             <button
               onClick={() => {
