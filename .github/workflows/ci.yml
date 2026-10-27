@@ -5,10 +5,15 @@ on:
   workflow_dispatch:
     inputs:
       release_tag:
-        description: 'Publish this version from main after all checks (for example v0.14.1)'
+        description: 'Publish this version from main (for example v0.14.1)'
         required: false
         default: ''
         type: string
+      skip_tests:
+        description: 'Skip tests for this manual run'
+        required: false
+        default: false
+        type: boolean
 permissions:
   contents: read
 concurrency:
@@ -16,6 +21,7 @@ concurrency:
   cancel-in-progress: ${{ github.event_name == 'pull_request' || (github.event_name == 'push' && !startsWith(github.ref, 'refs/tags/')) }}
 jobs:
   build-and-test:
+    if: ${{ github.event_name != 'workflow_dispatch' || !inputs.skip_tests }}
     strategy:
       fail-fast: false
       matrix:
@@ -43,8 +49,10 @@ jobs:
       - run: npm test
         timeout-minutes: 3
       - run: npm run test:performance-core
+        if: matrix.os == 'ubuntu-latest'
       - run: npm run test:integration
       - run: npm run test:features
+        if: matrix.os == 'ubuntu-latest'
       - name: Test concurrent sessions and settings with real Pi
         run: node --import tsx scripts/test-concurrency-settings.ts
       - name: Package Windows and macOS acceptance builds
@@ -101,6 +109,7 @@ jobs:
           if-no-files-found: ignore
 
   update-roundtrip:
+    if: ${{ github.event_name != 'workflow_dispatch' || !inputs.skip_tests }}
     strategy:
       fail-fast: false
       matrix:
@@ -135,7 +144,13 @@ jobs:
 
   package:
     needs: [build-and-test, update-roundtrip]
-    if: startsWith(github.ref, 'refs/tags/v') || github.event_name == 'workflow_dispatch'
+    if: >-
+      ${{
+        always() && !cancelled() &&
+        (startsWith(github.ref, 'refs/tags/v') || github.event_name == 'workflow_dispatch') &&
+        (needs.build-and-test.result == 'success' || (github.event_name == 'workflow_dispatch' && inputs.skip_tests && needs.build-and-test.result == 'skipped')) &&
+        (needs.update-roundtrip.result == 'success' || (github.event_name == 'workflow_dispatch' && inputs.skip_tests && needs.update-roundtrip.result == 'skipped'))
+      }}
     strategy:
       fail-fast: false
       matrix:
