@@ -359,9 +359,16 @@
   opacity: 1;
 }
 .reply-speed {
-  margin-top: 8px;
-  color: var(--muted);
-  font-size: calc(11px * var(--font-scale));
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  margin-top: 10px;
+  padding: 4px 8px;
+  border: 1px solid color-mix(in srgb, var(--accent) 28%, var(--line));
+  border-radius: 6px;
+  background: var(--accent-soft);
+  color: var(--accent);
+  font-size: calc(12px * var(--font-scale));
   font-variant-numeric: tabular-nums;
 }
 

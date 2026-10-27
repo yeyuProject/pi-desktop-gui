@@ -31,7 +31,7 @@ try {
   assert.equal(reply.usage.output, 20);
   assert.ok(reply.durationMs > 0, 'Pi provides the native response duration');
   const expectedSpeed = `${(20 / (reply.durationMs / 1000)).toFixed(1)} TPS`;
-  assert.equal((await speed.textContent()).trim(), expectedSpeed);
+  assert.equal((await speed.textContent()).trim(), `平均输出速度 ${expectedSpeed}`);
   assert.equal(await page.locator('.message.user .reply-speed').count(), 0);
   assert.equal(
     await speed.evaluate((element) => element.previousElementSibling?.className),
@@ -68,7 +68,10 @@ try {
   );
   await page.reload();
   await page.locator('.message.assistant .reply-speed').waitFor();
-  assert.equal((await page.locator('.reply-speed').last().textContent()).trim(), expectedSpeed);
+  assert.equal(
+    (await page.locator('.reply-speed').last().textContent()).trim(),
+    `平均输出速度 ${expectedSpeed}`,
+  );
   assert.deepEqual(errors, []);
   console.log(
     'PASS reply TPS from native usage/duration, history reload, and connected model refresh/selection',
