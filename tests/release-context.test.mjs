@@ -37,17 +37,27 @@ test('release context accepts only the exact version and checked-out workflow SH
   }
 });
 
-test('manual release retains every test gate, pins checkouts and cannot overwrite tags', () => {
+test('manual release defaults to test gates, pins checkouts and cannot overwrite tags', () => {
   const workflow = yaml.load(fs.readFileSync('.github/workflows/ci.yml', 'utf8'));
   assert.equal(workflow.on.workflow_dispatch.inputs.release_tag.default, '');
   assert.equal(workflow.on.workflow_dispatch.inputs.release_tag.required, false);
+  assert.equal(workflow.on.workflow_dispatch.inputs.skip_tests.default, false);
   assert.deepEqual(workflow.jobs.package.needs, ['build-and-test', 'update-roundtrip']);
   assert.equal(workflow.jobs.release.needs, 'package');
   assert.deepEqual(workflow.permissions, { contents: 'read' });
   assert.deepEqual(workflow.jobs.release.permissions, { contents: 'write' });
   assert.equal(workflow.jobs.release.concurrency['cancel-in-progress'], false);
   assert.match(workflow.jobs.release.if, /github\.ref == 'refs\/heads\/main'/);
-  const evaluate = new Function('github', 'inputs', 'startsWith', `return (${workflow.jobs.release.if})`);
+  const expression = workflow.jobs.release.if.trim().replace(/^\$\{\{\s*|\s*\}\}$/g, '');
+  const evaluate = new Function(
+    'github',
+    'inputs',
+    'startsWith',
+    'needs',
+    'always',
+    'cancelled',
+    `return (${expression})`,
+  );
   for (const [event_name, ref, release_tag, expected] of [
     ['push', 'refs/heads/main', '', false],
     ['push', 'refs/tags/v0.14.1', '', true],
@@ -57,10 +67,18 @@ test('manual release retains every test gate, pins checkouts and cannot overwrit
     ['workflow_dispatch', 'refs/heads/develop', 'v0.14.1', false],
     ['pull_request', 'refs/pull/1/merge', '', false],
   ]) {
-    assert.equal(
-      evaluate({ event_name, ref }, { release_tag }, (value, prefix) => value.startsWith(prefix)),
-      expected,
-    );
+    for (const result of ['success', 'failure', 'cancelled', 'skipped'])
+      assert.equal(
+        evaluate(
+          { event_name, ref },
+          { release_tag },
+          (value, prefix) => value.startsWith(prefix),
+          { package: { result } },
+          () => true,
+          () => false,
+        ),
+        expected && result === 'success',
+      );
   }
   for (const job of Object.values(workflow.jobs)) {
     const checkout = job.steps.find((step) => step.uses === 'actions/checkout@v4');
