@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs/promises';
 import path from 'node:path';
 import { createLocalProvider, prepareRealPiFixture } from '../tests/support/local-provider.ts';
+import { packagedExecutable, unregisterMacTestApp } from './mac-builds.mjs';
 
 const provider = await createLocalProvider();
 const f = await prepareRealPiFixture(provider.baseUrl, 'image-input-ui');
@@ -39,14 +40,7 @@ const within = async (operation, ms, label) => {
   }
 };
 const executable =
-  process.env.PI_DESKTOP_EXE ||
-  (process.argv.includes('--packaged')
-    ? path.resolve(
-        process.platform === 'win32'
-          ? 'release/win-unpacked/Pi Desktop.exe'
-          : `release/mac${process.arch === 'arm64' ? '-arm64' : ''}/Pi Desktop.app/Contents/MacOS/Pi Desktop`,
-      )
-    : undefined);
+  process.env.PI_DESKTOP_EXE || (process.argv.includes('--packaged') ? packagedExecutable() : undefined);
 const wait = async (condition) => {
   const started = Date.now();
   while (!(await condition())) {
@@ -304,6 +298,9 @@ try {
   await within(provider.close(), 5000, 'Closing the image test provider').catch((error) => {
     cleanupFailure ??= error;
     console.error('Image provider cleanup failed:', error);
+  });
+  await unregisterMacTestApp(executable).catch((error) => {
+    cleanupFailure ??= error;
   });
 }
 if (failure) throw failure;
