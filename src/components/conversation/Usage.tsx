@@ -59,7 +59,7 @@ export function ReplySpeed({ message }: { message: Message }) {
       className="reply-speed"
       title={`平均输出速度：${output.toLocaleString()} tokens ÷ ${(duration / 1000).toFixed(2)} 秒（含等待模型响应时间，不含工具执行时间）`}
     >
-      {tps.toFixed(1)} TPS
+      平均输出速度 <strong>{tps.toFixed(1)} TPS</strong>
     </div>
   );
 }
