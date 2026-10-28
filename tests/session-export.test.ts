@@ -37,6 +37,7 @@ async function fixture(t: TestContext) {
       throw new Error('Unexpected command ' + type);
     },
     async bridge(method: string) {
+      if (method === 'apply_tool_settings') return { activeTools: [] };
       assert.equal(method, 'options');
       return { approvalMode: 'auto' };
     },

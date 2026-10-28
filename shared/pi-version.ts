@@ -1,5 +1,5 @@
 // The regression baseline is informational, not a runtime version restriction.
-export const VERIFIED = '1.1.0';
+export const VERIFIED = '1.4.0';
 export const PI_INSTALL_COMMAND = 'npm install -g --ignore-scripts @earendil-works/pi-coding-agent';
 export const PI_SOURCE_URL = `https://github.com/earendil-works/pi/blob/v${VERIFIED}/packages/coding-agent`;
 export type PiCompatibility = 'verified' | 'unverified' | 'unknown';

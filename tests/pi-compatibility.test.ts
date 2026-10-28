@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
-import { classifyPiVersion, PI_INSTALL_COMMAND } from '../shared/pi-version';
+import { classifyPiVersion, PI_INSTALL_COMMAND, VERIFIED } from '../shared/pi-version';
 import { detectEnvironment } from '../electron/environment';
 import { defaultSettings } from '../electron/store';
 import { validateRpcResult, validateBridgeResult, sessionStats } from '../electron/pi/protocol';
@@ -12,9 +12,18 @@ import { AgentService } from '../electron/agent';
 import { Store } from '../electron/store';
 import { Workspace } from '../electron/workspace';
 
+test('the development Pi dependency matches the verified regression baseline', async () => {
+  const manifest = JSON.parse(await fs.readFile('package.json', 'utf8'));
+  assert.equal(manifest.devDependencies['@earendil-works/pi-coding-agent'], VERIFIED);
+});
+
 test('version policy allows every recognized version without claiming it has been verified', () => {
   for (const [version, expected] of [
-    ['1.1.0', 'verified'],
+    ['1.4.0', 'verified'],
+    ['1.4.1', 'unverified'],
+    ['1.4.0-rc.1', 'unverified'],
+    ['1.4.0+build.1', 'unverified'],
+    ['1.1.0', 'unverified'],
     ['1.1.1', 'unverified'],
     ['1.1.10', 'unverified'],
     ['1.1.0-rc.1', 'unverified'],
@@ -38,7 +47,8 @@ test('versioned CLI entry is admitted or rejected by environment detection', asy
   const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'pi-version-'));
   t.after(() => fs.rm(dir, { recursive: true, force: true }));
   for (const [version, supported, compatibility] of [
-    ['1.1.0', true, 'verified'],
+    ['1.4.0', true, 'verified'],
+    ['1.1.0', true, 'unverified'],
     ['1.1.1', true, 'unverified'],
     ['1.2.0', true, 'unverified'],
     ['2.0.0', true, 'unverified'],

@@ -76,7 +76,7 @@ Pi Desktop needs Node.js `>= 22.19` and the Pi Coding Agent CLI:
 npm install -g --ignore-scripts @earendil-works/pi-coding-agent
 ```
 
-Pi **1.1.0** is fully regression-tested. Other recognizable versions can connect normally, without a version warning. Pi Desktop never installs or upgrades Pi for you.
+Pi **1.4.0** is fully regression-tested. Other recognizable versions can connect normally, without a version warning. Pi Desktop never installs or upgrades Pi for you.
 
 > [!IMPORTANT]
 > On Windows, install [Git for Windows](https://git-scm.com/download/win) — Pi uses its Git Bash to run commands.

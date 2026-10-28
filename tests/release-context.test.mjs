@@ -37,6 +37,58 @@ test('release context accepts only the exact version and checked-out workflow SH
   }
 });
 
+test('packaging only accepts skipped test gates for an explicit manual opt-out', () => {
+  const workflow = yaml.load(fs.readFileSync('.github/workflows/ci.yml', 'utf8'));
+  const expression = workflow.jobs.package.if
+    .trim()
+    .replace(/^\$\{\{\s*|\s*\}\}$/g, '')
+    // GitHub accepts hyphens in job IDs; JavaScript property access needs brackets.
+    .replace(/\bneeds\.([\w-]+)\.result/g, "needs['$1'].result");
+  const evaluate = new Function(
+    'github',
+    'inputs',
+    'startsWith',
+    'needs',
+    'always',
+    'cancelled',
+    `return Boolean(${expression})`,
+  );
+  const results = ['success', 'failure', 'cancelled', 'skipped'];
+  const passed = ['success/success'];
+  const optional = [...passed, 'success/skipped', 'skipped/success', 'skipped/skipped'];
+  for (const [event_name, ref, withTests, withoutTests] of [
+    ['push', 'refs/heads/main', [], []],
+    ['push', 'refs/tags/v0.14.1', passed, passed],
+    ['push', 'refs/tags/preview', [], []],
+    ['pull_request', 'refs/pull/1/merge', [], []],
+    ['workflow_dispatch', 'refs/heads/main', passed, optional],
+    ['workflow_dispatch', 'refs/heads/develop', passed, optional],
+    ['workflow_dispatch', 'refs/tags/v0.14.1', passed, optional],
+  ]) {
+    for (const skip_tests of [undefined, false, true]) {
+      const allowed = skip_tests === true ? withoutTests : withTests;
+      for (const build of results) {
+        for (const update of results) {
+          for (const cancelled of [false, true]) {
+            assert.equal(
+              evaluate(
+                { event_name, ref },
+                skip_tests === undefined ? {} : { skip_tests },
+                (value, prefix) => value.startsWith(prefix),
+                { 'build-and-test': { result: build }, 'update-roundtrip': { result: update } },
+                () => true,
+                () => cancelled,
+              ),
+              !cancelled && allowed.includes(`${build}/${update}`),
+              JSON.stringify({ event_name, ref, skip_tests, build, update, cancelled }),
+            );
+          }
+        }
+      }
+    }
+  }
+});
+
 test('manual release defaults to test gates, pins checkouts and cannot overwrite tags', () => {
   const workflow = yaml.load(fs.readFileSync('.github/workflows/ci.yml', 'utf8'));
   assert.equal(workflow.on.workflow_dispatch.inputs.release_tag.default, '');
