@@ -125,6 +125,10 @@ New session logs use Pi's native directory (`~/.pi/agent/sessions/<encoded-cwd>/
 |  `!`   | Run a shell command in the working directory and add its output to the context       | `!npm test`                            |
 |  `!!`  | Run a shell command and show the output locally **without** adding it to the context | `!!git status`                         |
 
+Skill bodies and long questions start collapsed and expand automatically for search matches. Copy the last reply of a turn from its footer, from the hovered turn-outline row, or by pressing `C` on a focused row.
+
+Select conversation text to quote it in the draft, with a link back to its source. Side Chat answers separate questions while the main task runs; it has no tools, keeps its own local history, and never appends to the main Pi conversation.
+
 ### Keyboard shortcuts
 
 | Action                               |             Windows / Linux              |                 macOS                  |
@@ -132,6 +136,8 @@ New session logs use Pi's native directory (`~/.pi/agent/sessions/<encoded-cwd>/
 | New chat                             |       <kbd>Ctrl</kbd> <kbd>N</kbd>       |       <kbd>⌘</kbd> <kbd>N</kbd>        |
 | Search sessions and messages         |       <kbd>Ctrl</kbd> <kbd>K</kbd>       |       <kbd>⌘</kbd> <kbd>K</kbd>        |
 | Find in current session              |       <kbd>Ctrl</kbd> <kbd>F</kbd>       |       <kbd>⌘</kbd> <kbd>F</kbd>        |
+| Quote selected conversation text     |       <kbd>Ctrl</kbd> <kbd>'</kbd>       |       <kbd>⌘</kbd> <kbd>'</kbd>        |
+| Side Chat / ask about selection      |       <kbd>Ctrl</kbd> <kbd>L</kbd>       |       <kbd>⌘</kbd> <kbd>L</kbd>        |
 | Previous / next user turn            | <kbd>Alt</kbd> <kbd>↑</kbd> / <kbd>↓</kbd> | <kbd>⌥</kbd> <kbd>↑</kbd> / <kbd>↓</kbd> |
 | Toggle sidebar                       |       <kbd>Ctrl</kbd> <kbd>B</kbd>       |       <kbd>⌘</kbd> <kbd>B</kbd>        |
 | Toggle workspace panel               |       <kbd>Ctrl</kbd> <kbd>J</kbd>       |       <kbd>⌘</kbd> <kbd>J</kbd>        |

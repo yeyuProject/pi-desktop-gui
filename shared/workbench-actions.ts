@@ -2,6 +2,8 @@ export const workbenchShortcuts = [
   { action: 'new', key: 'n', mod: true, label: '新建独立对话' },
   { action: 'search', key: 'k', mod: true, label: '搜索会话与操作' },
   { action: 'find', key: 'f', mod: true, label: '查找当前会话' },
+  { action: 'quoteSelection', key: "'", mod: true, label: '引用对话选区' },
+  { action: 'sideChat', key: 'l', mod: true, label: '侧边对话 / 对选区提问' },
   { action: 'previousTurn', key: 'arrowup', alt: true, label: '跳到上一轮提问（文本输入框为空时）' },
   { action: 'nextTurn', key: 'arrowdown', alt: true, label: '跳到下一轮提问（文本输入框为空时）' },
   { action: 'sidebar', key: 'b', mod: true, label: '收起或展开侧栏' },

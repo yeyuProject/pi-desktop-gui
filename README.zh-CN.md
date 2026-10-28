@@ -122,6 +122,10 @@ Windows 安装版、macOS 和 Linux AppImage 支持应用内更新（默认手�
 | `!`  | 在工作目录执行 Shell 命令，并把输出加入对话上下文       | `!npm test`                       |
 | `!!` | 执行 Shell 命令，仅在本地显示结果，**不占用**模型上下文 | `!!git status`                    |
 
+技能正文和长提问默认折叠，查找命中时会自动展开。每轮最后的回复可直接复制，也可在轮次目录中悬停后点击复制图标，或聚焦该行后按 `C`。
+
+选中对话文字后可以引用到草稿，引用会保存出处并支持返回原文。顶部的“侧边对话”可在主任务运行时单独提问；侧边回答单独保存、没有工具，也不会写入主会话上下文。
+
 ### 快捷键
 
 | 功能                         |             Windows / Linux              |                 macOS                  |
@@ -129,6 +133,8 @@ Windows 安装版、macOS 和 Linux AppImage 支持应用内更新（默认手�
 | 新建对话                     |       <kbd>Ctrl</kbd> <kbd>N</kbd>       |       <kbd>⌘</kbd> <kbd>N</kbd>        |
 | 搜索会话与历史消息           |       <kbd>Ctrl</kbd> <kbd>K</kbd>       |       <kbd>⌘</kbd> <kbd>K</kbd>        |
 | 在当前会话中查找             |       <kbd>Ctrl</kbd> <kbd>F</kbd>       |       <kbd>⌘</kbd> <kbd>F</kbd>        |
+| 引用对话选区                 |       <kbd>Ctrl</kbd> <kbd>'</kbd>       |       <kbd>⌘</kbd> <kbd>'</kbd>        |
+| 侧边对话 / 对选区提问        |       <kbd>Ctrl</kbd> <kbd>L</kbd>       |       <kbd>⌘</kbd> <kbd>L</kbd>        |
 | 上一轮 / 下一轮提问          | <kbd>Alt</kbd> <kbd>↑</kbd> / <kbd>↓</kbd> | <kbd>⌥</kbd> <kbd>↑</kbd> / <kbd>↓</kbd> |
 | 展开 / 收起侧栏              |       <kbd>Ctrl</kbd> <kbd>B</kbd>       |       <kbd>⌘</kbd> <kbd>B</kbd>        |
 | 展开 / 收起工作区            |       <kbd>Ctrl</kbd> <kbd>J</kbd>       |       <kbd>⌘</kbd> <kbd>J</kbd>        |

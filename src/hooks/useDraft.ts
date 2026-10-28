@@ -15,6 +15,12 @@ import { composeDraftText, moveSnippetOffsets, textBytes, type DraftSnippet } fr
 import { formatAttachmentSpec, parseAttachmentSpec, type AttachmentInfo } from '../../shared/attachments';
 import { isImageFile, readImageFile } from '../lib/image-files';
 import { imageDataBytes, MAX_IMAGE_COUNT, MAX_IMAGES_BYTES } from '../../shared/images';
+import {
+  composeQuotedInput,
+  mergeDraftQuotes,
+  truncateQuote,
+  type DraftQuote,
+} from '../../shared/message-content';
 const api = window.desktop;
 interface DraftOptions {
   state: AppState | undefined;
@@ -53,12 +59,13 @@ export function useDraft({
     [fileResults, setFileResults] = useState<string[]>([]);
   const [fileIndex, setFileIndex] = useState(0),
     [snippets, setSnippets] = useState<DraftSnippet[]>([]);
+  const [draftQuotes, setDraftQuotes] = useState<DraftQuote[]>([]);
   const [attachmentInfo, setAttachmentInfo] = useState<AttachmentInfo[]>([]);
   const [inputMaxHeight, setInputMaxHeight] = useState(() =>
     Math.max(20, Math.min(55, Number(localStorage.getItem('pi.composerMaxHeight')) || 20)),
   );
   const recall = useRef(-1);
-  const composerDraft = useRef({ draft, attachments, images, snippets });
+  const composerDraft = useRef({ draft, attachments, images, snippets, quotes: draftQuotes });
   const draftRevision = useRef(0);
   const savingDraft = useRef(Promise.resolve<unknown>(undefined));
   const pendingDrafts = useRef(0);
@@ -142,6 +149,7 @@ export function useDraft({
     files = attachments,
     pictures = images,
     pieces = moveSnippetOffsets(composerDraft.current.draft, value, composerDraft.current.snippets),
+    quotes = composerDraft.current.quotes,
   ) => {
     if (!selected || stateRef.current?.selectedSessionId !== selected.id) return;
     draftRevision.current++;
@@ -151,14 +159,23 @@ export function useDraft({
       loadingImages.current = undefined;
       setImagesLoading(undefined);
     }
-    composerDraft.current = { draft: value, attachments: files, images: pictures, snippets: pieces };
+    composerDraft.current = { draft: value, attachments: files, images: pictures, snippets: pieces, quotes };
     setDraft(value);
     setAttachments(files);
     setImages(pictures);
     setSnippets(pieces);
+    setDraftQuotes(quotes);
     pendingDrafts.current++;
     savingDraft.current = attempt(() =>
-      api.invoke('saveDraft', selected.id, value, files, picturesChanged ? pictures : undefined, pieces),
+      api.invoke(
+        'saveDraft',
+        selected.id,
+        value,
+        files,
+        picturesChanged ? pictures : undefined,
+        pieces,
+        quotes,
+      ),
     ).finally(() => {
       pendingDrafts.current--;
     });
@@ -169,7 +186,33 @@ export function useDraft({
     if (pendingDrafts.current) await api.invoke('flushDraft');
     await savingDraft.current;
   };
-  const composeDraft = () => composeDraftText(composerDraft.current.draft, composerDraft.current.snippets);
+  const composeDraft = () =>
+    composeQuotedInput(
+      composeDraftText(composerDraft.current.draft, composerDraft.current.snippets),
+      composerDraft.current.quotes,
+    );
+  const addQuote = (quote: DraftQuote) => {
+    const current = composerDraft.current;
+    const added = truncateQuote(quote);
+    persistDraft(
+      current.draft,
+      current.attachments,
+      current.images,
+      current.snippets,
+      mergeDraftQuotes(current.quotes, [added]),
+    );
+    focusComposer();
+  };
+  const removeQuote = (id: string) => {
+    const current = composerDraft.current;
+    persistDraft(
+      current.draft,
+      current.attachments,
+      current.images,
+      current.snippets,
+      current.quotes.filter((quote) => quote.id !== id),
+    );
+  };
   const pasteText = (
     text: string,
     start = input.current?.selectionStart ?? draft.length,
@@ -314,7 +357,7 @@ export function useDraft({
       await attempt(async () => mergeDraftAttachments(selected.id, nextFiles, nextImages ?? []));
     focusComposer();
   }
-  composerDraft.current = { draft, attachments, images, snippets };
+  composerDraft.current = { draft, attachments, images, snippets, quotes: draftQuotes };
   useEffect(() => {
     const textarea = input.current;
     if (!textarea) return;
@@ -342,11 +385,19 @@ export function useDraft({
       draft: selected.draft,
       attachments: selected.attachments,
       snippets: selected.draftSnippets ?? [],
+      quotes: selected.draftQuotes ?? [],
     };
     setDraft(selected.draft);
     setAttachments(selected.attachments);
     setSnippets(selected.draftSnippets ?? []);
-  }, [selected?.id, selected?.draft, selected?.attachments.join('|'), selected?.draftSnippets]);
+    setDraftQuotes(selected.draftQuotes ?? []);
+  }, [
+    selected?.id,
+    selected?.draft,
+    selected?.attachments.join('|'),
+    selected?.draftSnippets,
+    selected?.draftQuotes,
+  ]);
   // Text/state broadcasts must not cancel an in-flight image read. A separate
   // effect owns image identity; its result merges into the latest typed draft.
   useEffect(() => {
@@ -452,13 +503,16 @@ export function useDraft({
     setFileIndex,
     fileList,
     snippets,
+    draftQuotes,
+    addQuote,
+    removeQuote,
     pasteText,
     expandSnippet,
     removeSnippet,
     composeDraft,
     attachmentInfo,
     attachmentBytes:
-      textBytes(composeDraftText(draft, snippets)) +
+      textBytes(composeQuotedInput(composeDraftText(draft, snippets), draftQuotes)) +
       attachmentInfo.reduce((total, info) => total + info.bytes, 0),
     inputMaxHeight,
     setInputMaxHeight,

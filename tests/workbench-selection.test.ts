@@ -172,6 +172,9 @@ function harness(
     isReadingAttachments: () => false,
     getDraftRevision: () => 0,
     snippets: [],
+    draftQuotes: [],
+    addQuote: noOp,
+    removeQuote: noOp,
   };
   const workspace = {
     checkpoints: [],
@@ -184,6 +187,7 @@ function harness(
     react: hooks,
     './useRuntime': { useRuntime: () => view },
     './useDraft': { useDraft: () => draft },
+    './useSideChat': { useSideChat: () => ({ open: false }) },
     './useWorkspace': { useWorkspace: () => workspace },
     './useShortcuts': { useShortcuts: () => ({ stopArmed: false, runAction: noOp }) },
     './useLayer': { useLayer: noOp },

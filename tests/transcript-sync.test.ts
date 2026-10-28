@@ -7,6 +7,7 @@ import { Store } from '../electron/store';
 import { Workspace } from '../electron/workspace';
 import { AgentService } from '../electron/agent';
 import { applyRuntimePatch, emptyRuntime, type Message, type RuntimePatch } from '../shared/types';
+import { composeQuotedInput, type DraftQuote } from '../shared/message-content';
 
 async function fixture(t: TestContext) {
   const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'pi-transcript-'));
@@ -198,4 +199,40 @@ test('native boundary entries retain hidden context without settling the active 
   assert.equal(f.service.runtime.messages.at(-1)?.display, false);
   assert.equal(f.service.runtime.messages.at(-1)?.content, 'Continue the active goal');
   assert.equal(internal.historyRevision, revision + 1, 'settlement will reconcile appended context');
+});
+
+test('queue restoration preserves quote chips together with raw draft text and pasted snippets', async (t) => {
+  const f = await fixture(t);
+  const quote: DraftQuote = {
+    id: 'queue-quote',
+    role: 'assistant',
+    turn: 1,
+    messageTimestamp: 2,
+    section: 'code',
+    text: '  const quoted = 1;',
+  };
+  f.session.draft = 'existing';
+  const text = composeQuotedInput('queued', [quote]);
+  const internal = f.service as unknown as {
+    restoreQueuedDrafts(returned: string[], snapshots: Record<string, unknown>[]): void;
+  };
+  internal.restoreQueuedDrafts(
+    [text],
+    [
+      {
+        text,
+        original: 'queued',
+        quotes: [quote],
+        snippets: [{ id: 'piece', text: 'paste', offset: 0 }],
+        attachments: [],
+        images: [],
+        mode: 'followUp',
+        observed: true,
+      },
+    ],
+  );
+  assert.equal(f.session.draft, 'existing\n\nqueued');
+  assert.deepEqual(f.session.draftQuotes, [quote]);
+  assert.equal(f.session.draftSnippets?.[0].offset, 'existing\n\n'.length);
+  assert.doesNotMatch(f.session.draft, /pi-quote/);
 });

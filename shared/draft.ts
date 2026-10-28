@@ -1,4 +1,5 @@
 import type { ImageAttachment, Session } from './types';
+import { composeQuotedInput } from './message-content';
 export interface DraftSnippet {
   id: string;
   text: string;
@@ -13,7 +14,10 @@ export function matchesDraft(
 ) {
   const current = session.images ?? [];
   return (
-    composeDraftText(session.draft, session.draftSnippets ?? []) === text &&
+    composeQuotedInput(
+      composeDraftText(session.draft, session.draftSnippets ?? []),
+      session.draftQuotes ?? [],
+    ) === text &&
     session.attachments.length === attachments.length &&
     session.attachments.every((file, index) => file === attachments[index]) &&
     current.length === images.length &&

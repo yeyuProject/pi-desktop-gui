@@ -116,6 +116,7 @@ for (const scenario of [
     const state = { sessions: [session], selectedSessionId: 'current' };
     const failure = Object.assign(new Error(scenario), { code: scenario.split('-')[1] });
     const calls = [];
+    const removedSideChats = [];
     const handlers = await boundary(
       '../electron/main.ts',
       '  deleteSession: async (id)',
@@ -138,6 +139,8 @@ for (const scenario of [
           },
         },
         service: { active: () => false, release: async () => {} },
+        sideFlight: undefined,
+        sideChats: { remove: async (id) => removedSideChats.push(id) },
         workspace: { removeSession: async () => {} },
         removeSessionScratch: async () => {},
         showAppDialog: async () => ({ response: scenario === 'cancel' ? 0 : 1 }),
@@ -161,9 +164,11 @@ for (const scenario of [
       await assert.rejects(handlers.deleteSession('current'), (error) => error === failure);
       assert.deepEqual(state.sessions, [session]);
       assert.equal(state.selectedSessionId, 'current');
+      assert.deepEqual(removedSideChats, []);
     } else if (scenario === 'cancel') {
       assert.equal(await handlers.deleteSession('current'), false);
       assert.deepEqual(calls, []);
+      assert.deepEqual(removedSideChats, []);
     } else {
       assert.deepEqual(await handlers.deleteSession('current'), { trashed: scenario === 'present' });
       assert.deepEqual(
@@ -172,6 +177,7 @@ for (const scenario of [
       );
       assert.deepEqual(state.sessions, []);
       assert.equal(state.selectedSessionId, 'other');
+      assert.deepEqual(removedSideChats, ['current']);
     }
   });
 }

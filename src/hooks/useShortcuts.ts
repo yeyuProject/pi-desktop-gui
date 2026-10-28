@@ -57,6 +57,8 @@ export function useShortcuts(options: ShortcutsOptions) {
         if (o.compact) o.setInspector(false);
         window.dispatchEvent(new CustomEvent('pi:find'));
       },
+      quoteSelection: () => window.dispatchEvent(new Event('pi:quote-selection')),
+      sideChat: () => window.dispatchEvent(new Event('pi:side-action')),
       previousTurn: () => window.dispatchEvent(new CustomEvent('pi:turn', { detail: -1 })),
       nextTurn: () => window.dispatchEvent(new CustomEvent('pi:turn', { detail: 1 })),
       sidebar: () => o.setSidebar((value) => !value),

@@ -95,6 +95,12 @@ export function SessionTab({
         </div>
         {currentUsage && (
           <>
+            {currentUsage.sideChat && (
+              <p className="settings-copy" aria-label="侧边对话用量">
+                其中侧边对话：{currentUsage.sideChat.tokens.toLocaleString()} tokens · $
+                {currentUsage.sideChat.cost.toFixed(4)}，不计入主会话上下文水位。
+              </p>
+            )}
             {(currentUsage.missingTokens > 0 || currentUsage.missingCost > 0) && (
               <p className="settings-copy">
                 {currentUsage.missingTokens} 个会话尚无用量数据，{currentUsage.missingCost}{' '}

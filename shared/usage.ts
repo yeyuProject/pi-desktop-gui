@@ -16,6 +16,7 @@ export interface ProjectUsage extends UsageTotals {
 }
 export interface UsagePeriod extends UsageTotals {
   projects: ProjectUsage[];
+  sideChat?: { tokens: number; cost: number };
 }
 export interface LocalUsageSummary {
   asOf: number;
@@ -23,7 +24,12 @@ export interface LocalUsageSummary {
   week: UsagePeriod;
   all: UsagePeriod;
 }
-type UsageSession = { projectId?: string; updatedAt: number; stats?: SessionUsage };
+type UsageSession = {
+  projectId?: string;
+  updatedAt: number;
+  stats?: SessionUsage;
+  sideUsage?: { tokens: number; cost: number; updatedAt: number };
+};
 const emptyTotals = (): UsageTotals => ({
   sessions: 0,
   tokens: 0,
@@ -55,6 +61,8 @@ export function aggregateUsage(
   const names = new Map(projects.map((project) => [project.id, project.name]));
   const summarize = (since: number): UsagePeriod => {
     const total = emptyTotals();
+    const sideChat = { tokens: 0, cost: 0 };
+    let hasSide = false;
     const groups = new Map<string, ProjectUsage>();
     for (const session of sessions) {
       if (session.updatedAt < since || (since !== -Infinity && session.updatedAt > now)) continue;
@@ -72,9 +80,32 @@ export function aggregateUsage(
       }
       addUsage(group, session.stats);
     }
+    for (const session of sessions) {
+      const usage = session.sideUsage;
+      if (!usage || usage.updatedAt < since || (since !== -Infinity && usage.updatedAt > now)) continue;
+      hasSide = true;
+      sideChat.tokens += usage.tokens;
+      sideChat.cost += usage.cost;
+      total.tokens += usage.tokens;
+      total.cost += usage.cost;
+      const key = session.projectId ?? '';
+      let group = groups.get(key);
+      if (!group) {
+        group = {
+          ...emptyTotals(),
+          projectId: session.projectId,
+          name: session.projectId ? (names.get(session.projectId) ?? '已移除项目') : '独立对话',
+          costShare: 0,
+        };
+        groups.set(key, group);
+      }
+      group.tokens += usage.tokens;
+      group.cost += usage.cost;
+    }
     for (const group of groups.values()) group.costShare = total.cost ? group.cost / total.cost : 0;
     return {
       ...total,
+      ...(hasSide ? { sideChat } : {}),
       projects: [...groups.values()].sort(
         (a, b) => b.cost - a.cost || b.tokens - a.tokens || a.name.localeCompare(b.name),
       ),

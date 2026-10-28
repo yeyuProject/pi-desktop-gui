@@ -1,5 +1,15 @@
-import { memo } from 'react';
-import { GitBranch, LoaderCircle, Copy, Terminal, RefreshCw, Pencil, Undo2 } from 'lucide-react';
+import { memo, useEffect, useRef, useState } from 'react';
+import {
+  GitBranch,
+  LoaderCircle,
+  Copy,
+  Terminal,
+  RefreshCw,
+  Pencil,
+  Undo2,
+  MoreHorizontal,
+  MessagesSquare,
+} from 'lucide-react';
 import { messageText, type Message, type ToolActivity, type MessageAction } from '../../../shared/types';
 import { time } from '../../lib/format';
 import { IconButton } from '../IconButton';
@@ -9,8 +19,53 @@ import { ReplyMeta, ReplySpeed } from './Usage';
 import type { SessionMatch } from '../../lib/session-search';
 import { ThinkingBlock } from './ThinkingBlock';
 import { AnsiOutput } from '../AnsiOutput';
+import { userMessageInput } from '../../lib/message-content';
+import { useLayer } from '../../hooks/useLayer';
+
+function UserMessageMenu({ text, copy }: { text: string; copy: (text: string) => void }) {
+  const [open, setOpen] = useState(false);
+  const menu = useRef<HTMLSpanElement>(null);
+  const popup = useRef<HTMLDivElement>(null);
+  useLayer(popup, open, () => setOpen(false), { kind: 'menu', trapFocus: true });
+  useEffect(() => {
+    if (!open) return;
+    const outside = (event: MouseEvent) => {
+      if (!menu.current?.contains(event.target as Node)) setOpen(false);
+    };
+    document.addEventListener('mousedown', outside);
+    return () => document.removeEventListener('mousedown', outside);
+  }, [open]);
+  return (
+    <span className="message-menu" ref={menu}>
+      <button
+        className="icon-button"
+        title="更多消息操作"
+        aria-label="更多消息操作"
+        aria-haspopup="menu"
+        aria-expanded={open}
+        onClick={() => setOpen((value) => !value)}
+      >
+        <MoreHorizontal size={13} />
+      </button>
+      {open && (
+        <div className="message-menu-popover" role="menu" ref={popup}>
+          <button
+            role="menuitem"
+            onClick={() => {
+              copy(text);
+              setOpen(false);
+            }}
+          >
+            复制完整内容
+          </button>
+        </div>
+      )}
+    </span>
+  );
+}
 
 export interface MessageContext {
+  quoteSources?: Set<string>;
   running: boolean;
   locked: boolean;
   expanded: string[];
@@ -34,12 +89,16 @@ export const ChatMessage = memo(
     ctx,
     match,
     hideThinking = false,
+    copyReply = false,
+    index = 0,
   }: {
     m: Message;
     last: boolean;
     ctx: MessageContext;
     match?: SessionMatch;
     hideThinking?: boolean;
+    copyReply?: boolean;
+    index?: number;
   }) {
     if (m.role === 'toolResult') {
       const observed = ctx.toolFor(m);
@@ -108,9 +167,25 @@ export const ChatMessage = memo(
           {m.timestamp && <time>{time(m.timestamp)}</time>}
           {m.role === 'assistant' && <ReplyMeta message={m} />}
           <span className="message-actions">
-            <IconButton title="复制消息" onClick={() => ctx.copy(content)}>
+            <IconButton
+              title="复制消息"
+              onClick={() => ctx.copy(m.role === 'user' ? userMessageInput(content) : content)}
+            >
               <Copy size={13} />
             </IconButton>
+            {m.role === 'user' && <UserMessageMenu text={content} copy={ctx.copy} />}
+            {m.role === 'assistant' && content.trim() && (
+              <IconButton
+                title="侧边提问"
+                onClick={() =>
+                  window.dispatchEvent(
+                    new CustomEvent('pi:side', { detail: { replyTimestamp: m.timestamp } }),
+                  )
+                }
+              >
+                <MessagesSquare size={13} />
+              </IconButton>
+            )}
             {m.role === 'user' && m.timestamp && (
               <>
                 {checkpoint && ctx.undo && (
@@ -160,7 +235,15 @@ export const ChatMessage = memo(
               ))}
           {content ? (
             m.role === 'user' ? (
-              <UserMessage text={content} match={match} />
+              <UserMessage
+                text={content}
+                match={match}
+                viewId={m.timestamp ?? index}
+                expanded={ctx.expanded}
+                toggle={ctx.toggleTool}
+                copy={ctx.copy}
+                quoteSources={ctx.quoteSources}
+              />
             ) : (
               <RichText text={content} streaming={ctx.running && last} />
             )
@@ -186,13 +269,25 @@ export const ChatMessage = memo(
                 </div>
               ))}
         </div>
-        {m.role === 'assistant' && <ReplySpeed message={m} />}
+        {m.role === 'assistant' && (
+          <div className="reply-footer">
+            <ReplySpeed message={m} />
+            {copyReply && (
+              <button className="reply-copy" onClick={() => ctx.copy(content)}>
+                <Copy size={13} />
+                复制回复
+              </button>
+            )}
+          </div>
+        )}
       </article>
     );
   },
   (a, b) =>
     a.m === b.m &&
     a.hideThinking === b.hideThinking &&
+    a.copyReply === b.copyReply &&
+    a.index === b.index &&
     a.last === b.last &&
     a.match === b.match &&
     a.ctx.running === b.ctx.running &&
@@ -200,6 +295,8 @@ export const ChatMessage = memo(
     a.ctx.canRerun === b.ctx.canRerun &&
     a.ctx.checkpointFor === b.ctx.checkpointFor &&
     (a.m.role !== 'user' || a.ctx.checkpointRevision === b.ctx.checkpointRevision) &&
+    (a.m.role !== 'user' || a.ctx.expanded === b.ctx.expanded) &&
+    (a.m.role !== 'user' || a.ctx.quoteSources === b.ctx.quoteSources) &&
     (a.m.role !== 'toolResult' ||
       (a.ctx.expanded === b.ctx.expanded && a.ctx.toolFor(a.m) === b.ctx.toolFor(b.m))) &&
     (!b.ctx.running || a.ctx.liveToolIds === b.ctx.liveToolIds),

@@ -1,0 +1,163 @@
+.workspace-columns {
+  position: relative;
+}
+.side-chat {
+  width: var(--side-chat-width, 360px);
+  min-width: 300px;
+  flex-shrink: 0;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  background: var(--surface);
+  border-left: 1px solid var(--line);
+  z-index: 22;
+}
+.side-chat > header {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 10px 12px;
+  border-bottom: 1px solid var(--line);
+}
+.side-chat > header strong {
+  flex: 1;
+}
+.side-chat > header button {
+  min-height: 26px;
+  padding: 4px;
+  border: 0;
+  background: transparent;
+}
+.side-chat-options {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 7px;
+  padding: 8px 12px;
+  font-size: 11px;
+  color: var(--muted);
+  align-items: center;
+}
+.side-chat-options select {
+  max-width: 150px;
+  padding: 4px;
+}
+.side-chat-options small {
+  width: 100%;
+  color: var(--signal);
+}
+.side-chat-options > span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  min-width: 0;
+}
+.side-chat-messages {
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+  padding: 12px;
+}
+.side-message {
+  margin-bottom: 22px;
+  font-size: calc(13px * var(--font-scale));
+  line-height: 1.8;
+  overflow-wrap: anywhere;
+}
+.side-message > strong {
+  color: var(--muted);
+  display: block;
+  margin-bottom: 8px;
+  font-size: 11px;
+}
+.side-message.user {
+  padding: 10px;
+  border-radius: 9px;
+  background: var(--accent-soft);
+}
+.side-message pre {
+  overflow: auto;
+  white-space: pre-wrap;
+}
+.side-message blockquote {
+  border-left: 2px solid var(--accent);
+  padding-left: 8px;
+  margin: 8px 0;
+}
+.side-message footer {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 8px;
+}
+.side-message footer button {
+  border: 0;
+  background: transparent;
+  padding: 2px 0;
+  min-height: 22px;
+  font-size: 11px;
+  color: var(--muted);
+}
+.side-chat-composer {
+  padding: 10px 12px;
+  border-top: 1px solid var(--line);
+}
+.side-chat-composer textarea {
+  display: block;
+  width: 100%;
+  min-height: 74px;
+  max-height: 200px;
+  resize: vertical;
+  font-size: 13px;
+}
+.side-chat-send {
+  margin-top: 8px;
+  margin-left: auto;
+  display: flex;
+  font-size: 12px;
+}
+.side-chat .inline-error,
+.side-chat-unavailable {
+  margin: 8px 12px;
+  font-size: 12px;
+}
+.side-chat-unavailable button {
+  padding: 3px 6px;
+  font-size: 11px;
+  margin: 5px 5px 0 0;
+}
+.side-draft-quotes span {
+  display: block;
+  font-size: 11px;
+  background: var(--accent-soft);
+  border-radius: 5px;
+  padding: 4px 6px;
+  margin-bottom: 5px;
+  overflow-wrap: anywhere;
+}
+.side-draft-quotes button {
+  padding: 0 4px;
+  min-height: 20px;
+  border: 0;
+  background: transparent;
+  float: right;
+}
+.side-chat-backdrop {
+  position: absolute;
+  inset: 0;
+  z-index: 21;
+  background: #0004;
+}
+.side-chat.drawer {
+  position: absolute;
+  top: 0;
+  right: 0;
+  bottom: 0;
+  width: min(var(--side-chat-width, 360px), 100%);
+  min-width: min(300px, 100%);
+  box-shadow: var(--shadow);
+}
+@media (max-width: 899px) {
+  [aria-label='侧边对话宽度'] {
+    display: none;
+  }
+}

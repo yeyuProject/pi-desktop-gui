@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict';
 import path from 'node:path';
+import fs from 'node:fs/promises';
 import { expect } from 'playwright/test';
 import { emptyRuntime } from '../../shared/types.ts';
 
@@ -67,8 +68,21 @@ export async function verifyTurnOutlineUI({ app, page, output }) {
     messages: fixtureMessages(),
   };
   await app.evaluate(({ ipcMain, BrowserWindow }, runtime) => {
-    BrowserWindow.getAllWindows()[0].setSize(1440, 1100);
+    const window = BrowserWindow.getAllWindows()[0];
+    window.setSize(1440, 1100);
     globalThis.outlineUiRuntime = runtime;
+    // A connected real Pi can publish after rendererReady; keep this fixture's transcript deterministic.
+    const send = window.webContents.send.bind(window.webContents);
+    window.webContents.send = (channel, event, ...args) => {
+      const sessionId = event?.runtime?.sessionId ?? event?.patch?.sessionId;
+      if (
+        channel === 'desktop:event' &&
+        ['runtime', 'runtimePatch'].includes(event?.type) &&
+        sessionId === globalThis.outlineUiRuntime.sessionId
+      )
+        return send(channel, { type: 'runtime', runtime: globalThis.outlineUiRuntime });
+      return send(channel, event, ...args);
+    };
     const original = ipcMain._invokeHandlers.get('desktop:invoke');
     ipcMain.removeHandler('desktop:invoke');
     ipcMain.handle('desktop:invoke', async (event, method, args) => {
@@ -386,4 +400,432 @@ export async function verifyTurnOutlineUI({ app, page, output }) {
     'PASS UI6 fixed ticks, hover delays, cleaned titles, filtered keyboard navigation and five-theme text contrast',
   );
   return { contrast, screenshots };
+}
+
+/** Exercise the real Pi edit/resend path against the local fixture provider. */
+export async function verifyNativeSkillUI({ app, page, fixture, provider }) {
+  const directory = path.join(fixture.agentDir, 'skills', 'ui7');
+  const file = path.join(directory, 'SKILL.md');
+  await fs.mkdir(directory, { recursive: true });
+  const source = (version) => `---\nname: ui7\ndescription: Local UI acceptance skill\n---\n\n${version}\n`;
+  await fs.writeFile(file, source('UI7_SKILL_VERSION_ONE'));
+  const session = await page.evaluate(() => window.desktop.invoke('newSession'));
+  const input = page.getByRole('textbox', { name: '任务输入' });
+  await expect(
+    page.locator(`.session-row[data-session-id="${session.id}"] > button`).first(),
+  ).toHaveAttribute('aria-current', 'page');
+  await input.fill('/skill:ui7 帮我看看');
+  await page.getByRole('button', { name: '发送任务', exact: true }).click();
+  await page.locator('.run-meta .status.completed').waitFor({ timeout: 30000 });
+  const user = page.locator('.message.user').last();
+  await expect(user.locator('.user-message-text')).toHaveText('帮我看看');
+  await expect(user.locator('.skill-toggle')).toHaveAttribute('aria-expanded', 'false');
+  const clipboard = () => app.evaluate(({ clipboard }) => clipboard.readText());
+  await user.getByRole('button', { name: '复制消息', exact: true }).click();
+  await expect.poll(clipboard).toBe('/skill:ui7 帮我看看');
+  await user.getByRole('button', { name: '更多消息操作', exact: true }).click();
+  await user.getByRole('menuitem', { name: '复制完整内容' }).click();
+  await expect.poll(clipboard).toMatch(/^<skill name="ui7"[\s\S]*UI7_SKILL_VERSION_ONE[\s\S]*帮我看看$/);
+  const requests = provider.requests.length;
+  await user.getByRole('button', { name: '编辑后重新发送', exact: true }).click();
+  await expect(input).toHaveValue('/skill:ui7 帮我看看');
+  assert.equal(provider.requests.length, requests, 'editing must not send a prompt');
+  await fs.writeFile(file, source('UI7_SKILL_VERSION_TWO'));
+  await page.getByRole('button', { name: '发送任务', exact: true }).click();
+  await page.locator('.run-meta .status.completed').waitFor({ timeout: 30000 });
+  await expect(page.locator('.message.user .skill-toggle').last()).toBeVisible();
+  const history = await page.evaluate((id) => window.desktop.invoke('readHistory', id), session.id);
+  const message = history.findLast((message) => message.role === 'user');
+  const text =
+    typeof message.content === 'string'
+      ? message.content
+      : message.content
+          .filter((block) => block.type === 'text')
+          .map((block) => block.text)
+          .join('\n');
+  assert.match(text, /UI7_SKILL_VERSION_TWO/);
+  assert.doesNotMatch(text, /UI7_SKILL_VERSION_ONE/);
+  console.log('PASS native skill copy, full-content menu and edit/resend reload the current skill file');
+  return { sessionId: session.id, latestSkillReloaded: true };
+}
+
+export async function verifyMessageContentUI({ app, page, output }) {
+  const skillBody = Array.from(
+    { length: 300 },
+    (_, index) => `- ${index === 294 ? 'SKILL_FIND_END' : '技能步骤'} ${index + 1}`,
+  ).join('\n');
+  const longPrompt = Array.from(
+    { length: 200 },
+    (_, index) => `第 ${index + 1} 行：${index === 195 ? 'PROMPT_FIND_END' : '检查粘贴内容并保留顺序'}`,
+  ).join('\n');
+  const messages = [];
+  const finalIndices = new Map();
+  for (let turn = 1; turn <= 20; turn++) {
+    const timestamp = 1800000000000 + turn * 100;
+    const content =
+      turn === 1 || turn === 2
+        ? `<skill name="x" location="/fixture/SKILL.md">\n${skillBody}\n</skill>${turn === 1 ? '\n\n帮我看看' : ''}`
+        : turn === 5
+          ? longPrompt
+          : turn === 6
+            ? '长'.repeat(1201)
+            : `第 ${turn} 轮提问`;
+    messages.push({ role: 'user', content, timestamp });
+    if (turn !== 4) {
+      messages.push(
+        { role: 'assistant', content: `第 ${turn} 轮的中间说明`, timestamp: timestamp + 1 },
+        {
+          role: 'assistant',
+          content: [{ type: 'toolCall', id: `ui7-${turn}`, name: 'read' }],
+          timestamp: timestamp + 2,
+        },
+        {
+          role: 'toolResult',
+          toolCallId: `ui7-${turn}`,
+          toolName: 'read',
+          content: '不应复制的工具输出',
+          timestamp: timestamp + 3,
+        },
+      );
+      finalIndices.set(turn, messages.length);
+      messages.push({
+        role: 'assistant',
+        content: [
+          { type: 'thinking', thinking: '不应复制的思考' },
+          { type: 'text', text: `第 ${turn} 轮最终回复\n\n已经完成检查。` },
+        ],
+        timestamp: timestamp + 4,
+      });
+    }
+    messages.push({
+      role: 'assistant',
+      content: [{ type: 'thinking', thinking: '后续只有思考' }],
+      timestamp: timestamp + 5,
+    });
+  }
+  await app.evaluate(({ BrowserWindow }, messages) => {
+    globalThis.outlineUiRuntime = { ...globalThis.outlineUiRuntime, messages, status: 'completed' };
+    BrowserWindow.getAllWindows()[0].webContents.send('desktop:event', {
+      type: 'runtime',
+      runtime: globalThis.outlineUiRuntime,
+    });
+  }, messages);
+  const outline = page.getByRole('navigation', { name: '对话轮次' });
+  const row = (turn) => outline.locator(`button[data-turn-number="${turn}"]`);
+  const thread = page.locator('.thread');
+  const user = (turn) => thread.locator(`[data-turn="${turn}"] .message.user`);
+  const clipboard = () => app.evaluate(({ clipboard }) => clipboard.readText());
+  const jump = async (turn) => {
+    await row(turn).focus();
+    await row(turn).press('Enter');
+    await expect(row(turn)).toHaveAttribute('aria-current', 'step');
+    await expect
+      .poll(() =>
+        user(turn).evaluate((element) => {
+          const container = document.querySelector('.thread');
+          const bounds = element.getBoundingClientRect();
+          const offset =
+            bounds.height > container.clientHeight * 0.4
+              ? bounds.bottom - container.getBoundingClientRect().top - container.clientHeight * 0.4
+              : bounds.top - container.getBoundingClientRect().top;
+          const target = Math.max(
+            0,
+            Math.min(container.scrollHeight - container.clientHeight, container.scrollTop + offset),
+          );
+          return Math.abs(container.scrollTop - target) <= 2;
+        }),
+      )
+      .toBe(true);
+  };
+  const savedExpansion = async (key) =>
+    page.evaluate(async (key) => {
+      const { state } = await window.desktop.invoke('bootstrap');
+      return (
+        state.sessions
+          .find((session) => session.id === state.selectedSessionId)
+          ?.expandedTools?.includes(key) ?? false
+      );
+    }, key);
+  await jump(1);
+  const skill = user(1).locator('.skill-toggle');
+  await expect(skill).toHaveText('技能 · x · 300 行');
+  await expect(skill).toHaveAttribute('aria-expanded', 'false');
+  await expect(user(1).locator('.skill-content')).toHaveCount(0);
+  await expect(user(1).locator('.user-message-text')).toHaveText('帮我看看');
+  const bubble = await user(1)
+    .locator('.message-content')
+    .evaluate((element) => ({
+      height: element.getBoundingClientRect().height,
+      line: parseFloat(getComputedStyle(element).lineHeight),
+      parts: [...element.children].map((node) => ({
+        className: node.className,
+        height: node.getBoundingClientRect().height,
+        margin: getComputedStyle(node).margin,
+        padding: getComputedStyle(node).padding,
+      })),
+    }));
+  assert.ok(
+    bubble.height <= bubble.line * 3 + 1,
+    `collapsed skill and prompt should fit within three lines: ${JSON.stringify(bubble)}`,
+  );
+  await skill.click();
+  await expect(user(1).locator('.skill-content li')).toHaveCount(300);
+  await expect.poll(() => savedExpansion('skill:1800000000100')).toBe(true);
+  await user(1).getByRole('button', { name: '复制技能正文' }).click();
+  await expect.poll(clipboard).toBe(skillBody);
+  await page.reload();
+  await page.getByRole('textbox', { name: '任务输入' }).waitFor();
+  await jump(1);
+  await expect(skill).toHaveAttribute('aria-expanded', 'true');
+  await skill.click();
+  await expect.poll(() => savedExpansion('skill:1800000000100')).toBe(false);
+  await jump(2);
+  await expect(user(2).locator('.user-message-text')).toHaveText('使用技能 x');
+  await user(2).getByRole('button', { name: '复制消息', exact: true }).click();
+  await expect.poll(clipboard).toBe('/skill:x');
+
+  const find = async (query) => {
+    await page.evaluate(() => window.dispatchEvent(new Event('pi:find')));
+    await page.getByRole('textbox', { name: '查找当前会话' }).fill(query);
+  };
+  await find('SKILL_FIND_END');
+  await expect(user(1).locator('.skill-toggle')).toHaveAttribute('aria-expanded', 'true');
+  await expect
+    .poll(() =>
+      page.evaluate(() => {
+        const range = [...(CSS.highlights.get('session-find') ?? [])][0];
+        const content = range?.startContainer.parentElement?.closest('.skill-content');
+        if (!range || !content) return false;
+        const hit = range.getBoundingClientRect(),
+          box = content.getBoundingClientRect();
+        return range.toString() === 'SKILL_FIND_END' && hit.top >= box.top && hit.bottom <= box.bottom;
+      }),
+    )
+    .toBe(true);
+  await page.getByRole('button', { name: '关闭会话查找' }).click();
+  await jump(5);
+  const expand = user(5).getByRole('button', { name: '展开全文（共 200 行）' });
+  await expect(expand).toBeVisible();
+  const collapsed = await user(5)
+    .locator('.user-message-text')
+    .evaluate((element) => ({
+      height: element.clientHeight,
+      line: parseFloat(getComputedStyle(element).lineHeight),
+      scrollHeight: element.scrollHeight,
+    }));
+  assert.ok(collapsed.height <= collapsed.line * 12 + 1 && collapsed.scrollHeight > collapsed.height);
+  await expand.click();
+  await expect.poll(() => savedExpansion('prompt:1800000000500')).toBe(true);
+  await jump(5);
+  await expect
+    .poll(() =>
+      user(5).evaluate((element) => {
+        const viewport = document.querySelector('.thread').getBoundingClientRect();
+        const question = element.getBoundingClientRect();
+        const reply = element.closest('[data-message-index]').nextElementSibling.getBoundingClientRect();
+        return (
+          Math.abs(question.bottom - (viewport.top + viewport.height * 0.4)) < 4 &&
+          reply.top < viewport.bottom
+        );
+      }),
+    )
+    .toBe(true);
+  await page.screenshot({ path: path.join(output, 'chat-ui-long-prompt-jump.png') });
+  await user(5).getByRole('button', { name: '收起', exact: true }).click();
+  await expect.poll(() => savedExpansion('prompt:1800000000500')).toBe(false);
+  await find('PROMPT_FIND_END');
+  await expect(user(5).getByRole('button', { name: '收起', exact: true })).toBeVisible();
+  await expect
+    .poll(() =>
+      page.evaluate(() => {
+        const range = [...(CSS.highlights.get('session-find') ?? [])][0];
+        return (
+          range?.toString() === 'PROMPT_FIND_END' &&
+          Boolean(range.startContainer.parentElement.closest('.user-message-text'))
+        );
+      }),
+    )
+    .toBe(true);
+  await page.getByRole('button', { name: '关闭会话查找' }).click();
+  await page.reload();
+  await page.getByRole('textbox', { name: '任务输入' }).waitFor();
+  await jump(5);
+  await expect(user(5).getByRole('button', { name: '收起', exact: true })).toBeVisible();
+  const { state } = await page.evaluate(() => window.desktop.invoke('bootstrap'));
+  const currentSession = state.selectedSessionId;
+  const otherSession = state.sessions.find((session) => session.id !== currentSession);
+  assert.ok(otherSession);
+  const select = async (id) => {
+    const button = page.locator(`.session-row[data-session-id="${id}"] > button`).first();
+    await button.click();
+    await expect(button).toHaveAttribute('aria-current', 'page');
+  };
+  await select(otherSession.id);
+  await select(currentSession);
+  await jump(1);
+  await expect(skill).toHaveAttribute('aria-expanded', 'true');
+  await jump(5);
+  await expect(user(5).getByRole('button', { name: '收起', exact: true })).toBeVisible();
+  await jump(6);
+  await expect(user(6).getByRole('button', { name: '展开全文（共 1 行）' })).toBeVisible();
+  await jump(1);
+  await row(5).hover();
+  const before = await thread.evaluate((element) => element.scrollTop);
+  await outline.getByRole('button', { name: '复制第 5 轮回复', exact: true }).click();
+  await expect.poll(clipboard).toBe('第 5 轮最终回复\n\n已经完成检查。');
+  assert.equal(
+    await thread.evaluate((element) => element.scrollTop),
+    before,
+    'copy must not jump the conversation',
+  );
+  await row(5).focus();
+  await app.evaluate(({ clipboard }) => clipboard.writeText('UI7_KEYBOARD_COPY_SENTINEL'));
+  await page.keyboard.press('c');
+  await expect.poll(clipboard).toBe('第 5 轮最终回复\n\n已经完成检查。');
+  const intercepted = await row(5).evaluate((element) => {
+    const event = new KeyboardEvent('keydown', { key: 'c', ctrlKey: true, bubbles: true, cancelable: true });
+    element.dispatchEvent(event);
+    return event.defaultPrevented;
+  });
+  assert.equal(intercepted, false, 'Ctrl+C keeps system text copying');
+  await row(4).hover();
+  const missing = outline.getByRole('button', { name: '复制第 4 轮回复', exact: true });
+  await expect(missing).toBeDisabled();
+  await expect(missing).toHaveAttribute('title', '本轮没有可复制的回复');
+  await jump(5);
+  const final = thread.locator(`[data-message-index="${finalIndices.get(5)}"]`);
+  await expect(final.getByRole('button', { name: '复制回复', exact: true })).toBeVisible();
+  await final.getByRole('button', { name: '复制回复', exact: true }).click();
+  await expect.poll(clipboard).toBe('第 5 轮最终回复\n\n已经完成检查。');
+  await expect(thread.locator(`[data-message-index="${finalIndices.get(5) - 3}"] .reply-copy`)).toHaveCount(
+    0,
+  );
+  await app.evaluate(({ BrowserWindow }) => {
+    globalThis.outlineUiRuntime.status = 'running';
+    BrowserWindow.getAllWindows()[0].webContents.send('desktop:event', {
+      type: 'runtime',
+      runtime: globalThis.outlineUiRuntime,
+    });
+  });
+  await jump(20);
+  await expect(thread.locator(`[data-message-index="${finalIndices.get(20)}"] .reply-copy`)).toHaveCount(0);
+  await app.evaluate(({ BrowserWindow }) => {
+    globalThis.outlineUiRuntime.status = 'completed';
+    BrowserWindow.getAllWindows()[0].webContents.send('desktop:event', {
+      type: 'runtime',
+      runtime: globalThis.outlineUiRuntime,
+    });
+  });
+  await expect(thread.locator(`[data-message-index="${finalIndices.get(20)}"] .reply-copy`)).toHaveCount(1);
+  assert.ok((await outline.locator('button').count()) <= 60);
+  await app.evaluate(({ BrowserWindow }) => {
+    const messages = globalThis.outlineUiRuntime.messages;
+    messages[2].content[0].arguments = { path: 'fixture.ts' };
+    messages[4].content.find((block) => block.type === 'text').text += '\n\n```ts\nconst quoted = 1;\n```';
+    messages[5].content[0].thinking = '不应复制的思考，后续只有思考';
+    BrowserWindow.getAllWindows()[0].webContents.send('desktop:event', {
+      type: 'runtime',
+      runtime: globalThis.outlineUiRuntime,
+    });
+  });
+  await jump(1);
+  const tool = thread.locator('[data-message-index="3"]');
+  await tool.locator('summary').click();
+  const choose = async (locator, text) => {
+    await locator.scrollIntoViewIfNeeded();
+    await thread.focus();
+    await locator.evaluate((element, text) => {
+      const range = document.createRange();
+      range.selectNodeContents(element);
+      if (text) {
+        const node = element.firstChild;
+        const start = node.textContent.lastIndexOf(text);
+        assertSelectionStart(start);
+        range.setStart(node, start);
+        range.setEnd(node, start + text.length);
+      }
+      const selection = window.getSelection();
+      selection.removeAllRanges();
+      selection.addRange(range);
+      element.dispatchEvent(new PointerEvent('pointerup', { bubbles: true }));
+      function assertSelectionStart(start) {
+        if (start < 0) throw new Error('The expected thinking fragment is missing');
+      }
+    }, text);
+  };
+  const selectionMenu = page.getByRole('toolbar', { name: '对话选区操作' });
+  await choose(tool.locator('.ansi-output'));
+  await selectionMenu.getByRole('button', { name: '引用', exact: true }).click();
+  await expect(page.locator('.draft-quotes')).toContainText('工具输出');
+  const code = thread.locator('[data-message-index="4"] .code-block > pre');
+  await choose(code);
+  await selectionMenu.getByRole('button', { name: '引用', exact: true }).click();
+  await expect(page.locator('.draft-quotes')).toContainText('代码');
+  const thinking = thread.locator('[data-quote-thinking-owner="4"] .thinking');
+  await thinking.locator('summary').click();
+  await choose(thinking.locator('pre'), '后续只有思考');
+  await selectionMenu.getByRole('button', { name: '引用', exact: true }).click();
+  const quotes = () =>
+    page.evaluate(async () => {
+      await window.desktop.invoke('flushDraft');
+      const { state } = await window.desktop.invoke('bootstrap');
+      return state.sessions.find((session) => session.id === state.selectedSessionId).draftQuotes;
+    });
+  await expect.poll(async () => (await quotes()).at(-1).messageTimestamp).toBe(1800000000105);
+  await page.locator('.draft-quotes > span').last().locator('button').first().click();
+  await expect
+    .poll(() => page.evaluate(() => [...(CSS.highlights.get('conversation-quote') ?? [])][0]?.toString()))
+    .toBe('后续只有思考');
+  await choose(thinking.locator('pre'), '不应复制的思考');
+  await selectionMenu.getByRole('button', { name: '引用', exact: true }).click();
+  await expect.poll(async () => (await quotes()).at(-1).messageTimestamp).toBe(1800000000105);
+  await page.locator('.draft-quotes > span').last().locator('button').first().click();
+  await expect
+    .poll(() => page.evaluate(() => [...(CSS.highlights.get('conversation-quote') ?? [])][0]?.startOffset))
+    .toBeGreaterThan(0);
+  await choose(thinking.locator('pre'));
+  await selectionMenu.getByRole('button', { name: '引用', exact: true }).click();
+  await expect.poll(async () => (await quotes()).at(-1).text).toBe('不应复制的思考');
+  assert.equal((await quotes()).at(-1).messageTimestamp, 1800000000104);
+  await choose(code);
+  await page.keyboard.press('Escape');
+  await expect(selectionMenu).toHaveCount(0);
+  await choose(tool.locator('.arguments'));
+  await expect(selectionMenu).toHaveCount(0);
+  await thread.locator('[data-message-index="1"] .message-content').scrollIntoViewIfNeeded();
+  await thread.focus();
+  await thread.evaluate((element) => {
+    const first = element.querySelector('[data-message-index="1"] .message-content');
+    const end = element.querySelector('[data-turn="2"] .user-message-text');
+    const range = document.createRange();
+    range.setStart(first, 0);
+    range.setEnd(end, end.childNodes.length);
+    const selection = window.getSelection();
+    selection.removeAllRanges();
+    selection.addRange(range);
+    first.dispatchEvent(new PointerEvent('pointerup', { bubbles: true }));
+  });
+  await selectionMenu.getByRole('button', { name: '引用', exact: true }).click();
+  await expect(page.getByText('选区跨过多条消息，只引用了第一条消息内的内容', { exact: true })).toBeVisible();
+  await choose(code);
+  await selectionMenu.getByRole('button', { name: '侧边提问', exact: true }).click();
+  const side = page.getByRole('complementary', { name: '侧边对话' });
+  await expect(side.locator('.side-draft-quotes')).toContainText('代码');
+  await side.getByRole('button', { name: '关闭侧边对话' }).click();
+  await app.evaluate(({ BrowserWindow }) => {
+    globalThis.outlineUiRuntime.messages[3].details = {
+      patch: '--- a/fixture.ts\n+++ b/fixture.ts\n@@ -1 +1 @@\n-old line\n+new line\n',
+    };
+    BrowserWindow.getAllWindows()[0].webContents.send('desktop:event', {
+      type: 'runtime',
+      runtime: globalThis.outlineUiRuntime,
+    });
+  });
+  await choose(tool.locator('.diff-row.added code'));
+  await selectionMenu.getByRole('button', { name: '引用', exact: true }).click();
+  await expect.poll(async () => (await quotes()).at(-1).text).toBe('new line');
+  console.log(
+    'PASS UI7 folding, saved views, section search and turn copying; C1 code/tool/thinking selection, source jumps, cross-message clipping and side entry',
+  );
+  return { turns: 20, skillLines: 300, promptLines: 200 };
 }

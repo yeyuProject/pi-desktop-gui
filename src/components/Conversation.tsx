@@ -6,7 +6,7 @@ import { ChatMessage } from './conversation/ChatMessage';
 import { ReadinessChecklist } from './ReadinessChecklist';
 const api = window.desktop;
 import type { Workbench } from '../hooks/useWorkbench';
-import type { AppState, ToolActivity } from '../../shared/types';
+import { messageText, type AppState, type ToolActivity } from '../../shared/types';
 import type { ReactNode } from 'react';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { SessionSearch } from '../lib/session-search';
@@ -23,6 +23,17 @@ import { RetryErrorGroup } from './conversation/RetryErrorGroup';
 import { SearchHighlight } from './conversation/SearchHighlight';
 import { sessionModelState } from '../lib/session-model';
 import '../styles/conversation-v014.css';
+import { SelectionMenu } from './conversation/SelectionMenu';
+import type { DraftQuote } from '../../shared/message-content';
+
+function turnScrollTop(container: HTMLElement, target: HTMLElement) {
+  const bounds = (target.querySelector('.message.user') ?? target).getBoundingClientRect();
+  const top = container.scrollTop + bounds.top - container.getBoundingClientRect().top;
+  const offset =
+    bounds.height > container.clientHeight * 0.4 ? bounds.height - container.clientHeight * 0.4 : 0;
+  return Math.max(0, Math.min(container.scrollHeight - container.clientHeight, top + offset));
+}
+
 export function Conversation(
   props: Pick<
     Workbench,
@@ -58,6 +69,8 @@ export function Conversation(
     | 'inspectFile'
     | 'toggleTool'
     | 'messageContext'
+    | 'addQuote'
+    | 'setNotice'
   > & { state: AppState; recovery: ReactNode },
 ) {
   const {
@@ -96,8 +109,9 @@ export function Conversation(
     [query, setQuery] = useState(''),
     [matchIndex, setMatchIndex] = useState(0);
   const [activeTurn, setActiveTurn] = useState(1),
-    [jumpIndex, setJumpIndex] = useState<{ index: number } | null>(null);
+    [jumpIndex, setJumpIndex] = useState<{ index: number; turn: boolean } | null>(null);
   const [turnJump, setTurnJump] = useState<{ index: number } | null>(null);
+  const [quoteTarget, setQuoteTarget] = useState<DraftQuote>();
   const requestedTurn = useRef<number | undefined>(undefined);
   const [historyWindow, setHistoryWindow] = useState<{ sessionId?: string; start: number }>();
   const findInput = useRef<HTMLInputElement>(null);
@@ -138,14 +152,18 @@ export function Conversation(
     [messages, messageContext.toolFor, expanded],
   );
   const turns = useMemo(
-    () => conversationTurns(messages, messageContext.toolFor),
-    [messages, messageContext.toolFor],
+    () => conversationTurns(messages, messageContext.toolFor, ownRuntime && running),
+    [messages, messageContext.toolFor, ownRuntime, running],
+  );
+  const replyIndices = useMemo(
+    () => new Set(turns.flatMap((turn) => (turn.replyIndex === undefined ? [] : [turn.replyIndex]))),
+    [turns],
   );
   const visibleItems = useMemo(
     () => windowConversation(items, startIndex, endIndex),
     [items, startIndex, endIndex],
   );
-  const jump = (index: number) => {
+  const jump = (index: number, turn = false) => {
     requestedTurn.current = undefined;
     autoScroll.current = false;
     const target = messageWindow(messages.length, index);
@@ -153,10 +171,10 @@ export function Conversation(
       target.end < messages.length ? { sessionId: selected?.id, start: target.start } : undefined,
     );
     setMessageLimit(messagePageSize);
-    setJumpIndex({ index });
+    setJumpIndex({ index, turn });
   };
   const jumpToTurn = (index: number) => {
-    jump(index);
+    jump(index, true);
     setTurnJump({ index });
     const turn = turns.find((item) => item.index === index);
     if (turn) {
@@ -164,6 +182,99 @@ export function Conversation(
       setActiveTurn(turn.turn);
     }
   };
+  useEffect(() => {
+    const locate = (event: Event) => {
+      const quote = (event as CustomEvent<DraftQuote>).detail;
+      if (quote.role === 'side') {
+        window.dispatchEvent(new CustomEvent('pi:side', { detail: { show: true } }));
+        return;
+      }
+      const index = messages.findIndex(
+        (m) => m.timestamp === quote.messageTimestamp && m.role === quote.role,
+      );
+      if (index < 0) {
+        props.setNotice('引用的原文已不在当前会话分支');
+        return;
+      }
+      setFindOpen(false);
+      setQuoteTarget(quote);
+      if (quote.section === 'skill') toggleTool(`skill:${quote.messageTimestamp}`, true);
+      if (quote.role === 'user') toggleTool(`prompt:${quote.messageTimestamp}`, true);
+      if (quote.role === 'toolResult' && messages[index].toolCallId)
+        toggleTool(messages[index].toolCallId!, true);
+      jump(index);
+      setTurnJump({ index });
+    };
+    window.addEventListener('pi:quote', locate);
+    return () => window.removeEventListener('pi:quote', locate);
+  }, [messages, selected?.id]);
+  useEffect(() => {
+    if (!quoteTarget) return;
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const frame = requestAnimationFrame(() => {
+      const index = messages.findIndex(
+        (m) => m.timestamp === quoteTarget.messageTimestamp && m.role === quoteTarget.role,
+      );
+      const thinking =
+        quoteTarget.section === 'thinking'
+          ? thinkingGroups.find((group) => group.parts.some((part) => part.index === index))
+          : undefined;
+      const wrapper = thread.current?.querySelector(
+        thinking ? `[data-quote-thinking-owner="${thinking.owner}"]` : `[data-message-index="${index}"]`,
+      );
+      const selector = {
+        text: '.message-content',
+        code: '.code-block pre',
+        thinking: '.thinking pre',
+        tool: '.ansi-output,.tool-body .diff-view',
+        skill: '.skill-content',
+      }[quoteTarget.section];
+      const root = [...(wrapper?.querySelectorAll(selector) ?? [])].find((node) =>
+        node.textContent?.includes(quoteTarget.text),
+      );
+      if (!root || !CSS.highlights) return;
+      const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT);
+      const nodes: Text[] = [];
+      while (walker.nextNode())
+        if (!walker.currentNode.parentElement?.closest('button:not(.inline-link),summary'))
+          nodes.push(walker.currentNode as Text);
+      const text = nodes.map((node) => node.data).join('');
+      const sourceStart = thinking?.parts.find((part) => part.index === index)?.offset ?? 0;
+      const sourceEnd = thinking?.parts.find((part) => part.index > index)?.offset;
+      const start = text.indexOf(quoteTarget.text, sourceStart);
+      if (start < 0 || (sourceEnd !== undefined && start + quoteTarget.text.length > sourceEnd - 2)) return;
+      const range = document.createRange();
+      let offset = 0,
+        found = false;
+      for (const node of nodes) {
+        if (!found && offset + node.length > start) {
+          range.setStart(node, start - offset);
+          found = true;
+        }
+        if (found && offset + node.length >= start + quoteTarget.text.length) {
+          range.setEnd(node, start + quoteTarget.text.length - offset);
+          break;
+        }
+        offset += node.length;
+      }
+      CSS.highlights.set('conversation-quote', new Highlight(range));
+      for (let node = range.startContainer.parentElement; node; node = node.parentElement) {
+        if (node === thread.current || node.matches('pre,.skill-content'))
+          node.scrollTop +=
+            range.getBoundingClientRect().top +
+            range.getBoundingClientRect().height / 2 -
+            node.getBoundingClientRect().top -
+            node.clientHeight / 2;
+        if (node === thread.current) break;
+      }
+      timer = setTimeout(() => CSS.highlights.delete('conversation-quote'), 1800);
+    });
+    return () => {
+      cancelAnimationFrame(frame);
+      clearTimeout(timer);
+      CSS.highlights?.delete('conversation-quote');
+    };
+  }, [quoteTarget, startIndex, endIndex, expanded]);
   useEffect(() => {
     requestedTurn.current = undefined;
   }, [turns.length]);
@@ -206,6 +317,7 @@ export function Conversation(
   const showLatest = () => {
     requestedTurn.current = undefined;
     setHistoryWindow(undefined);
+    setQuoteTarget(undefined);
     setJumpIndex(null);
     autoScroll.current = true;
     requestAnimationFrame(() => thread.current?.scrollTo({ top: thread.current.scrollHeight }));
@@ -232,6 +344,7 @@ export function Conversation(
     setJumpIndex(null);
     setTurnJump(null);
     setActiveTurn(1);
+    setQuoteTarget(undefined);
     requestedTurn.current = undefined;
     setHistoryWindow(undefined);
   }, [selected?.id]);
@@ -265,12 +378,20 @@ export function Conversation(
   }, [activeMatch]);
   useEffect(() => {
     if (jumpIndex === null) return;
-    const timer = requestAnimationFrame(() =>
-      thread.current?.querySelector(`[data-message-index="${jumpIndex.index}"]`)?.scrollIntoView({
-        block: activeMatch ? 'center' : 'start',
-        behavior: activeMatch ? 'instant' : 'smooth',
-      }),
-    );
+    const timer = requestAnimationFrame(() => {
+      const container = thread.current;
+      const target = container?.querySelector<HTMLElement>(`[data-message-index="${jumpIndex.index}"]`);
+      if (!container || !target) return;
+      if (jumpIndex.turn) {
+        const top = turnScrollTop(container, target);
+        if (Math.abs(container.scrollTop - top) <= 2) requestedTurn.current = undefined;
+        container.scrollTo({ top, behavior: 'smooth' });
+      } else
+        target.scrollIntoView({
+          block: activeMatch ? 'center' : 'start',
+          behavior: activeMatch ? 'instant' : 'smooth',
+        });
+    });
     return () => cancelAnimationFrame(timer);
   }, [jumpIndex, startIndex, endIndex, activeMatch]);
   useEffect(() => {
@@ -280,17 +401,21 @@ export function Conversation(
     const timer = requestAnimationFrame(() => {
       const target = thread.current?.querySelector('.search-active');
       if (!target) return;
-      const selectedMark = target.querySelector('.search-current');
+      const content =
+        (activeMatch.section === 'quote'
+          ? target.querySelectorAll('[data-search-section="quote"]')[activeMatch.blockIndex ?? 0]
+          : target.querySelector(`[data-search-section="${activeMatch.section}"]`)) ??
+        target.querySelector('.message-content') ??
+        target;
+      const selectedMark = content.querySelector('.search-current');
       if (selectedMark) {
         selectedMark.scrollIntoView({ block: 'center' });
         return;
       }
-      const walker = document.createTreeWalker(
-        target.querySelector('.message-content') ?? target,
-        NodeFilter.SHOW_TEXT,
-      );
+      const walker = document.createTreeWalker(content, NodeFilter.SHOW_TEXT);
       const needle = activeMatch.query.toLocaleLowerCase();
-      const wanted = activeMatch.section === 'text' ? activeMatch.occurrence : 0;
+      const wanted =
+        activeMatch.section === 'text' || activeMatch.section === 'skill' ? activeMatch.occurrence : 0;
       let occurrence = 0,
         range: Range | undefined;
       while (!range && walker.nextNode()) {
@@ -311,10 +436,15 @@ export function Conversation(
       }
       if (range && thread.current) {
         CSS.highlights.set('session-find', new Highlight(range));
-        const pre = range.startContainer.parentElement?.closest('pre');
-        if (pre)
-          pre.scrollTop +=
-            range.getBoundingClientRect().top - pre.getBoundingClientRect().top - pre.clientHeight / 2;
+        for (
+          let node = range.startContainer.parentElement;
+          node && node !== thread.current;
+          node = node.parentElement
+        ) {
+          if (node.matches('pre,.skill-content'))
+            node.scrollTop +=
+              range.getBoundingClientRect().top - node.getBoundingClientRect().top - node.clientHeight / 2;
+        }
         const bounds = range.getBoundingClientRect(),
           container = thread.current;
         container.scrollTop +=
@@ -325,7 +455,7 @@ export function Conversation(
       cancelAnimationFrame(timer);
       CSS.highlights.delete('session-find');
     };
-  }, [activeMatch, startIndex, endIndex]);
+  }, [activeMatch, startIndex, endIndex, expanded]);
   const renderThinking = (group: ReturnType<typeof turnThinking>[number]) => {
     const part =
       activeMatch?.section === 'thinking'
@@ -335,11 +465,16 @@ export function Conversation(
       <div
         key={`${selected?.id}:thinking:${group.parts[0].index}`}
         className={part ? 'search-active' : undefined}
+        data-quote-thinking-owner={group.owner}
       >
         <ThinkingBlock
           text={group.text}
           streaming={running && group.end === messages.length - 1}
-          defaultExpanded={state.settings.expandThinking}
+          defaultExpanded={
+            state.settings.expandThinking ||
+            (quoteTarget?.section === 'thinking' &&
+              group.parts.some((part) => messages[part.index].timestamp === quoteTarget.messageTimestamp))
+          }
           collapseKey={collapseThinking}
           match={part && activeMatch ? { ...activeMatch, start: part.offset + activeMatch.start } : undefined}
         />
@@ -387,6 +522,8 @@ export function Conversation(
           last={messages[index] === lastAssistant}
           ctx={messageContext}
           match={match}
+          index={index}
+          copyReply={replyIndices.has(index)}
         />
         {placedTools.afterMessage.get(index)?.map(renderTool)}
       </div>
@@ -395,6 +532,14 @@ export function Conversation(
 
   return (
     <>
+      <SelectionMenu
+        key={selected?.id}
+        thread={thread}
+        messages={messages}
+        turns={turns}
+        addQuote={props.addQuote}
+        notice={props.setNotice}
+      />
       {findOpen && (
         <div className="session-find" role="search" aria-label="会话内查找">
           <Search size={14} />
@@ -483,7 +628,7 @@ export function Conversation(
           const top = el.getBoundingClientRect().top;
           if (requestedTurn.current !== undefined) {
             const target = el.querySelector<HTMLElement>(`[data-turn="${requestedTurn.current}"]`);
-            if (target && Math.abs(target.getBoundingClientRect().top - top) <= 2)
+            if (target && Math.abs(el.scrollTop - turnScrollTop(el, target)) <= 2)
               requestedTurn.current = undefined;
             // Intermediate smooth-scroll positions must not replace the requested navigation target.
             return;
@@ -661,6 +806,7 @@ export function Conversation(
           running={ownRuntime && running}
           jump={jumpToTurn}
           focusConversation={() => thread.current?.focus({ preventScroll: true })}
+          copyReply={(index) => messageContext.copy(messageText(messages[index]))}
         />
       )}
       {(newContent || endIndex < messages.length) && (

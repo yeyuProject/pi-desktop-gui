@@ -14,6 +14,7 @@ import { memo, useEffect, useMemo, useState } from 'react';
 import { AboutUpdates, UpdateBadge, UpdateDialog } from './components/Updates';
 import { ResizeHandle } from './components/ResizeHandle';
 import { CheckpointDialog } from './components/CheckpointDialog';
+import { SideChatPanel } from './components/SideChatPanel';
 const Sidebar = memo(SidebarView);
 const WorkspaceHeader = memo(WorkspaceHeaderView);
 const Inspector = memo(
@@ -126,7 +127,7 @@ export default function App() {
       }}
     />
   );
-  const saveWidth = (key: 'sidebarWidth' | 'inspectorWidth', width: number) => {
+  const saveWidth = (key: 'sidebarWidth' | 'inspectorWidth' | 'sideChatWidth', width: number) => {
     model.setPrefs((previous) => previous && { ...previous, [key]: width });
     void model.attempt(() => window.desktop.invoke('saveSettings', { [key]: width }));
   };
@@ -225,6 +226,8 @@ export default function App() {
                 'inspectFile',
                 'toggleTool',
                 'messageContext',
+                'addQuote',
+                'setNotice',
               ])}
               state={state}
               recovery={recovery}
@@ -257,6 +260,8 @@ export default function App() {
                 'setFileIndex',
                 'fileList',
                 'snippets',
+                'draftQuotes',
+                'removeQuote',
                 'pasteText',
                 'expandSnippet',
                 'removeSnippet',
@@ -299,6 +304,23 @@ export default function App() {
               state={state}
             />
           </section>
+          {model.sideChat.open && (
+            <>
+              <ResizeHandle
+                label="侧边对话宽度"
+                variable="--side-chat-width"
+                value={state.settings.sideChatWidth ?? 360}
+                min={300}
+                max={560}
+                defaultValue={360}
+                direction={-1}
+                save={(width) => saveWidth('sideChatWidth', width)}
+              />
+              <SideChatPanel
+                {...pick(model, ['sideChat', 'runtime', 'selected', 'openSettings', 'connect', 'copy'])}
+              />
+            </>
+          )}
           {model.inspector && !compact && (
             <ResizeHandle
               label="文件面板宽度"

@@ -28,6 +28,7 @@ import type { ModelErrorAction } from '../../shared/errors';
 const api = window.desktop;
 import type { Workbench } from '../hooks/useWorkbench';
 import type { AppState } from '../../shared/types';
+import { quoteLabel } from '../../shared/message-content';
 
 export type ComposerProps = Pick<
   Workbench,
@@ -58,6 +59,8 @@ export type ComposerProps = Pick<
   | 'setFileIndex'
   | 'fileList'
   | 'snippets'
+  | 'draftQuotes'
+  | 'removeQuote'
   | 'pasteText'
   | 'expandSnippet'
   | 'removeSnippet'
@@ -124,6 +127,8 @@ export function Composer(props: ComposerProps) {
     setFileIndex,
     fileList,
     snippets,
+    draftQuotes,
+    removeQuote,
     pasteText,
     expandSnippet,
     removeSnippet,
@@ -276,6 +281,7 @@ export function Composer(props: ComposerProps) {
   const largest = [
     ...attachmentInfo.map((info) => ({ name: info.spec, bytes: info.bytes })),
     ...snippets.map((item) => ({ name: '粘贴片段', bytes: textBytes(item.text) })),
+    ...draftQuotes.map((item) => ({ name: '对话引用', bytes: textBytes(item.text) })),
     { name: '草稿正文', bytes: textBytes(draft) },
   ].sort((a, b) => b.bytes - a.bytes)[0];
   const handleModelError = async (action: ModelErrorAction) => {
@@ -366,6 +372,22 @@ export function Composer(props: ComposerProps) {
                     )
                   }
                 >
+                  <X size={12} />
+                </IconButton>
+              </span>
+            ))}
+          </div>
+        )}
+        {!!draftQuotes.length && (
+          <div className="attachments draft-quotes">
+            {draftQuotes.map((quote) => (
+              <span key={quote.id} title={quote.text.slice(0, 2000)}>
+                <button onClick={() => window.dispatchEvent(new CustomEvent('pi:quote', { detail: quote }))}>
+                  ❝ {quoteLabel(quote)} · {Array.from(quote.text).slice(0, 40).join('')}
+                  {Array.from(quote.text).length > 40 ? '…' : ''}
+                  {quote.truncated ? '（已截断）' : ''}
+                </button>
+                <IconButton title="移除对话引用" onClick={() => removeQuote(quote.id)}>
                   <X size={12} />
                 </IconButton>
               </span>
@@ -680,7 +702,7 @@ export function Composer(props: ComposerProps) {
               aria-label="发送任务"
               title="发送任务"
               disabled={
-                (!draft.trim() && !images.length && !snippets.length) ||
+                (!draft.trim() && !images.length && !snippets.length && !draftQuotes.length) ||
                 attachmentBytes > 1024 * 1024 ||
                 Boolean(parameterError) ||
                 !selected ||

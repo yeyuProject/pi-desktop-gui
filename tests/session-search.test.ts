@@ -3,6 +3,27 @@ import assert from 'node:assert/strict';
 import { SessionSearch } from '../src/lib/session-search';
 import type { Message, ToolActivity } from '../shared/types';
 
+test('native skill bodies, user arguments and referenced files have independent search offsets', () => {
+  const body = '# Instructions\nneedle before\n' + 'a line\n'.repeat(300) + 'needle after';
+  const content = `<skill name="review" location="/fixture/SKILL.md">\n${body}\n</skill>\n\nuser needle\n\n<project_file path="needle.ts">\nfile needle\n</project_file>`;
+  const messages: Message[] = [{ role: 'user', content }];
+  const search = new SessionSearch();
+  const matches = search.search(messages, [], 'needle');
+  assert.equal(matches.length, 5);
+  assert.deepEqual(
+    Array.from({ length: matches.length }, (_, i) => matches.at(i)!.section),
+    ['skill', 'skill', 'text', 'attachment', 'attachment'],
+  );
+  const hit = matches.at(1)!;
+  assert.equal(hit.start, body.lastIndexOf('needle'));
+  assert.equal(hit.occurrence, 1);
+  assert.equal(hit.text, body);
+  assert.equal(hit.messageIndex, 0);
+  assert.equal(matches.at(2)!.start, 'user '.length);
+  assert.equal(search.search(messages, [], '/fixture/SKILL.md').length, 0);
+  assert.equal(messages[0].content, content);
+});
+
 test('dense search keeps every occurrence accessible without eagerly creating match objects', () => {
   const search = new SessionSearch();
   const messages: Message[] = Array.from({ length: 1000 }, () => ({

@@ -31,6 +31,16 @@ import { WorkspaceWatcher } from './workspace-watch';
 import { isEmptySession, hasSessionData, fillSessionUsage } from './session-maintenance';
 import { aggregateUsage } from '../shared/usage';
 import { composeDraftText } from '../shared/draft';
+import { composeQuotedInput, isDraftQuote } from '../shared/message-content';
+import { formatMessageQuotes } from '../shared/message-content';
+import { SideChats } from './side-chats';
+import {
+  sideChatContext,
+  type SideChat,
+  type SideChatRequest,
+  type SideChatInput,
+} from '../shared/side-chat';
+import { classifyModelError } from '../shared/errors';
 import { validatePromptTemplate } from '../shared/prompts';
 import {
   readPromptTemplate,
@@ -74,6 +84,15 @@ import {
 } from '../shared/types';
 
 let window: BrowserWindow | undefined, store: Store, service: SessionAgents, workspace: Workspace;
+let sideChats: SideChats;
+interface SideFlight {
+  sessionId: string;
+  id: string;
+  chat?: SideChat;
+  done?: Promise<void>;
+  cancelled?: boolean;
+}
+let sideFlight: SideFlight | undefined;
 let workspaceCleanup: Promise<void> | undefined;
 let updates: UpdateService;
 let quitting = false;
@@ -290,7 +309,7 @@ async function loadWindowState(): Promise<{ bounds?: Rectangle; maximized: boole
         ? {
             x: b.x,
             y: b.y,
-            width: Math.min(area.width, Math.max(1024, b.width)),
+            width: Math.min(area.width, Math.max(800, b.width)),
             height: Math.min(area.height, Math.max(700, b.height)),
           }
         : undefined,
@@ -527,6 +546,121 @@ async function saveText(title: string, contents: string, defaultName: string) {
   return picked.filePath;
 }
 const handlers: Record<Exclude<keyof ApiMap, WorkspaceHandlerName>, (...args: any[]) => any> = {
+  sideChatRead: async (id) => {
+    text(id, 100);
+    store.session(id);
+    const chat = await sideChats.read(id);
+    return sideFlight?.sessionId === id && sideFlight.chat ? sideFlight.chat : chat;
+  },
+  sideChatSend: async (id, request: SideChatRequest) => {
+    text(id, 100);
+    store.assertWritable();
+    text(request?.id, 100);
+    text(request?.prompt);
+    if (
+      !/^[\w-]{1,100}$/.test(request.id) ||
+      !['quotes', 'reply', 'all'].includes(request.scope) ||
+      !Array.isArray(request.quotes) ||
+      !request.quotes.every(isDraftQuote) ||
+      (!request.prompt.trim() && !request.quotes.length)
+    )
+      throw new Error('请填写侧边问题，引用内容与上下文范围必须有效');
+    if (sideFlight) throw new Error('已有侧边对话正在回答，请先等待或停止');
+    const agent = service.get(id);
+    if (!agent.runtime.connected || !agent.runtime.model)
+      throw new Error('请先连接主会话并选择模型，再发送侧边提问');
+    const flight: SideFlight = { sessionId: id, id: request.id };
+    sideFlight = flight;
+    flight.done = (async () => {
+      const chat = await sideChats.read(id);
+      flight.chat = chat;
+      const context = sideChatContext(
+        agent.runtime.messages,
+        request,
+        agent.runtime.model!.contextWindow,
+        busy(agent.runtime.status),
+      );
+      const prompt = [formatMessageQuotes(request.quotes), request.prompt].filter(Boolean).join('\n\n');
+      const inputs: SideChatInput[] = [
+        ...context.messages,
+        ...chat.messages.map(({ role, content }) => ({ role, content })),
+        { role: 'user', content: prompt },
+      ];
+      chat.messages.push({ id: request.id + '-user', role: 'user', content: prompt, timestamp: Date.now() });
+      const answer = { id: request.id, role: 'assistant' as const, content: '', timestamp: Date.now() };
+      chat.messages.push(answer);
+      chat.messages = chat.messages.slice(-100);
+      chat.running = request.id;
+      chat.error = undefined;
+      chat.omittedTurns = context.omittedTurns;
+      store.promoteSession(id);
+      send({ type: 'sideChat', chat });
+      try {
+        if (flight.cancelled) {
+          Object.assign(answer, { aborted: true });
+          return;
+        }
+        const result = await agent.sideChat(id, { id: request.id, messages: inputs }, (text) => {
+          answer.content += text;
+          send({ type: 'sideChatDelta', sessionId: id, id: request.id, text });
+        });
+        Object.assign(answer, { content: result.text, aborted: result.aborted, usage: result.usage });
+        const session = store.session(id);
+        session.sideUsage = {
+          tokens: (session.sideUsage?.tokens ?? 0) + result.usage.tokens,
+          cost: (session.sideUsage?.cost ?? 0) + result.usage.cost,
+          updatedAt: Date.now(),
+        };
+        await save();
+      } catch (error) {
+        chat.error = classifyModelError(error instanceof Error ? error.message : String(error));
+      } finally {
+        chat.running = undefined;
+        await sideChats.save(chat);
+        send({ type: 'sideChat', chat });
+      }
+    })();
+    try {
+      await flight.done;
+    } finally {
+      if (sideFlight === flight) sideFlight = undefined;
+    }
+  },
+  sideChatStop: async (id) => {
+    text(id, 100);
+    store.session(id);
+    if (sideFlight?.sessionId === id) {
+      sideFlight.cancelled = true;
+      await service.get(id).stopSideChat();
+    }
+  },
+  sideChatClear: async (id) => {
+    text(id, 100);
+    store.assertWritable();
+    store.session(id);
+    if (sideFlight?.sessionId === id) {
+      sideFlight.cancelled = true;
+      await service.get(id).stopSideChat();
+      await sideFlight?.done;
+    }
+    await sideChats.remove(id);
+    send({ type: 'sideChat', chat: { sessionId: id, messages: [], omittedTurns: 0 } });
+  },
+  sideChatContinue: async (id, answerId) => {
+    text(id, 100);
+    text(answerId, 100);
+    store.assertWritable();
+    store.session(id);
+    const chat = await sideChats.read(id);
+    const index = chat.messages.findIndex((m) => m.id === answerId && m.role === 'assistant');
+    if (index < 1) throw new Error('这条侧边回答已被清空，请重新选择');
+    const session = store.createSession();
+    session.title = '从侧边对话继续';
+    session.draft = `原问题：\n${chat.messages[index - 1].content}\n\n侧边回答：\n${chat.messages[index].content}\n\n继续提问：`;
+    store.selectSession(session.id);
+    await save();
+    return session;
+  },
   rendererReady: () => {
     workbenchReady = true;
     if (appDialogsReady) void acknowledgeUpdateHealth(app.getVersion()).catch(() => {});
@@ -725,6 +859,7 @@ const handlers: Record<Exclude<keyof ApiMap, WorkspaceHandlerName>, (...args: an
     await assertTerminalClosed(id);
     const s = store.session(id);
     if (service.active(id)) throw new Error('请先停止这个会话的任务');
+    if (sideFlight?.sessionId === id) await sideFlight.done;
     const result = await showAppDialog({
       type: 'warning',
       message: `删除会话“${s.title}”？`,
@@ -755,6 +890,7 @@ const handlers: Record<Exclude<keyof ApiMap, WorkspaceHandlerName>, (...args: an
       }
     }
     await workspace.removeSession(id);
+    await sideChats.remove(id);
     await removeSessionScratch(store.dir, id);
     store.removeSessions([id]);
     if (store.state.selectedSessionId === id) {
@@ -895,7 +1031,7 @@ const handlers: Record<Exclude<keyof ApiMap, WorkspaceHandlerName>, (...args: an
     text(label, 200);
     await service.get(id).admin(id, 'set_label', { entryId, label });
   },
-  saveDraft: async (id, draft, attachments, images, snippets) => {
+  saveDraft: async (id, draft, attachments, images, snippets, quotes) => {
     text(id, 100);
     text(draft);
     strings(attachments);
@@ -912,11 +1048,16 @@ const handlers: Record<Exclude<keyof ApiMap, WorkspaceHandlerName>, (...args: an
       }
     }
     if (images !== undefined) validateImages(images);
+    if (quotes !== undefined && (!Array.isArray(quotes) || !quotes.every(isDraftQuote)))
+      throw new Error('引用内容无效，请移除后重新引用');
+    if (quotes !== undefined) text(composeQuotedInput(composeDraftText(draft, snippets ?? []), quotes));
     const s = store.session(id);
-    if (draft || attachments.length || images?.length || snippets?.length) store.promoteSession(id);
+    if (draft || attachments.length || images?.length || snippets?.length || quotes?.length)
+      store.promoteSession(id);
     s.draft = draft;
     s.attachments = attachments;
     if (snippets !== undefined) s.draftSnippets = snippets;
+    if (quotes !== undefined) s.draftQuotes = quotes;
     if (images !== undefined) s.images = images;
     await store.scheduleSave();
   },
@@ -928,12 +1069,19 @@ const handlers: Record<Exclude<keyof ApiMap, WorkspaceHandlerName>, (...args: an
     validateImages(images);
     const s = store.session(id);
     if (store.matchesDraft(s, expected, attachments, images)) {
-      if (s.draft || s.attachments.length || s.images?.length || s.draftSnippets?.length)
+      if (
+        s.draft ||
+        s.attachments.length ||
+        s.images?.length ||
+        s.draftSnippets?.length ||
+        s.draftQuotes?.length
+      )
         store.promoteSession(id);
       s.draft = '';
       s.attachments = [];
       s.images = [];
       s.draftSnippets = [];
+      s.draftQuotes = [];
       await save();
     }
   },
@@ -998,6 +1146,7 @@ const handlers: Record<Exclude<keyof ApiMap, WorkspaceHandlerName>, (...args: an
       ['fontScale', 1, 2],
       ['sidebarWidth', 180, 360],
       ['inspectorWidth', 300, 720],
+      ['sideChatWidth', 300, 560],
       ['inspectorSplit', 15, 70],
     ] as const)
       if (value[key] !== undefined) {
@@ -1458,7 +1607,7 @@ async function createWindow() {
     width: saved.bounds?.width ?? 1440,
     height: saved.bounds?.height ?? 900,
     ...(saved.bounds ? { x: saved.bounds.x, y: saved.bounds.y } : {}),
-    minWidth: 1024,
+    minWidth: 800,
     minHeight: 700,
     title: 'Pi Desktop',
     icon: windowIconPath,
@@ -1652,6 +1801,7 @@ else {
       app.setAppUserModelId(appUserModelId);
       void loadLoginShellPath();
       store = new Store(app.getPath('userData'), app.getVersion());
+      sideChats = new SideChats(store.dir);
       await store.load();
       nativeTheme.themeSource = nativeThemeSource(store.state.settings.theme);
       nativeTheme.on('updated', updateWindowTheme);
@@ -1798,6 +1948,8 @@ else {
             'installUpdate',
             'selectSession',
             'readHistory',
+            'sideChatRead',
+            'sideChatStop',
             'readDraftImages',
             'searchSessions',
             'piSessions',
