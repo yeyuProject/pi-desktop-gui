@@ -73,7 +73,7 @@ Pi Desktop 依赖 Node.js（`>= 22.19`）与 Pi Coding Agent CLI：
 npm install -g --ignore-scripts @earendil-works/pi-coding-agent
 ```
 
-完整回归基准为 Pi **1.1.0**。其他可识别的版本也能正常连接，不显示版本提示。Pi Desktop 不会自动安装或升级 Pi。
+完整回归基准为 Pi **1.4.0**。其他可识别的版本也能正常连接，不显示版本提示。Pi Desktop 不会自动安装或升级 Pi。
 
 > [!IMPORTANT]
 > Windows 用户请先安装 [Git for Windows](https://git-scm.com/download/win)，Pi 需要用其中的 Git Bash 执行命令。

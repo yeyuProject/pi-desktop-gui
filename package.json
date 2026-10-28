@@ -1,6 +1,6 @@
 {
   "name": "pi-desktop-gui",
-  "version": "0.14.46",
+  "version": "0.14.47",
   "private": true,
   "description": "A local desktop workspace for the Pi coding agent",
   "author": "yeyuProject",
@@ -151,7 +151,7 @@
     }
   },
   "devDependencies": {
-    "@earendil-works/pi-coding-agent": "1.1.0",
+    "@earendil-works/pi-coding-agent": "1.4.0",
     "@types/diff": "7.0.2",
     "@types/node": "26.6.5",
     "@types/react": "19.3.0",
