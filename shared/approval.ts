@@ -36,10 +36,17 @@ export function decide(
   toolName: string,
   readTarget?: ReadTarget,
 ): 'allow' | 'ask' | 'deny' {
-  // These bundled Goal tools only record completion/blocker evidence in the session.
+  // Bundled Goal tools only read or record session state; they never operate on workspace files.
   if (
     mode === 'auto' ||
-    ['tool_search', 'desktop_goal_complete', 'desktop_goal_blocked'].includes(toolName) ||
+    [
+      'tool_search',
+      'desktop_goal_get',
+      'desktop_goal_update',
+      'desktop_goal_plan',
+      'desktop_goal_complete',
+      'desktop_goal_blocked',
+    ].includes(toolName) ||
     (isReadTool(toolName) && readTarget === 'project')
   )
     return 'allow';

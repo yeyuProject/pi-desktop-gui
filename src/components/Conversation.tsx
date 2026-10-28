@@ -224,10 +224,12 @@ export function Conversation(
   useEffect(() => {
     const locateResult = (event: Event) => {
       const goalId = (event as CustomEvent<string>).detail;
-      const index = messages.findIndex(
+      const index = messages.findLastIndex(
         (message) =>
           message.role === 'toolResult' &&
-          message.toolName === 'desktop_goal_complete' &&
+          ['desktop_goal_complete', 'desktop_goal_blocked', 'desktop_goal_update'].includes(
+            message.toolName ?? '',
+          ) &&
           (message.details as { id?: string } | undefined)?.id === goalId,
       );
       if (index < 0) {

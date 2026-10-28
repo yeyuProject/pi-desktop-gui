@@ -44,6 +44,32 @@
   color: var(--muted);
   font-variant-numeric: tabular-nums;
 }
+.goal-progress {
+  min-width: 0;
+  max-width: 40%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.goal-plan {
+  padding-left: 22px;
+}
+.goal-plan li {
+  margin-bottom: 6px;
+  overflow-wrap: anywhere;
+}
+.goal-plan li span {
+  color: var(--muted);
+  font-size: 11px;
+}
+.goal-plan li[data-status='in_progress'] span {
+  color: var(--warning);
+}
+.goal-updated-divider {
+  color: var(--muted);
+  font-size: 11px;
+  border-top: 1px solid var(--line);
+  padding: 8px 0;
+}
 .goal-budget {
   display: flex;
   align-items: center;

@@ -13,6 +13,7 @@ export function useGoalCard(
   sessionId: string | undefined,
   expanded: string[],
   toggle: (id: string, open: boolean) => void,
+  openRequest?: number,
 ) {
   const [revealed, setRevealed] = useState<string>(),
     [hovered, setHovered] = useState(false);
@@ -51,6 +52,14 @@ export function useGoalCard(
     document.addEventListener('keydown', escape, true);
     return () => document.removeEventListener('keydown', escape, true);
   }, [open, visible, goal?.id, toggle]);
+  const lastRequest = useRef({ key, openRequest });
+  useLayoutEffect(() => {
+    if (lastRequest.current.key === key && lastRequest.current.openRequest !== openRequest && openRequest) {
+      setRevealed(key);
+      setOpen(true);
+    }
+    lastRequest.current = { key, openRequest };
+  }, [key, openRequest]);
   return {
     open,
     visible,
@@ -70,6 +79,7 @@ export function GoalCard({
   view,
   disabled,
   action,
+  openProviders,
 }: {
   goal: GoalSnapshot;
   runtime: Runtime;
@@ -77,11 +87,19 @@ export function GoalCard({
   view: ReturnType<typeof useGoalCard>;
   disabled: boolean;
   action: (action: GoalAction) => Promise<void>;
+  openProviders: () => void;
 }) {
-  const [allEvidence, setAllEvidence] = useState(false),
-    [budgetDialog, setBudgetDialog] = useState(false);
+  const [budgetDialog, setBudgetDialog] = useState(false);
+  const [editing, setEditing] = useState<GoalSnapshot>();
   const [pending, setPending] = useState(false),
     [error, setError] = useState('');
+  const [now, setNow] = useState(Date.now());
+  useEffect(() => {
+    if (goal.status !== 'active') return;
+    setNow(Date.now());
+    const timer = setInterval(() => setNow(Date.now()), 1000);
+    return () => clearInterval(timer);
+  }, [goal.status]);
   const run = async (operation: GoalAction) => {
     setPending(true);
     setError('');
@@ -93,13 +111,27 @@ export function GoalCard({
       setPending(false);
     }
   };
-  const exhausted = goal.tokenBudget !== undefined && goal.tokensUsed >= goal.tokenBudget;
-  const seconds = Math.max(0, Math.round((goal.updatedAt - goal.createdAt) / 1000));
-  const cost =
-    runtime.stats?.tokens && runtime.stats.cost !== undefined
-      ? (goal.tokensUsed * runtime.stats.cost) / runtime.stats.tokens
-      : undefined;
+  const seconds =
+    goal.timeUsedMs === null
+      ? null
+      : Math.floor(
+          (goal.timeUsedMs + (goal.status === 'active' ? Math.max(0, now - goal.updatedAt) : 0)) / 1000,
+        );
+  const elapsed =
+    seconds === null ? '—' : `${Math.floor(seconds / 60)}:${String(seconds % 60).padStart(2, '0')}`;
+  const stepIndex = goal.plan?.findIndex((step) => step.status === 'in_progress') ?? -1;
+  const currentIndex =
+    stepIndex >= 0 ? stepIndex : (goal.plan?.findIndex((step) => step.status === 'pending') ?? -1);
+  const progress = goal.plan?.length
+    ? `步骤 ${currentIndex < 0 ? goal.plan.length : currentIndex + 1} / ${goal.plan.length} · ${currentIndex < 0 ? '步骤已完成，等待核验' : goal.plan[currentIndex].text}`
+    : `用时 ${elapsed}`;
   const locked = disabled || pending;
+  const reason =
+    goal.status === 'budget_limited'
+      ? `未完成 · 已达到用量上限 ${compactGoalTokens(goal.tokenBudget ?? goal.tokensUsed)}`
+      : goal.status === 'usage_limited'
+        ? '服务商额度不足'
+        : goal.reason || (goal.status === 'blocked' ? '遇到阻碍' : '已暂停');
   return (
     <section
       className={`goal-card ${goal.status}`}
@@ -112,10 +144,10 @@ export function GoalCard({
           <LoaderCircle className="goal-icon spin" size={14} />
         ) : goal.status === 'completed' ? (
           <Check className="goal-icon" size={14} />
-        ) : goal.status === 'blocked' ? (
-          <CircleAlert className="goal-icon" size={14} />
-        ) : (
+        ) : goal.status === 'paused' ? (
           <Pause className="goal-icon" size={14} />
+        ) : (
+          <CircleAlert className="goal-icon" size={14} />
         )}
         <strong>Goal{goal.status === 'completed' ? ' 已完成' : ''}</strong>
         <span className="goal-objective" title={goal.objective}>
@@ -123,8 +155,8 @@ export function GoalCard({
         </span>
         {goal.status === 'active' ? (
           <>
-            <span className="goal-progress">
-              第 {goal.continuations} / {goal.maxContinuations} 次续跑
+            <span className="goal-progress" title={progress}>
+              {progress}
             </span>
             {goal.tokenBudget !== undefined && (
               <span className="goal-budget">
@@ -138,25 +170,31 @@ export function GoalCard({
           </>
         ) : goal.status === 'completed' ? (
           <>
-            <span className="goal-progress">
-              用时 {Math.floor(seconds / 60)}:{String(seconds % 60).padStart(2, '0')}
-            </span>
+            <span className="goal-progress">用时 {elapsed}</span>
             <button onClick={() => view.setOpen(!view.open)}>查看结果</button>
           </>
         ) : (
           <>
-            <span className="goal-reason" title={goal.reason}>
-              {exhausted ? '已达到预算' : goal.reason || (goal.status === 'blocked' ? '遇到阻碍' : '已暂停')}
+            <span className="goal-reason" title={goal.reason || reason}>
+              {reason}
             </span>
+            {goal.status === 'usage_limited' && <button onClick={openProviders}>打开服务商设置</button>}
             <button
               disabled={locked}
               onClick={() =>
-                exhausted ? setBudgetDialog(true) : void run({ action: 'resume', goalId: goal.id })
+                goal.status === 'budget_limited'
+                  ? setBudgetDialog(true)
+                  : void run({ action: 'resume', goalId: goal.id })
               }
             >
-              {exhausted ? '调整上限并继续' : '继续'}
+              {goal.status === 'budget_limited' ? '调整上限并继续' : '继续'}
             </button>
           </>
+        )}
+        {goal.status !== 'completed' && (
+          <button disabled={locked} onClick={() => setEditing({ ...goal })}>
+            编辑目标
+          </button>
         )}
         <button
           aria-label={view.open ? '收起 Goal 详情' : '展开 Goal 详情'}
@@ -181,25 +219,38 @@ export function GoalCard({
       {view.open && (
         <div className="goal-details">
           <p className="goal-full-objective">{goal.objective}</p>
-          {goal.summary && <RichText text={goal.summary} />}
-          {goal.evidence && (
-            <>
-              <div className={`goal-evidence${allEvidence ? '' : ' clipped'}`}>
-                <RichText text={goal.evidence} />
-              </div>
-              <button onClick={() => setAllEvidence(!allEvidence)}>
-                {allEvidence ? '收起证据' : '展开全部证据'}
-              </button>
-            </>
+          {!!goal.plan?.length && (
+            <ol className="goal-plan" aria-label="Goal 计划">
+              {goal.plan.map((step, index) => (
+                <li key={index} data-status={step.status}>
+                  <span>
+                    {step.status === 'completed'
+                      ? '已完成'
+                      : step.status === 'in_progress'
+                        ? '进行中'
+                        : '待开始'}
+                  </span>{' '}
+                  {step.text}
+                </li>
+              ))}
+            </ol>
+          )}
+          {goal.summary && (
+            <div className="goal-summary">
+              <RichText text={goal.summary} />
+            </div>
           )}
           <p
             className="goal-usage"
-            title={`${goal.tokensUsed.toLocaleString()} tokens · ${cost === undefined ? '估算费用未知' : `按会话平均单价估算 $${cost.toFixed(4)}`}`}
+            title={`计费用量（含缓存）${goal.billedTokensUsed.toLocaleString()} tokens（${compactGoalTokens(goal.billedTokensUsed)}） · ${goal.legacyUsage ? '旧记录费用不完整' : `估算费用 $${goal.costUsed.toFixed(4)}`}`}
           >
-            已用 {compactGoalTokens(goal.tokensUsed)}{' '}
-            tokens（含每次请求重复发送的上下文与缓存，与底部累计口径一致）
+            Goal 用量 {compactGoalTokens(goal.tokensUsed)} tokens（不含缓存命中） · 用时 {elapsed}
           </p>
-          {goal.status === 'completed' && (
+          {goal.legacyUsage && <p className="muted">含旧版统计口径，用量可能偏大；旧版执行用时不可用。</p>}
+          <button disabled={locked} onClick={() => setEditing({ ...goal })}>
+            编辑目标
+          </button>
+          {goal.summary && (
             <button
               onClick={() => window.dispatchEvent(new CustomEvent('pi:goal-result', { detail: goal.id }))}
             >
@@ -218,6 +269,18 @@ export function GoalCard({
           submit={async (_objective, tokenBudget) => {
             await action({ action: 'budget', goalId: goal.id, tokenBudget });
             setBudgetDialog(false);
+          }}
+        />
+      )}
+      {editing && (
+        <GoalDialog
+          runtime={{ ...runtime, messages }}
+          editing
+          initialObjective={editing.objective}
+          close={() => setEditing(undefined)}
+          submit={async (objective) => {
+            await action({ action: 'edit', goalId: editing.id, revision: editing.revision, objective });
+            setEditing(undefined);
           }}
         />
       )}

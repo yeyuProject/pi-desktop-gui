@@ -172,7 +172,7 @@ export function Composer(props: ComposerProps) {
   } = props;
   const modelState = sessionModelState(runtime, selected, state.settings);
   const goal = ownRuntime ? runtime.goal : null;
-  const goalView = useGoalCard(goal, selected?.id, props.expanded, props.toggleTool);
+  const goalView = useGoalCard(goal, selected?.id, props.expanded, props.toggleTool, runtime.goalOpenRequest);
   const connecting = ownRunning && !runtime.connected;
   const [goalRequestSession, setGoalRequestSession] = useState<string>();
   const goalOpening = Boolean(selected && goalRequestSession === selected.id);
@@ -318,6 +318,7 @@ export function Composer(props: ComposerProps) {
           view={goalView}
           disabled={pending || selectionChanging || !storage.writable}
           action={(action) => api.invoke('goalAction', selected!.id, action)}
+          openProviders={() => setFeatureTab('providers')}
         />
       )}
       <div

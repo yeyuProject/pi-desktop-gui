@@ -48,7 +48,13 @@ test('external read-only hints cannot bypass confirmation or read-only restricti
 
 test('only the two built-in Goal state tools bypass workspace approval', async () => {
   for (const mode of ['confirm', 'readonly'] as const) {
-    for (const tool of ['desktop_goal_complete', 'desktop_goal_blocked'])
+    for (const tool of [
+      'desktop_goal_get',
+      'desktop_goal_update',
+      'desktop_goal_plan',
+      'desktop_goal_complete',
+      'desktop_goal_blocked',
+    ])
       assert.equal(decide(mode, tool), 'allow', tool);
     const unknown = 'desktop_goal_execute';
     assert.equal(decide(mode, unknown), mode === 'confirm' ? 'ask' : 'deny');
