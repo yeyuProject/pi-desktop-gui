@@ -85,7 +85,7 @@ export function SelectionMenu({
         !tool &&
         (!message ||
           message.timestamp === undefined ||
-          !turn ||
+          (!turn && !shell) ||
           !['user', 'assistant', 'toolResult', 'bashExecution'].includes(message.role))
       )
         return;
@@ -108,7 +108,7 @@ export function SelectionMenu({
           id: crypto.randomUUID(),
           text,
           role: tool || shell ? 'toolResult' : (message.role as DraftQuote['role']),
-          turn: tool ? Number(wrapper.dataset.quoteTurn) : turn!.turn,
+          turn: tool ? Number(wrapper.dataset.quoteTurn) : (turn?.turn ?? 0),
           messageTimestamp: tool ? Number(wrapper.dataset.quoteTimestamp) : message.timestamp!,
           ...(tool ? { toolCallId: wrapper.dataset.quoteToolId } : {}),
           section,
