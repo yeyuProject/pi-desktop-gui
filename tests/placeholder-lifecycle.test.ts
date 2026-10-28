@@ -289,6 +289,36 @@ for (const [label, payload] of [
     assert.equal(f.store.persistentState().sessions[0].id, blank.id);
   });
 
+test('saving an over-capacity draft preserves pastes and quotes so the user can reduce it before sending', async (t) => {
+  const f = await fixture(t);
+  const session = f.store.createSession();
+  const snippets = [
+    { id: 'first', text: 'x'.repeat(550 * 1024), offset: 0 },
+    { id: 'second', text: 'y'.repeat(600 * 1024), offset: 0 },
+  ];
+  const quote = {
+    id: 'quote',
+    role: 'assistant' as const,
+    turn: 1,
+    messageTimestamp: 1,
+    section: 'text' as const,
+    text: 'Referenced passage',
+  };
+  for (const quotes of [[], [quote]]) {
+    assert.ok(Buffer.byteLength(composeQuotedInput(composeDraftText('', snippets), quotes)) > 1024 * 1024);
+    await f.handlers.saveDraft(session.id, '', [], [], snippets, quotes);
+    const restarted = new Store(f.store.dir);
+    await restarted.load();
+    assert.deepEqual(restarted.session(session.id).draftSnippets, snippets);
+    assert.deepEqual(restarted.session(session.id).draftQuotes, quotes);
+  }
+  await assert.rejects(
+    f.handlers.saveDraft(session.id, '', [], [], snippets, [{ ...quote, text: 'x'.repeat(8001) }]),
+    /引用内容无效/,
+  );
+  assert.deepEqual(f.store.session(session.id).draftQuotes, [quote]);
+});
+
 test('common numbered snapshots hide unused IDs without changing stale ordering or live identity', async (t) => {
   const f = await fixture(t);
   const blank = await f.newSession();
