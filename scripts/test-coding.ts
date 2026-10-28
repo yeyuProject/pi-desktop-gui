@@ -17,6 +17,16 @@ await fs.writeFile(
 const workspace = new Workspace(f.dataDir);
 const s = new AgentService(f.store, workspace);
 const project = f.store.project(f.projectId);
+await fs.writeFile(
+  path.join(f.agentDir, 'extensions', 'settings-tool.js'),
+  `export default function (pi) {
+    pi.registerTool({
+      name: 'settings_fixture', label: 'Settings fixture', description: 'Verify extension tool preservation',
+      parameters: { type: 'object', properties: {} },
+      execute: async () => ({ content: [{ type: 'text', text: 'OK' }], details: {} }),
+    });
+  }`,
+);
 async function until(fn: () => boolean) {
   const start = Date.now();
   while (!fn()) {
@@ -106,6 +116,38 @@ try {
   assert.equal(saved.retry.maxRetries, 5);
   assert.equal(saved.defaultModel, 'local-e2e', 'unrelated settings preserved');
   console.log('PASS settings form writes only edited keys');
+
+  const builtins = ['read', 'bash', 'powershell', 'edit', 'write', 'grep', 'find', 'ls'];
+  const assertTools = async (expected: string[]) => {
+    const resources = await s.admin(f.sessionId, 'resources');
+    assert.deepEqual(
+      resources.activeTools.filter((name: string) => builtins.includes(name)),
+      expected,
+    );
+    assert.ok(resources.activeTools.includes('settings_fixture'), 'extension tools remain active');
+  };
+  for (const tools of [['grep'], []]) {
+    const document = await config.read(f.sessionId, 'settings', false);
+    await config.save(f.sessionId, 'settings', false, {
+      ...document,
+      text: JSON.stringify({ ...JSON.parse(document.text), defaultTools: tools }),
+    });
+    await s.scheduleReload();
+    await assertTools(tools);
+  }
+  await s.disconnect();
+  await s.connect(f.sessionId);
+  await assertTools([]);
+  const projectDocument = await config.read(f.sessionId, 'settings', true);
+  await config.save(f.sessionId, 'settings', true, {
+    ...projectDocument,
+    text: JSON.stringify({ ...JSON.parse(projectDocument.text), defaultTools: ['grep'] }),
+  });
+  await s.scheduleReload();
+  await assertTools(['grep']);
+  console.log(
+    'PASS saved tool settings override recorded history on reload/reconnect while preserving extension tools',
+  );
 } finally {
   await s.dispose().catch(() => {});
   await provider.close();

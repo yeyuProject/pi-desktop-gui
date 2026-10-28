@@ -1275,6 +1275,7 @@ export class AgentService extends EventEmitter {
     this.runtime.model = displayModel(state.model);
     this.runtime.thinking = state.thinkingLevel;
     const [messages] = await Promise.all([rpc.request('get_messages'), this.refreshCapabilities()]);
+    await rpc.bridge('apply_tool_settings');
     const transcript = await this.readTranscript(session.file, messages.messages);
     assertActive();
     this.runtime.messages = transcript;

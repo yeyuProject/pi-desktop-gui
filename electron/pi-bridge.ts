@@ -217,6 +217,21 @@ export default function desktopBridge(pi: ExtensionAPI) {
               approvalGrants,
             };
             break;
+          case 'apply_tool_settings': {
+            const settings = SettingsManager.create(ctx.cwd, getAgentDir(), {
+              projectTrusted: ctx.isProjectTrusted(),
+            });
+            const builtins = new Set(['read', 'bash', 'powershell', 'edit', 'write', 'grep', 'find', 'ls']);
+            const configured = settings.getDefaultTools() ?? ['read', 'bash', 'edit', 'write'];
+            // Pi restores tool choices from history. The desktop's tool checkboxes
+            // must take effect after reconnecting, without changing extension tools.
+            pi.setActiveTools([
+              ...pi.getActiveTools().filter((name) => !builtins.has(name)),
+              ...configured.filter((name) => builtins.has(name)),
+            ]);
+            data = { activeTools: pi.getActiveTools() };
+            break;
+          }
           case 'approval_mode':
             if (!['auto', 'confirm', 'readonly'].includes(p.mode)) throw new Error('审批模式无效');
             approvalMode = p.mode;
