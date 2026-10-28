@@ -185,10 +185,6 @@ export function UserMessage({
     promptId = `prompt:${viewId}`;
   const skillOpen = expanded.includes(skillId) || match?.section === 'skill';
   const promptOpen = expanded.includes(promptId) || match?.section === 'text';
-  useEffect(() => {
-    if (skill && match?.section === 'skill' && !expanded.includes(skillId)) toggle(skillId, true);
-    if (long && match?.section === 'text' && !expanded.includes(promptId)) toggle(promptId, true);
-  }, [match, skill, long, expanded, skillId, promptId, toggle]);
   return (
     <>
       {skill && (
@@ -220,7 +216,11 @@ export function UserMessage({
         <QuoteCard
           key={quote.id}
           quote={quote}
-          available={quoteSources?.has(`${quote.role}:${quote.messageTimestamp}`) ?? false}
+          available={
+            quoteSources?.has(
+              quote.toolCallId ? `tool:${quote.toolCallId}` : `${quote.role}:${quote.messageTimestamp}`,
+            ) ?? false
+          }
           match={match?.section === 'quote' && match.blockIndex === index ? match : undefined}
         />
       ))}
@@ -274,7 +274,18 @@ export function QuoteCard({
   match?: SessionMatch;
 }) {
   const [expanded, setExpanded] = useState(false);
-  const long = quote.text.split(/\r?\n/).length > 4;
+  const content = useRef<HTMLPreElement>(null);
+  const [long, setLong] = useState(false);
+  useEffect(() => {
+    const element = content.current;
+    if (!element) return;
+    const measure = () =>
+      setLong(element.scrollHeight > parseFloat(getComputedStyle(element).lineHeight) * 4 + 1);
+    measure();
+    const observer = new ResizeObserver(measure);
+    observer.observe(element);
+    return () => observer.disconnect();
+  }, [quote.text]);
   const open = expanded || Boolean(match);
   return (
     <div className="message-quote" data-search-section="quote">
@@ -287,7 +298,7 @@ export function QuoteCard({
         ❝ {quoteLabel(quote)}
         {quote.truncated ? '（已截断）' : ''}
       </button>
-      <pre className={long && !open ? 'quote-text collapsed' : 'quote-text'}>
+      <pre ref={content} className={long && !open ? 'quote-text collapsed' : 'quote-text'}>
         <SearchHighlight text={quote.text} query={match?.query} activeStart={match?.start} />
       </pre>
       {long && (

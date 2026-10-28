@@ -3,8 +3,9 @@ import { createReadStream } from 'node:fs';
 import { setImmediate as yieldToEvents } from 'node:timers/promises';
 import type { Message } from '../shared/types';
 import { sessionUsage } from './pi/session-usage';
+import { DESKTOP_GOAL_ENTRY_TYPE, readGoalView } from './goal-state';
 
-type Entry = { id: string; parentId?: string; offset: number; length: number; type: string };
+type Entry = { id: string; parentId?: string; offset: number; length: number; type: string; goal: boolean };
 /** Index offsets without retaining message bodies, then load a bounded preview of the active branch. */
 export async function readLargeTranscript(file: string) {
   const byId = new Map<string, Entry>();
@@ -32,7 +33,14 @@ export async function readLargeTranscript(file: string) {
     tokens = tokens === undefined || usage.tokens === undefined ? undefined : tokens + usage.tokens;
     cost = cost === undefined || usage.cost === undefined ? undefined : cost + usage.cost;
     if (typeof row.id === 'string' && row.type !== 'session') {
-      last = { id: row.id, parentId: row.parentId, type: row.type, offset: start, length: bytes.length };
+      last = {
+        id: row.id,
+        parentId: row.parentId,
+        type: row.type,
+        offset: start,
+        length: bytes.length,
+        goal: row.type === 'custom' && row.customType === DESKTOP_GOAL_ENTRY_TYPE,
+      };
       byId.set(row.id, last);
     }
     if (performance.now() - yielded > 4) {
@@ -63,19 +71,27 @@ export async function readLargeTranscript(file: string) {
     seen = new Set<string>();
   let bytes = 0,
     limited = false;
+  let goalEntry: Entry | undefined;
   while (last && !seen.has(last.id)) {
     seen.add(last.id);
-    if (['message', 'custom_message', 'branch_summary'].includes(last.type)) {
+    if (!goalEntry && last.goal) goalEntry = last;
+    if (!limited && ['message', 'custom_message', 'branch_summary'].includes(last.type)) {
       if (bytes + last.length > 16 * 1024 * 1024) {
         limited = true;
-        break;
+      } else {
+        bytes += last.length;
+        branch.push(last);
       }
-      bytes += last.length;
-      branch.push(last);
     }
     last = last.parentId ? byId.get(last.parentId) : undefined;
+    if (performance.now() - yielded > 4) {
+      await yieldToEvents();
+      yielded = performance.now();
+    }
   }
   const messages: Message[] = [];
+  let goalView: ReturnType<typeof readGoalView> = {};
+  if (goalEntry) branch.push(goalEntry);
   const handle = await fs.open(file, 'r');
   try {
     for (const entry of branch.reverse()) {
@@ -88,6 +104,7 @@ export async function readLargeTranscript(file: string) {
       }
       const row = JSON.parse(buffer.toString('utf8'));
       if (row.id !== entry.id) throw new Error('会话文件在读取时发生变化，请重新打开');
+      if (entry.goal) goalView = readGoalView([row]);
       if (row.type === 'message' && row.message) messages.push(row.message);
       else if (row.type === 'custom_message')
         messages.push({
@@ -116,8 +133,11 @@ export async function readLargeTranscript(file: string) {
     name,
     messages,
     stats: { tokens, cost },
-    warning: limited
-      ? '此会话较大，仅显示当前分支最近的内容（最多 16 MiB）。完整历史仍保留，可导出或在 Pi 终端查看。'
-      : '此会话较大，已按当前分支读取。完整历史仍保留。',
+    ...goalView,
+    warning:
+      (limited
+        ? '此会话较大，仅显示当前分支最近的内容（最多 16 MiB）。完整历史仍保留，可导出或在 Pi 终端查看。'
+        : '此会话较大，已按当前分支读取。完整历史仍保留。') +
+      (goalView.warning ? '\n' + goalView.warning : ''),
   };
 }

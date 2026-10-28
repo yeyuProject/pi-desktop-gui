@@ -167,6 +167,7 @@ export default function desktopBridge(pi: ExtensionAPI) {
     }
     return m;
   }
+  const goal = registerDesktopGoal(pi);
   pi.registerCommand(DESKTOP_BRIDGE_COMMAND, {
     description: 'Pi Desktop internal bridge',
     handler: async (encoded, ctx) => {
@@ -179,6 +180,9 @@ export default function desktopBridge(pi: ExtensionAPI) {
         const p = request.params ?? {};
         let data: unknown;
         switch (request.method) {
+          case 'goal_action':
+            data = await goal.action(p, ctx);
+            break;
           case 'side_chat': {
             if (sideChat) throw new Error('侧边对话正在回答，请先等待或停止');
             const controller = new AbortController();
@@ -448,5 +452,4 @@ export default function desktopBridge(pi: ExtensionAPI) {
       }
     },
   });
-  registerDesktopGoal(pi);
 }

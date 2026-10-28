@@ -13,11 +13,17 @@ export class SideChats {
   async read(sessionId: string): Promise<SideChat> {
     await this.writes.get(sessionId);
     let messages: SideChatMessage[] = [];
+    let omittedTurns = 0;
     try {
       const data: unknown = JSON.parse(await fs.readFile(this.file(sessionId), 'utf8'));
+      // v0.14.52 stored only an array. Read it once and save metadata on the next write.
+      const record = Array.isArray(data) ? { messages: data, omittedTurns: 0 } : (data as SideChat);
       if (
-        !Array.isArray(data) ||
-        data.some(
+        !record ||
+        !Number.isSafeInteger(record.omittedTurns) ||
+        record.omittedTurns < 0 ||
+        !Array.isArray(record.messages) ||
+        record.messages.some(
           (m) =>
             !m ||
             !['user', 'assistant'].includes(m.role) ||
@@ -27,15 +33,16 @@ export class SideChats {
         )
       )
         throw new Error('侧边对话记录损坏，请备份数据目录后清空这段侧边对话');
-      messages = data.slice(-100);
+      messages = record.messages.slice(-100);
+      omittedTurns = record.omittedTurns;
     } catch (error) {
       if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error;
     }
-    return { sessionId, messages, omittedTurns: 0 };
+    return { sessionId, messages, omittedTurns };
   }
   save(chat: SideChat) {
     const file = this.file(chat.sessionId);
-    const snapshot = JSON.stringify(chat.messages.slice(-100));
+    const snapshot = JSON.stringify({ messages: chat.messages.slice(-100), omittedTurns: chat.omittedTurns });
     const write = (this.writes.get(chat.sessionId) ?? Promise.resolve())
       .catch(() => {})
       .then(async () => {

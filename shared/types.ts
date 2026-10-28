@@ -12,6 +12,7 @@ import type { ModelErrorKind } from './errors';
 import type { DraftSnippet } from './draft';
 import type { DraftQuote } from './message-content';
 import type { SideChat, SideChatRequest } from './side-chat';
+import type { GoalAction, GoalSnapshot } from './goal';
 export type { DraftQuote } from './message-content';
 import type { NestedToolCalls } from '@earendil-works/pi-ai';
 export type { DraftSnippet } from './draft';
@@ -232,6 +233,7 @@ export interface ProviderInfo {
   apiKey: boolean;
 }
 export interface Runtime {
+  goal?: GoalSnapshot | null;
   sessionId?: string;
   status: RunStatus;
   messages: Message[];
@@ -485,6 +487,7 @@ export interface ApiMap {
   testConnection: { args: [string]; result: { elapsed: number; text: string } };
   send: { args: [string, string, string[], SendMode, ImageAttachment[]?]; result: void };
   openGoal: { args: [sessionId: string]; result: void };
+  goalAction: { args: [sessionId: string, action: GoalAction]; result: void };
   pickImages: { args: []; result: ImageAttachment[] };
   projectImage: { args: [string, string]; result: ImageAttachment | null };
   sessionTree: { args: [string]; result: TreeEntry[] };
@@ -565,6 +568,7 @@ export interface DesktopApi {
 export const busy = (status: string) =>
   ['starting', 'running', 'waiting', 'retrying', 'compacting', 'stopping'].includes(status);
 export const emptyRuntime = (): Runtime => ({
+  goal: null,
   status: 'idle',
   messages: [],
   tools: [],

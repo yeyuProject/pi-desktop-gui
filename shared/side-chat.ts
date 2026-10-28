@@ -1,5 +1,5 @@
 import { messageText, type Message } from './types';
-import { parseUserMessage, type DraftQuote } from './message-content';
+import { formatMessageQuotes, parseUserMessage, type DraftQuote } from './message-content';
 import type { ModelErrorDescription } from './errors';
 
 export interface SideChatMessage {
@@ -34,27 +34,45 @@ export interface SideChatResult {
   usage: { tokens: number; cost: number };
 }
 
-/** Conservative text estimate; leave at least half the window for the side conversation. */
+export function sideChatPrompt(request: Pick<SideChatRequest, 'prompt' | 'quotes'>) {
+  return [formatMessageQuotes(request.quotes), request.prompt].filter(Boolean).join('\n\n');
+}
+
+/** CJK text needs about one token per character; other text uses four characters per token. */
+export function estimateSideChatTokens(text: string) {
+  let characters = 0,
+    cjk = 0;
+  const pattern = /[\p{Script=Han}\p{Script=Hiragana}\p{Script=Katakana}\p{Script=Hangul}]/u;
+  for (const char of text) {
+    characters++;
+    if (pattern.test(char)) cjk++;
+  }
+  return cjk + Math.ceil((characters - cjk) / 4);
+}
+
+/** The main excerpt, side history and new question share half the model's window. */
 export function sideChatContext(
   messages: Message[],
   request: Pick<SideChatRequest, 'scope' | 'replyTimestamp'>,
   contextWindow: number | undefined,
   running: boolean,
+  sideMessages: SideChatInput[] = [],
 ) {
-  if (request.scope === 'quotes') return { messages: [] as SideChatInput[], omittedTurns: 0 };
   if (request.scope === 'reply' && !Number.isFinite(request.replyTimestamp))
     throw new Error('请从主会话中的一条回复打开“到此条回复”');
-  if (!contextWindow || !Number.isFinite(contextWindow) || contextWindow <= 0)
-    throw new Error('当前模型没有提供上下文窗口大小，请改选“仅引用内容”或完善模型配置');
+  const window =
+    contextWindow && Number.isFinite(contextWindow) && contextWindow > 0 ? contextWindow : 128000;
   const end =
-    request.scope === 'reply'
-      ? messages.findIndex((m) => m.role === 'assistant' && m.timestamp === request.replyTimestamp)
-      : messages.findLastIndex(
-          (m) =>
-            m.role === 'assistant' &&
-            (['stop', 'length', 'error', 'aborted'].includes(m.stopReason ?? '') ||
-              (!running && m.stopReason !== 'toolUse')),
-        );
+    request.scope === 'quotes'
+      ? -1
+      : request.scope === 'reply'
+        ? messages.findIndex((m) => m.role === 'assistant' && m.timestamp === request.replyTimestamp)
+        : messages.findLastIndex(
+            (m) =>
+              m.role === 'assistant' &&
+              (['stop', 'length', 'error', 'aborted'].includes(m.stopReason ?? '') ||
+                (!running && m.stopReason !== 'toolUse')),
+          );
   if (end < 0 && request.scope === 'reply') throw new Error('这条回复已不在当前分支，请重新选择上下文范围');
   const turns: SideChatInput[][] = [];
   const calls = new Map<string, { name: string; path?: string }>();
@@ -88,14 +106,21 @@ export function sideChatContext(
     }
   }
   const size = (turn: SideChatInput[]) =>
-    turn.reduce((sum, m) => sum + Math.ceil(m.content.length / 3) + 8, 0);
-  let tokens = turns.reduce((sum, turn) => sum + size(turn), 0),
+    turn.reduce((sum, m) => sum + estimateSideChatTokens(m.content) + 8, 0);
+  const history = sideMessages.slice();
+  let tokens = turns.reduce((sum, turn) => sum + size(turn), size(history)),
     omittedTurns = 0;
-  while (turns.length && tokens > contextWindow * 0.5) {
+  while (turns.length && tokens > window * 0.5) {
     tokens -= size(turns.shift()!);
     omittedTurns++;
   }
-  return { messages: turns.flat(), omittedTurns };
+  // Keep the new question intact, dropping old side exchanges when the excerpt is already empty.
+  while (history.length > 1 && tokens > window * 0.5) {
+    tokens -= size([history.shift()!]);
+    while (history.length > 1 && history[0].role !== 'user') tokens -= size([history.shift()!]);
+  }
+  if (tokens > window * 0.5) throw new Error('侧边问题与引用超过模型上下文的一半，请缩短内容后重新发送');
+  return { messages: [...turns.flat(), ...history], omittedTurns };
 }
 
 export function validateSideChatInput(

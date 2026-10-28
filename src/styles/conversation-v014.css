@@ -335,7 +335,6 @@ mark,
   white-space: nowrap;
 }
 .turn-outline {
-  --warning: var(--signal);
   position: absolute;
   top: 64px;
   right: 3px;
@@ -442,10 +441,9 @@ mark,
   color: var(--accent);
 }
 .turn-number {
-  width: 3ch;
+  width: var(--turn-number-width);
   flex-shrink: 0;
   font-variant-numeric: tabular-nums;
-  overflow: hidden;
 }
 .turn-title {
   display: flex;

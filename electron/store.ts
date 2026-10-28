@@ -21,6 +21,8 @@ import { sessionUsage } from './pi/session-usage';
 import type { SessionUsage } from '../shared/usage';
 import { isReusableSession } from './session-lifecycle';
 import { readLargeTranscript } from './large-transcript';
+import { readGoalView } from './goal-state';
+import type { GoalSnapshot } from '../shared/goal';
 export { defaultSettings } from './store-state';
 
 const BACKUP_INTERVAL = 10 * 60 * 1000;
@@ -608,7 +610,14 @@ export class Store extends EventEmitter {
   }
 }
 
-type Transcript = { cwd: string; name?: string; messages: Message[]; stats: SessionUsage; warning?: string };
+type Transcript = {
+  cwd: string;
+  name?: string;
+  messages: Message[];
+  stats: SessionUsage;
+  warning?: string;
+  goal?: GoalSnapshot;
+};
 const transcriptCache = new Map<string, { stamp: string; bytes: number; value: Transcript }>();
 const transcriptReads = new Map<string, Promise<Transcript>>();
 const transcriptBudget = 32 * 1024 * 1024;
@@ -654,9 +663,7 @@ export async function readSessionFile(file: string): Promise<Transcript> {
   // Agents mutate live replies; no reader may mutate the shared cache/in-flight result.
   return structuredClone(await pending);
 }
-async function readSessionFileUncached(
-  file: string,
-): Promise<{ cwd: string; name?: string; messages: Message[]; stats: SessionUsage }> {
+async function readSessionFileUncached(file: string): Promise<Transcript> {
   const stat = await fs.stat(file);
   if (stat.size > 64 * 1024 * 1024) return readLargeTranscript(file);
   const raw = await fs.readFile(file, 'utf8');
@@ -689,6 +696,7 @@ async function readSessionFileUncached(
   branch.reverse();
   return {
     cwd: header.cwd,
+    ...readGoalView(branch),
     name: entries.findLast((e) => e.type === 'session_info')?.name,
     messages: branch.flatMap((e): Message[] => {
       if (e.type === 'message' && e.message) return [e.message];

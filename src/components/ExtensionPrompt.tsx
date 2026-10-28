@@ -1,15 +1,19 @@
 import { useEffect, useState } from 'react';
-import { type ExtensionDialog } from '../../shared/types';
+import { type ExtensionDialog, type Runtime } from '../../shared/types';
 import { Modal } from './Modal';
+import { GoalDialog } from './GoalDialog';
+import { GOAL_DIALOG_TITLE } from '../../shared/goal';
 
 export function ExtensionPrompt({
   request,
   remaining,
   respond,
+  runtime,
 }: {
   request: ExtensionDialog;
   remaining: number;
-  respond: (values: { value?: string; confirmed?: boolean; cancelled?: boolean }) => void;
+  runtime: Runtime;
+  respond: (values: { value?: string; confirmed?: boolean; cancelled?: boolean }) => void | Promise<void>;
 }) {
   const [value, setValue] = useState(request.prefill ?? request.options?.[0] ?? '');
   const [now, setNow] = useState(Date.now());
@@ -19,6 +23,16 @@ export function ExtensionPrompt({
     return () => clearInterval(timer);
   }, [request.expiresAt]);
   const left = request.expiresAt ? Math.max(0, Math.ceil((request.expiresAt - now) / 1000)) : undefined;
+  if (request.title === GOAL_DIALOG_TITLE)
+    return (
+      <GoalDialog
+        runtime={runtime}
+        close={() => void respond({ cancelled: true })}
+        submit={async (objective, tokenBudget) => {
+          await respond({ value: JSON.stringify({ action: 'start', objective, tokenBudget }) });
+        }}
+      />
+    );
   return (
     <Modal
       title={request.title || 'Pi 需要你的输入'}

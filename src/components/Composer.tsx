@@ -29,6 +29,7 @@ const api = window.desktop;
 import type { Workbench } from '../hooks/useWorkbench';
 import type { AppState } from '../../shared/types';
 import { quoteLabel } from '../../shared/message-content';
+import { GoalCard, useGoalCard } from './conversation/GoalCard';
 
 export type ComposerProps = Pick<
   Workbench,
@@ -36,6 +37,9 @@ export type ComposerProps = Pick<
   | 'storage'
   | 'environment'
   | 'runtime'
+  | 'messages'
+  | 'expanded'
+  | 'toggleTool'
   | 'error'
   | 'setError'
   | 'setNotice'
@@ -167,15 +171,21 @@ export function Composer(props: ComposerProps) {
     inspectFile,
   } = props;
   const modelState = sessionModelState(runtime, selected, state.settings);
+  const goal = ownRuntime ? runtime.goal : null;
+  const goalView = useGoalCard(goal, selected?.id, props.expanded, props.toggleTool);
   const connecting = ownRunning && !runtime.connected;
   const [goalRequestSession, setGoalRequestSession] = useState<string>();
   const goalOpening = Boolean(selected && goalRequestSession === selected.id);
   const openGoal = async () => {
     const id = selected?.id;
     if (!id || goalOpening || selectionChanging || pending || !sessionEnabled || !storage.writable) return;
+    if (goal) {
+      goalView.reveal();
+      return;
+    }
     setGoalRequestSession(id);
     try {
-      // Use the bundled extension's native dialogs; do not send or replace the composer draft.
+      // The bundled extension opens the Goal form without changing the composer draft.
       await attempt(() => api.invoke('openGoal', id), id);
     } finally {
       setGoalRequestSession((current) => (current === id ? undefined : current));
@@ -299,6 +309,17 @@ export function Composer(props: ComposerProps) {
   return (
     <div className="composer-wrap">
       <ComposerFeedback {...props} handleModelError={handleModelError} />
+      {goal && goalView.visible && (
+        <GoalCard
+          key={`${selected?.id}:${goal.id}`}
+          goal={goal}
+          runtime={runtime}
+          messages={props.messages}
+          view={goalView}
+          disabled={pending || selectionChanging || !storage.writable}
+          action={(action) => api.invoke('goalAction', selected!.id, action)}
+        />
+      )}
       <div
         className={'composer ' + (!selected ? 'disabled' : '') + (dragging ? ' dragging' : '')}
         onDragOver={(e) => {
@@ -615,6 +636,7 @@ export function Composer(props: ComposerProps) {
             >
               {goalOpening ? <LoaderCircle size={14} className="spin" /> : <Target size={14} />}
               Goal
+              {goal?.status === 'completed' && <i className="goal-completed-dot" aria-label="Goal 已完成" />}
             </button>
             <ApprovalSwitch
               grants={ownRuntime ? runtime.approvalGrants : []}

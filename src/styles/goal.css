@@ -1,0 +1,127 @@
+.goal-card {
+  margin: 0 0 6px;
+  border: 1px solid var(--line);
+  border-radius: 7px;
+  background: var(--surface);
+  min-width: 0;
+}
+.goal-bar {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  height: 34px;
+  padding: 0 7px;
+  font-size: 11px;
+  min-width: 0;
+}
+.goal-bar strong {
+  white-space: nowrap;
+}
+.goal-icon {
+  flex-shrink: 0;
+  color: var(--warning);
+}
+.goal-card.paused .goal-icon {
+  color: var(--muted);
+}
+.goal-card.blocked .goal-icon {
+  color: var(--danger);
+}
+.goal-card.completed .goal-icon {
+  color: var(--accent);
+}
+.goal-objective {
+  flex: 1;
+  min-width: 20px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.goal-progress,
+.goal-budget {
+  flex-shrink: 0;
+  white-space: nowrap;
+  color: var(--muted);
+  font-variant-numeric: tabular-nums;
+}
+.goal-budget {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+}
+.goal-budget progress {
+  width: 45px;
+  height: 4px;
+  accent-color: var(--warning);
+}
+.goal-bar button,
+.goal-details button {
+  border: 0;
+  padding: 2px 4px;
+  min-height: 24px;
+  background: transparent;
+  font-size: 11px;
+  white-space: nowrap;
+}
+.goal-bar button {
+  display: flex;
+  align-items: center;
+}
+.goal-reason {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  max-width: 30%;
+  color: var(--muted);
+}
+.goal-details {
+  max-height: 40vh;
+  overflow: auto;
+  padding: 8px 12px;
+  border-top: 1px solid var(--line);
+  font-size: 12px;
+}
+.goal-full-objective {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  margin-top: 0;
+}
+.goal-evidence.clipped {
+  max-height: 6lh;
+  overflow: hidden;
+}
+.goal-usage {
+  color: var(--muted);
+  font-size: 11px;
+}
+.goal-dialog label {
+  display: grid;
+  gap: 5px;
+  margin: 6px 0;
+}
+.goal-dialog details {
+  margin-top: 12px;
+}
+.goal-dialog summary {
+  cursor: pointer;
+}
+.goal-dialog p {
+  font-size: 12px;
+}
+.goal-completed-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--accent);
+}
+@media (max-width: 899px) {
+  .goal-budget progress {
+    display: none;
+  }
+  .goal-bar {
+    gap: 4px;
+  }
+  .goal-reason {
+    display: none;
+  }
+}

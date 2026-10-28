@@ -1,7 +1,13 @@
-import { useEffect, useState } from 'react';
-import type { Runtime, Session, StorageStatus } from '../../shared/types';
+import { useEffect, useMemo, useState } from 'react';
+import { busy, type Runtime, type Session, type StorageStatus } from '../../shared/types';
 import { mergeDraftQuotes, truncateQuote, type DraftQuote } from '../../shared/message-content';
-import type { SideChat, SideChatMessage, SideChatRequest } from '../../shared/side-chat';
+import {
+  sideChatContext,
+  sideChatPrompt,
+  type SideChat,
+  type SideChatMessage,
+  type SideChatRequest,
+} from '../../shared/side-chat';
 import { readableError } from '../lib/format';
 const api = window.desktop;
 
@@ -20,6 +26,17 @@ export function useSideChat(
     [sending, setSending] = useState<string>();
   const id = selected?.id;
   const draft = id ? (drafts[id] ?? blank()) : blank();
+  const preview = useMemo(() => {
+    if (!id || !drafts[id] || chat?.running) return { omittedTurns: chat?.omittedTurns ?? 0 };
+    try {
+      return sideChatContext(runtime.messages, draft, runtime.model?.contextWindow, busy(runtime.status), [
+        ...(chat?.messages ?? []).map(({ role, content }) => ({ role, content })),
+        { role: 'user', content: sideChatPrompt({ prompt: draft.text, quotes: draft.quotes }) },
+      ]);
+    } catch (error) {
+      return { omittedTurns: 0, error: readableError(error) };
+    }
+  }, [id, drafts, draft, chat, runtime.messages, runtime.model, runtime.status]);
   const updateDraft = (update: Partial<Draft>) => {
     if (id) setDrafts((before) => ({ ...before, [id]: { ...(before[id] ?? blank()), ...update } }));
   };
@@ -135,7 +152,8 @@ export function useSideChat(
     chat,
     draft,
     updateDraft,
-    error,
+    error: error || ('error' in preview ? preview.error : ''),
+    omittedTurns: preview.omittedTurns,
     sending: sending === id,
     disabledReason,
     send,
