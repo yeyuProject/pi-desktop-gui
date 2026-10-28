@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs/promises';
 import path from 'node:path';
 import { createLocalProvider, prepareRealPiFixture } from '../tests/support/local-provider.ts';
+import { verifyTurnOutlineUI } from '../tests/support/turn-outline-ui.mjs';
 
 const provider = await createLocalProvider({ holdSlowResponses: true });
 const fixture = await prepareRealPiFixture(provider.baseUrl, 'chat-ui');
@@ -538,6 +539,13 @@ try {
   console.log(
     'PASS a new chat initializes independently while the existing response keeps running; stop targets only that response',
   );
+  const requestsBeforeOutline = provider.requests.length;
+  const outline = await verifyTurnOutlineUI({ app, page, output });
+  assert.equal(
+    provider.requests.length,
+    requestsBeforeOutline,
+    'outline checks must not send a model request',
+  );
   assert.deepEqual(errors, []);
   await fs.writeFile(
     path.join(output, 'chat-ui-result.json'),
@@ -569,6 +577,7 @@ try {
           'project trust retained',
         ],
         consoleErrors: errors,
+        outline,
       },
       null,
       2,

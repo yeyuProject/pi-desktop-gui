@@ -3,13 +3,121 @@ import assert from 'node:assert/strict';
 import { performance } from 'node:perf_hooks';
 import { parseAnsi, stripAnsi } from '../shared/ansi';
 import { composeDraftText, moveSnippetOffsets, shouldCollapsePaste, textBytes } from '../shared/draft';
-import { groupConversation, conversationTurns, hideRecoveredErrors } from '../src/lib/conversation-layout';
+import {
+  groupConversation,
+  conversationTurns,
+  hideRecoveredErrors,
+  turnTitle,
+} from '../src/lib/conversation-layout';
 import { SessionSearch } from '../src/lib/session-search';
 import { parseArgumentHint, parsePromptArguments, formatPromptArguments } from '../src/lib/prompt-arguments';
 import { tokenizeCode } from '../src/lib/code-tokens';
 import { splitUserContent } from '../src/lib/message-content';
 import type { Message, ToolActivity } from '../shared/types';
 import { parseCommandArgs } from '../node_modules/@earendil-works/pi-coding-agent/dist/core/prompt-templates.js';
+import { parseSkillBlock } from '../node_modules/@earendil-works/pi-coding-agent/dist/core/agent-session.js';
+
+test('turn titles remove native file attachments and show the user message from a native skill invocation', () => {
+  const skill = '<skill name="review" location="/fixture/SKILL.md">\nSkill instructions\n</skill>';
+  const userMessage = '# 检查接口\n\n> 保留字段\n- 修复测试\n  1. 补充说明';
+  const native = `${skill}\n\n${userMessage}`;
+  assert.equal(parseSkillBlock(native)?.userMessage, userMessage);
+  const message: Message = {
+    role: 'user',
+    content: `${native}\n\n<project_file path="src/api.ts" lines="1-4">\nignored source\n</project_file>`,
+  };
+  assert.deepEqual(turnTitle(message), {
+    title: '检查接口 保留字段 修复测试 补充说明',
+    tooltip: '检查接口 保留字段 修复测试 补充说明',
+    skillName: 'review',
+  });
+  assert.deepEqual(turnTitle({ role: 'user', content: skill }), {
+    title: '使用技能 review',
+    tooltip: '使用技能 review',
+    skillName: 'review',
+  });
+  assert.equal(
+    message.content,
+    `${native}\n\n<project_file path="src/api.ts" lines="1-4">\nignored source\n</project_file>`,
+  );
+});
+
+test('turn title skill recognition follows Pi parseSkillBlock instead of guessing alternate formats', () => {
+  const candidates = [
+    '<skill name="check" location="/skill.md">\nBody\n</skill>',
+    '<skill name="check" location="/skill.md">\nBody\n</skill>\n\nAdditional message',
+    "<skill name='check' location='/skill.md'>\nBody\n</skill>",
+    '<skill location="/skill.md" name="check">\nBody\n</skill>',
+    '<skill name="check" location="/skill.md">Body</skill>',
+    '<skill name="check" location="/skill.md">\r\nBody\r\n</skill>',
+  ];
+  for (const content of candidates) {
+    const native = parseSkillBlock(content);
+    assert.equal(turnTitle({ role: 'user', content }).skillName, native?.name);
+  }
+});
+
+test('turn titles normalize multiline Markdown and distinguish image-only and empty requests', () => {
+  assert.equal(
+    turnTitle({ role: 'user', content: '  ##  标题\r\n> - 内容\n\t* 第二项\n2) 结论\nC# 与 -name 参数' })
+      .title,
+    '标题 内容 第二项 结论 C# 与 -name 参数',
+  );
+  assert.equal(
+    turnTitle({ role: 'user', content: [{ type: 'image' }, { type: 'image' }] }).title,
+    '[图片 ×2]',
+  );
+  assert.equal(
+    turnTitle({ role: 'user', content: [{ type: 'text', text: '\n> \n# ' }] }).title,
+    '（无文字）',
+  );
+  assert.equal(turnTitle({ role: 'user', content: '' }).tooltip, '（无文字）');
+});
+
+test('turn titles keep 80 characters and a 200-character tooltip without splitting emoji', () => {
+  const content = '龙🐉'.repeat(150);
+  const title = turnTitle({ role: 'user', content });
+  assert.equal(Array.from(title.title).length, 80);
+  assert.equal(Array.from(title.tooltip).length, 200);
+  assert.equal(title.title, '龙🐉'.repeat(40));
+  assert.equal(title.tooltip, '龙🐉'.repeat(100));
+});
+
+test('turn title cache reuses historical messages and invalidates replaced content without changing turn indices', () => {
+  let reads = 0;
+  const message: Message = {
+    role: 'user',
+    content: [
+      {
+        type: 'text',
+        get text() {
+          reads++;
+          return '# first';
+        },
+      },
+    ],
+  };
+  const first = turnTitle(message);
+  const before = reads;
+  assert.equal(turnTitle(message), first);
+  const messages: Message[] = [
+    message,
+    { role: 'assistant', content: 'reply' },
+    { role: 'user', content: 'second' },
+  ];
+  const turns = conversationTurns(messages, () => tool('unused'));
+  assert.equal(reads, before, 're-rendering must not read and clean historical text again');
+  assert.deepEqual(
+    turns.map(({ turn, index }) => ({ turn, index })),
+    [
+      { turn: 1, index: 0 },
+      { turn: 2, index: 2 },
+    ],
+  );
+  message.content = '## replaced';
+  assert.notEqual(turnTitle(message), first);
+  assert.equal(turnTitle(message).title, 'replaced');
+});
 
 test('ANSI removes terminal commands, handles progress overwrite and retains only safe style tokens', () => {
   assert.deepEqual(parseAnsi('\x1b[1;32mPASS\x1b[0m'), [{ text: 'PASS', color: 'green', bold: true }]);

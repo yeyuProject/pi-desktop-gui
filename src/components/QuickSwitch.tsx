@@ -4,7 +4,7 @@ import { type AppState, type Session, type PiSessionInfo, type SessionMatch } fr
 import { shortcut } from '../lib/platform';
 import { relativeTime } from '../lib/format';
 import { Modal } from './Modal';
-import { workbenchShortcuts } from '../../shared/workbench-actions';
+import { workbenchKeyLabel, workbenchShortcuts } from '../../shared/workbench-actions';
 const api = window.desktop;
 
 export function QuickSwitch({
@@ -77,7 +77,10 @@ export function QuickSwitch({
             key: binding.action,
             icon: <ChevronRight size={15} />,
             title: binding.label,
-            meta: 'mod' in binding ? shortcut(binding.key.toUpperCase()) : `Alt+${binding.key}`,
+            meta:
+              'mod' in binding
+                ? shortcut(workbenchKeyLabel(binding.key))
+                : `Alt+${workbenchKeyLabel(binding.key)}`,
             run: () => {
               close();
               setTimeout(

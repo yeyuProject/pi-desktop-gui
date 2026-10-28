@@ -2,6 +2,8 @@ export const workbenchShortcuts = [
   { action: 'new', key: 'n', mod: true, label: '新建独立对话' },
   { action: 'search', key: 'k', mod: true, label: '搜索会话与操作' },
   { action: 'find', key: 'f', mod: true, label: '查找当前会话' },
+  { action: 'previousTurn', key: 'arrowup', alt: true, label: '跳到上一轮提问（文本输入框为空时）' },
+  { action: 'nextTurn', key: 'arrowdown', alt: true, label: '跳到下一轮提问（文本输入框为空时）' },
   { action: 'sidebar', key: 'b', mod: true, label: '收起或展开侧栏' },
   { action: 'inspector', key: 'j', mod: true, label: '收起或展开工作区面板' },
   { action: 'changes', key: '1', alt: true, label: '查看工作区变更' },
@@ -12,3 +14,5 @@ export const workbenchShortcuts = [
   { action: 'shortcuts', key: '/', mod: true, label: '显示快捷键' },
 ] as const;
 export type WorkbenchAction = (typeof workbenchShortcuts)[number]['action'];
+export const workbenchKeyLabel = (key: string) =>
+  key === 'arrowup' ? '↑' : key === 'arrowdown' ? '↓' : key.toUpperCase();

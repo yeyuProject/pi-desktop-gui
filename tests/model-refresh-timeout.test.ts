@@ -8,6 +8,7 @@ import desktopBridge from '../electron/pi-bridge';
 import { AgentService } from '../electron/agent';
 import { Store } from '../electron/store';
 import { Workspace } from '../electron/workspace';
+import { DESKTOP_BRIDGE_COMMAND } from '../shared/pi-bridge';
 
 test('a slow model refresh aborts after 15 seconds, releases the session and can be retried', async (t) => {
   const directory = await fs.mkdtemp(path.join(os.tmpdir(), 'pi-model-refresh-timeout-'));
@@ -26,9 +27,10 @@ test('a slow model refresh aborts after 15 seconds, releases the session and can
   let handler!: (encoded: string, ctx: ExtensionCommandContext) => Promise<void>;
   desktopBridge({
     on() {},
-    registerCommand(_name: string, command: { handler: typeof handler }) {
-      handler = command.handler;
+    registerCommand(name: string, command: { handler: typeof handler }) {
+      if (name === DESKTOP_BRIDGE_COMMAND) handler = command.handler;
     },
+    registerTool() {},
   } as unknown as ExtensionAPI);
   let slow = true;
   let signal!: AbortSignal;

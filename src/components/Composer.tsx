@@ -1,4 +1,14 @@
-import { ArrowUp, Square, Search, X, FileText, LoaderCircle, Paperclip, ImagePlus } from 'lucide-react';
+import {
+  ArrowUp,
+  Square,
+  Search,
+  X,
+  FileText,
+  LoaderCircle,
+  Paperclip,
+  ImagePlus,
+  Target,
+} from 'lucide-react';
 import { mod } from '../lib/platform';
 import { commandSourceNames } from '../lib/commands';
 import { IconButton } from './IconButton';
@@ -153,6 +163,19 @@ export function Composer(props: ComposerProps) {
   } = props;
   const modelState = sessionModelState(runtime, selected, state.settings);
   const connecting = ownRunning && !runtime.connected;
+  const [goalRequestSession, setGoalRequestSession] = useState<string>();
+  const goalOpening = Boolean(selected && goalRequestSession === selected.id);
+  const openGoal = async () => {
+    const id = selected?.id;
+    if (!id || goalOpening || selectionChanging || pending || !sessionEnabled || !storage.writable) return;
+    setGoalRequestSession(id);
+    try {
+      // Use the bundled extension's native dialogs; do not send or replace the composer draft.
+      await attempt(() => api.invoke('openGoal', id), id);
+    } finally {
+      setGoalRequestSession((current) => (current === id ? undefined : current));
+    }
+  };
   const [modelPickerOwner, setModelPickerOwner] = useState<{ sessionId: string; revision: number }>();
   // Ownership hides a stale picker during render; the effect only discards its state.
   const modelPickerOpen = Boolean(
@@ -552,6 +575,25 @@ export function Composer(props: ComposerProps) {
                 <Paperclip size={17} />
               </IconButton>
             )}
+            <button
+              className="goal-button"
+              aria-label="Goal 目标管理"
+              title="设置目标，或查看、暂停和恢复当前目标"
+              disabled={
+                !selected ||
+                !sessionEnabled ||
+                !storage.writable ||
+                !environment?.supported ||
+                selectionChanging ||
+                pending ||
+                connecting ||
+                goalOpening
+              }
+              onClick={() => void openGoal()}
+            >
+              {goalOpening ? <LoaderCircle size={14} className="spin" /> : <Target size={14} />}
+              Goal
+            </button>
             <ApprovalSwitch
               grants={ownRuntime ? runtime.approvalGrants : []}
               revoke={(id) => selected && void attempt(() => api.invoke('revokeApproval', selected.id, id))}

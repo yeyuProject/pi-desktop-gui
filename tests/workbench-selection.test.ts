@@ -40,6 +40,30 @@ const session = (id: string, file: string | undefined = `${id}.jsonl`): types.Se
   lastStatus: 'idle',
 });
 const noOp = () => {};
+
+test('the conversation hides internal goal prompts but keeps visible extension output', async () => {
+  const f = harness(() => Promise.resolve([]));
+  f.view.runtime = {
+    ...types.emptyRuntime(),
+    sessionId: 'A',
+    connected: true,
+    messages: [
+      { role: 'user', content: 'Fix the tests' },
+      { role: 'custom', content: 'Internal goal contract', display: false },
+      { role: 'custom', content: 'Visible extension output', display: true },
+      { role: 'assistant', content: 'Tests passed' },
+    ],
+  };
+  f.render();
+  await f.settle();
+  assert.deepEqual(f.current.messages.map(types.messageText), [
+    'Fix the tests',
+    'Visible extension output',
+    'Tests passed',
+  ]);
+  assert.equal(f.view.runtime.messages.length, 4, 'canonical model context remains intact');
+  f.unmount();
+});
 type Effect = { deps?: unknown[]; cleanup?: () => void; run?: () => void | (() => void) };
 function harness(
   invoke: (method: string, id?: string) => Promise<unknown>,

@@ -16,6 +16,7 @@ import {
 } from '../shared/approval';
 import { classifyWriteTarget } from '../electron/approval-paths';
 import desktopBridge from '../electron/pi-bridge';
+import { DESKTOP_BRIDGE_COMMAND } from '../shared/pi-bridge';
 
 test('tool path normalization follows Pi 1.1 native aliases before checking boundaries', () => {
   const cwd = path.join(os.tmpdir(), 'pi-tool-path');
@@ -208,10 +209,17 @@ test('bridge publishes scoped grants, revokes them and resets them on session st
   const previous = process.env.PI_DESKTOP_APPROVAL;
   process.env.PI_DESKTOP_APPROVAL = 'confirm';
   desktopBridge({
-    on: (name: string, hook: any) => hooks.set(name, hook),
-    registerCommand: (_: string, command: any) => {
-      handler = command.handler;
+    on: (name: string, hook: any) => {
+      const previous = hooks.get(name);
+      hooks.set(name, async (...args: any[]) => {
+        const result = await previous?.(...args);
+        return result?.block ? result : ((await hook(...args)) ?? result);
+      });
     },
+    registerCommand: (name: string, command: any) => {
+      if (name === DESKTOP_BRIDGE_COMMAND) handler = command.handler;
+    },
+    registerTool: () => {},
   } as any);
   if (previous === undefined) delete process.env.PI_DESKTOP_APPROVAL;
   else process.env.PI_DESKTOP_APPROVAL = previous;
@@ -220,7 +228,10 @@ test('bridge publishes scoped grants, revokes them and resets them on session st
   let choice = APPROVAL_ALWAYS;
   const ctx: any = {
     cwd: dir,
+    sessionManager: { getBranch: () => [], getSessionId: () => 'approval-v014-test' },
     ui: {
+      setStatus: () => {},
+      setWidget: () => {},
       select: async (title: string, options: string[]) => {
         requests.push({ title, options });
         return choice;
@@ -246,9 +257,9 @@ test('bridge publishes scoped grants, revokes them and resets them on session st
   choice = APPROVAL_ALLOW;
   await hooks.get('tool_call')!({ toolName: 'write', input: { path: '.env', content: 'secret' } }, ctx);
   assert.deepEqual(requests.at(-1).options, [APPROVAL_ALLOW, APPROVAL_DENY]);
-  hooks.get('session_start')!({}, ctx);
-  assert.equal(events.at(-2).type, 'desktop_session_start');
-  assert.deepEqual(events.at(-1).grants, []);
+  await hooks.get('session_start')!({}, ctx);
+  assert.ok(events.some((event) => event.type === 'desktop_session_start'));
+  assert.deepEqual(events.findLast((event) => event.type === 'desktop_approval_grants').grants, []);
   choice = APPROVAL_ALWAYS;
   await call('npm test a.ts');
   await bridge('approval_mode', { mode: 'auto' });

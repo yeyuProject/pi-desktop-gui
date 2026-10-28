@@ -170,8 +170,7 @@ export function SettingsModal(
                       <span>Pi 版本</span>
                       <strong>
                         {environment?.version || '未检测到'}
-                        {environment &&
-                          environment.compatibility !== 'unverified' &&
+                        {environment?.compatibility === 'unknown' &&
                           ` · ${compatibilityLabels[environment.compatibility]}`}
                       </strong>
                       {environment?.supported ? <CheckCircle2 size={16} /> : <AlertCircle size={16} />}

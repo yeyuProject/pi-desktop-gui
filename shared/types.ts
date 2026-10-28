@@ -468,6 +468,7 @@ export interface ApiMap {
   recover: { args: [string, string?]; result: void };
   testConnection: { args: [string]; result: { elapsed: number; text: string } };
   send: { args: [string, string, string[], SendMode, ImageAttachment[]?]; result: void };
+  openGoal: { args: [sessionId: string]; result: void };
   pickImages: { args: []; result: ImageAttachment[] };
   projectImage: { args: [string, string]; result: ImageAttachment | null };
   sessionTree: { args: [string]; result: TreeEntry[] };

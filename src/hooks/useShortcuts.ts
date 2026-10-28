@@ -21,6 +21,26 @@ interface ShortcutsOptions {
   setInspector: Toggle;
   selectTab: (tab: 'changes' | 'files' | 'output') => void;
 }
+function hasInputText(target: EventTarget | null): boolean {
+  if (target instanceof HTMLTextAreaElement) return target.value.length > 0;
+  if (target instanceof HTMLInputElement)
+    return (
+      ![
+        'button',
+        'checkbox',
+        'color',
+        'file',
+        'hidden',
+        'image',
+        'radio',
+        'range',
+        'reset',
+        'submit',
+      ].includes(target.type) && target.value.length > 0
+    );
+  const editor = target instanceof HTMLElement ? target.closest<HTMLElement>('[contenteditable]') : null;
+  return Boolean(editor?.isContentEditable && editor.textContent);
+}
 export function useShortcuts(options: ShortcutsOptions) {
   const latest = useRef(options);
   latest.current = options;
@@ -37,6 +57,8 @@ export function useShortcuts(options: ShortcutsOptions) {
         if (o.compact) o.setInspector(false);
         window.dispatchEvent(new CustomEvent('pi:find'));
       },
+      previousTurn: () => window.dispatchEvent(new CustomEvent('pi:turn', { detail: -1 })),
+      nextTurn: () => window.dispatchEvent(new CustomEvent('pi:turn', { detail: 1 })),
       sidebar: () => o.setSidebar((value) => !value),
       inspector: () => o.setInspector((value) => !value),
       changes: () => o.selectTab('changes'),
@@ -59,6 +81,11 @@ export function useShortcuts(options: ShortcutsOptions) {
           ('mod' in item ? mod(event) && !event.altKey : event.altKey && !event.ctrlKey && !event.metaKey),
       );
       if (!binding) return;
+      if (
+        (binding.action === 'previousTurn' || binding.action === 'nextTurn') &&
+        (hasInputText(event.target) || !allowsWorkbenchAction(binding.action))
+      )
+        return;
       event.preventDefault();
       if (!event.repeat) runAction(binding.action);
     };

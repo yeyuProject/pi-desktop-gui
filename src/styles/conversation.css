@@ -464,6 +464,18 @@
   gap: 6px;
   min-width: 0;
 }
+.goal-button {
+  display: inline-flex;
+  align-items: center;
+  flex-shrink: 0;
+  gap: 4px;
+  padding: 5px 8px;
+  border-radius: 7px;
+  font-size: calc(12px * var(--font-scale));
+  color: var(--accent);
+  background: color-mix(in srgb, var(--accent) 8%, var(--surface));
+  border-color: color-mix(in srgb, var(--accent) 24%, var(--line));
+}
 .composer-hint {
   font-size: calc(11px * var(--font-scale));
   color: var(--muted);

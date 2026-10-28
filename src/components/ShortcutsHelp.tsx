@@ -1,6 +1,6 @@
 import { modKey, shortcut } from '../lib/platform';
 import { Modal } from './Modal';
-import { workbenchShortcuts } from '../../shared/workbench-actions';
+import { workbenchKeyLabel, workbenchShortcuts } from '../../shared/workbench-actions';
 
 export const shortcutGroups: [string, [string[], string][]][] = [
   [
@@ -30,7 +30,7 @@ export const shortcutGroups: [string, [string[], string][]][] = [
     '导航',
     [
       ...workbenchShortcuts.map((binding): [string[], string] => [
-        ['mod' in binding ? modKey : 'Alt', binding.key.toUpperCase()],
+        ['mod' in binding ? modKey : 'Alt', workbenchKeyLabel(binding.key)],
         binding.label,
       ]),
       [['Esc'], '关闭弹窗或工作区面板'],

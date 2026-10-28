@@ -39,7 +39,7 @@ flowchart LR
 
 ## Pi 升级
 
-1. `shared/pi-version.ts` 是版本提示的唯一来源。`VERIFIED` 为回归使用的版本，不限制可运行的主、次版本线；其他可识别版本（含预发布版）显示“未验证”并允许使用，不宣称已经兼容。
+1. `shared/pi-version.ts` 是版本提示的唯一来源。`VERIFIED` 为回归使用的版本，不限制可运行的主、次版本线；所有可识别版本（含预发布版）均允许使用，界面只显示版本号，不显示“已验证 / 未验证”。诊断保留实际的版本分类，不宣称未验证版本已经兼容。
 2. `electron/environment.ts` 发现入口、验证 Node 并读取 `--version`。平台路径、Shell 和终端、进程树操作集中在 `electron/platform.ts`。
 3. `electron/rpc.ts` 只处理进程、JSONL、请求关联、超时和桌面扩展调用。`electron/pi/protocol.ts` 校验桌面依赖的核心响应字段并转换统计数据。允许新增字段，不猜测字段别名；字段改变时返回明确的不兼容错误。
    stdout 解码逐块查找换行，只在完整记录到达时拼接，避免大条 `get_messages` 响应反复扫描和复制前缀。

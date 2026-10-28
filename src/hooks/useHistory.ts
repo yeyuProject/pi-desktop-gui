@@ -49,11 +49,12 @@ export function useHistory(
   const messages = useMemo(
     () =>
       hideRecoveredErrors(
-        own && (runtime.connected || runtime.messages.length)
+        (own && (runtime.connected || runtime.messages.length)
           ? runtime.messages
           : history && history.sessionId === selected?.id
             ? history.messages
-            : empty,
+            : empty
+        ).filter((message) => message.role !== 'custom' || message.display !== false),
       ),
     [own, runtime.connected, runtime.messages, history, selected?.id],
   );

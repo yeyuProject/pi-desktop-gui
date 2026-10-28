@@ -13,6 +13,7 @@ import {
   waitForCallbackOrManualInput,
 } from '../node_modules/@earendil-works/pi-ai/dist/auth/oauth/callback-server.js';
 import desktopBridge from '../electron/pi-bridge';
+import { DESKTOP_BRIDGE_COMMAND } from '../shared/pi-bridge';
 
 function deferred<T>() {
   let resolve!: (value: T) => void;
@@ -75,13 +76,14 @@ async function loginFixture(t: TestContext) {
   models.setProvider(provider);
   t.mock.method(ModelRuntime, 'create', async () => models as never);
   let handler!: (encoded: string, ctx: ExtensionCommandContext) => Promise<void>;
-  const pi: Pick<ExtensionAPI, 'on' | 'registerCommand'> = {
+  const pi: Pick<ExtensionAPI, 'on' | 'registerCommand' | 'registerTool'> = {
     on() {
       return () => {};
     },
-    registerCommand(_name, command) {
-      handler = command.handler;
+    registerCommand(name, command) {
+      if (name === DESKTOP_BRIDGE_COMMAND) handler = command.handler;
     },
+    registerTool() {},
   };
   desktopBridge(pi as ExtensionAPI);
   const events: any[] = [];

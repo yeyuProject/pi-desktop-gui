@@ -40,6 +40,7 @@ Sessions and workspaces stay on your machine. Model requests go to whichever pro
 
 - **Responsive long conversations** — Reuse completed Markdown sections during streaming and after replies finish. Browse and search history in pages, type without rerendering the conversation, and load draft image contents only for the selected chat. Environment setup and snapshot cleanup run after the window opens; idle chats stop updating their timers.
 - **Compact conversation history** — Thinking from one user turn shares a single collapsible section. Completed turns start collapsed by default (or stay expanded when **默认展开思考过程** is enabled in Settings); search reveals the original text, and you can collapse all thinking at once.
+- **Turn outline** — From three turns onward, aligned markers stay in place as the outline expands. Clean question titles and skill labels make it easier to scan; current, running and failed turns are marked, and line counts appear only for actual additions or deletions. From ten turns, filter the outline to modified or failed turns.
 - **Visible agent workflow** — Streamed thinking, tool calls with arguments and exit status, inline diffs for every edit, plus estimated current context/window capacity, clearly labeled cumulative session tokens, cache breakdown and estimated cost. Completed replies show average TPS in a labeled, colored badge when Pi provides output tokens and response duration; this includes response waiting time and excludes tool execution.
 - **Image attachments** — Paste or drop images even when the system omits their file type; selecting a project image through `@` also attaches the image. Supports PNG, JPEG, WebP and GIF, up to 8 images, 8 MiB each and 16 MiB combined.
 - **Per-turn undo** — In Git projects, a snapshot is taken before each run (stored outside your repo's `.git`). Open either the repository root or a subdirectory as your project. Repeated run-change refreshes reuse hashes of unchanged files. Undo a whole turn or roll back individual files. Side effects of shell commands are not covered.
@@ -49,6 +50,7 @@ Sessions and workspaces stay on your machine. Model requests go to whichever pro
 - **Quick chat or full project** — Start a standalone chat without a repository, or open a project to get the file tree, Git changes and snapshots.
 - **Concurrent conversations** — Each connected chat has its own Pi process. Switch chats while tasks continue. Model and reasoning changes apply to the next new user task; tool continuations and mid-run additions retain the current settings. A double <kbd>Esc</kbd> stops only the current chat.
 - **Steer while it runs** — Add instructions mid-run (steer) or queue follow-ups within each conversation.
+- **Built-in Goals** — Click **Goal** beside the composer to enter an objective and optional token budget, then pause, resume or inspect it from the same button. Goals keep working across replies and require completion evidence, with bounded automatic continuation. State stays in the Pi session; reconnecting restores it paused. No extra plugin or model is needed. `/goal` commands remain available. See [Goal controls and limits](docs/goal.md).
 - **Clear retry progress** — See retry backoff and response wait time, cancel an active retry request, and distinguish recovered attempts from failures in the run log. Consecutive empty error replies show the latest failure once, with earlier attempts expandable.
 - **Keyboard-first** — Global search across sessions, in-session find, and shortcuts for every panel.
 - **Consistent appearance** — Light, dark and system themes, plus sepia, soft green and navy backgrounds, cover the desktop title bar and confirmations while retaining native window controls. Pi configuration stays editable during a run; saving waits until it is safe and reports separately when a saved change could not yet be applied.
@@ -130,6 +132,7 @@ New session logs use Pi's native directory (`~/.pi/agent/sessions/<encoded-cwd>/
 | New chat                             |       <kbd>Ctrl</kbd> <kbd>N</kbd>       |       <kbd>⌘</kbd> <kbd>N</kbd>        |
 | Search sessions and messages         |       <kbd>Ctrl</kbd> <kbd>K</kbd>       |       <kbd>⌘</kbd> <kbd>K</kbd>        |
 | Find in current session              |       <kbd>Ctrl</kbd> <kbd>F</kbd>       |       <kbd>⌘</kbd> <kbd>F</kbd>        |
+| Previous / next user turn            | <kbd>Alt</kbd> <kbd>↑</kbd> / <kbd>↓</kbd> | <kbd>⌥</kbd> <kbd>↑</kbd> / <kbd>↓</kbd> |
 | Toggle sidebar                       |       <kbd>Ctrl</kbd> <kbd>B</kbd>       |       <kbd>⌘</kbd> <kbd>B</kbd>        |
 | Toggle workspace panel               |       <kbd>Ctrl</kbd> <kbd>J</kbd>       |       <kbd>⌘</kbd> <kbd>J</kbd>        |
 | Switch Changes / Files / Output tab  | <kbd>Alt</kbd> <kbd>1</kbd>–<kbd>3</kbd> | <kbd>⌥</kbd> <kbd>1</kbd>–<kbd>3</kbd> |
@@ -138,6 +141,8 @@ New session logs use Pi's native directory (`~/.pi/agent/sessions/<encoded-cwd>/
 | Browse sent history (empty composer) |       <kbd>↑</kbd> / <kbd>↓</kbd>        |      <kbd>↑</kbd> / <kbd>↓</kbd>       |
 | Close panel and focus composer       |              <kbd>Esc</kbd>              |             <kbd>Esc</kbd>             |
 | **Stop the current chat's task**     |      <kbd>Esc</kbd> <kbd>Esc</kbd>       |     <kbd>Esc</kbd> <kbd>Esc</kbd>      |
+
+Turn navigation works from the conversation or an empty text input. When the focused input contains text, Alt/Option+↑/↓ keeps its normal text-navigation behavior.
 
 ## How it works
 

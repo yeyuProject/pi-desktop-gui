@@ -36,7 +36,12 @@ export function decide(
   toolName: string,
   readTarget?: ReadTarget,
 ): 'allow' | 'ask' | 'deny' {
-  if (mode === 'auto' || toolName === 'tool_search' || (isReadTool(toolName) && readTarget === 'project'))
+  // These bundled Goal tools only record completion/blocker evidence in the session.
+  if (
+    mode === 'auto' ||
+    ['tool_search', 'desktop_goal_complete', 'desktop_goal_blocked'].includes(toolName) ||
+    (isReadTool(toolName) && readTarget === 'project')
+  )
     return 'allow';
   // External annotations are hints, not a trusted grant to run without approval.
   return mode === 'readonly' ? 'deny' : 'ask';

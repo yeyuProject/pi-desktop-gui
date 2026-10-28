@@ -41,8 +41,15 @@ function bridge(mode: ApprovalMode, cwd: string, choice = APPROVAL_ALLOW) {
   process.env.PI_DESKTOP_APPROVAL = mode;
   try {
     desktopBridge({
-      on: (name: string, handler: any) => handlers.set(name, handler),
+      on: (name: string, handler: any) => {
+        const previous = handlers.get(name);
+        handlers.set(name, async (...args: any[]) => {
+          const result = await previous?.(...args);
+          return result?.block ? result : ((await handler(...args)) ?? result);
+        });
+      },
       registerCommand: () => {},
+      registerTool: () => {},
     } as never);
   } finally {
     if (previous === undefined) delete process.env.PI_DESKTOP_APPROVAL;

@@ -19,6 +19,7 @@ import {
   DESKTOP_WORKSPACE_PREFIX,
 } from '../shared/pi-bridge';
 import { classifyReadTarget, classifyWriteTarget } from './approval-paths';
+import { registerDesktopGoal } from './pi-goal';
 import {
   APPROVAL_ALLOW,
   APPROVAL_ALWAYS,
@@ -427,4 +428,5 @@ export default function desktopBridge(pi: ExtensionAPI) {
       }
     },
   });
+  registerDesktopGoal(pi);
 }

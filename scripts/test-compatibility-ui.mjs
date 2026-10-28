@@ -4,7 +4,7 @@ import fs from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import { Store } from '../electron/store.ts';
-import { PI_INSTALL_COMMAND } from '../shared/pi-version.ts';
+import { PI_INSTALL_COMMAND, VERIFIED } from '../shared/pi-version.ts';
 
 const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'pi-compatibility-ui-'));
 const store = new Store(dir);
@@ -20,8 +20,14 @@ await store.save();
 let app, page;
 const errors = [];
 try {
-  for (const version of ['1.1.1', '1.2.0', '2.0.0', 'no version']) {
-    const recognized = version !== 'no version';
+  for (const [version, compatibility] of [
+    [VERIFIED, 'verified'],
+    ['1.1.1', 'unverified'],
+    ['1.2.0', 'unverified'],
+    ['2.0.0', 'unverified'],
+    ['no version', 'unknown'],
+  ]) {
+    const recognized = compatibility !== 'unknown';
     await fs.writeFile(path.join(dir, 'fixture-version.txt'), version);
     app = await electron.launch({
       executablePath: process.env.PI_DESKTOP_EXE,
@@ -56,15 +62,15 @@ try {
     }
     await page.getByRole('button', { name: '设置', exact: true }).click();
     await page.getByRole('button', { name: '运行环境', exact: true }).click();
-    const status = await page.locator('.environment-status').innerText();
-    if (recognized) assert.ok(status.includes(version) && !status.includes('未验证'));
-    else assert.match(status, /未知/);
+    const versionText = await page.locator('.environment-status > div').first().locator('strong').innerText();
+    if (recognized) assert.equal(versionText, version);
+    else assert.match(versionText, /未知/);
     assert.equal(
       await page.locator('.settings-content').getByLabel('Pi 版本兼容性').count(),
       recognized ? 0 : 1,
     );
     const diagnostic = await page.evaluate(() => window.desktop.invoke('diagnostics'));
-    assert.match(diagnostic, recognized ? /"piCompatibility": "unverified"/ : /"piCompatibility": "unknown"/);
+    assert.match(diagnostic, new RegExp(`"piCompatibility": "${compatibility}"`));
     console.log(`PASS ${version} welcome/settings, sending policy and diagnostic compatibility`);
     await app.close();
     app = undefined;

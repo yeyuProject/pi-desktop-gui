@@ -1050,6 +1050,10 @@ const handlers: Record<Exclude<keyof ApiMap, WorkspaceHandlerName>, (...args: an
     validateImages(images);
     await service.get(id).send(id, prompt, attachments, mode, images);
   },
+  openGoal: async (id) => {
+    text(id, 100);
+    await service.get(id).openGoal(id);
+  },
   pickImages: async () => {
     const picked = await dialog.showOpenDialog(window!, {
       title: '添加图片',
@@ -1884,6 +1888,7 @@ else {
               'readModels',
               'recover',
               'send',
+              'openGoal',
               'selectSession',
               'sessionTree',
               'branchSession',

@@ -194,67 +194,243 @@ mark,
   white-space: nowrap;
 }
 .turn-outline {
+  --warning: var(--signal);
   position: absolute;
   top: 64px;
   right: 3px;
-  max-height: 45%;
-  overflow: auto;
+  width: min(clamp(240px, 32vw, 360px), calc(100% - 48px));
+  max-height: 60%;
   z-index: 8;
   display: flex;
   flex-direction: column;
-  padding: 7px 4px;
+  padding: 6px 4px;
+  border: 1px solid transparent;
   border-radius: 8px;
+  color: var(--muted);
+  pointer-events: none;
 }
-.turn-outline button {
+.turn-outline::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  z-index: -1;
+  border-radius: inherit;
+  background: var(--surface);
+  box-shadow: var(--shadow);
+  opacity: 0;
+  transform: translateX(6px);
+  transition:
+    opacity 120ms ease,
+    transform 120ms ease;
+  pointer-events: none;
+}
+.turn-outline.expanded {
+  border-color: var(--line);
+  pointer-events: auto;
+}
+.turn-outline.expanded::before {
+  opacity: 1;
+  transform: none;
+}
+.turn-outline-list {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  overflow: auto;
+  scrollbar-width: none;
+  clip-path: inset(0 0 0 calc(100% - 24px));
+  pointer-events: auto;
+}
+.turn-outline-list::-webkit-scrollbar {
+  display: none;
+}
+.turn-outline.expanded .turn-outline-list {
+  clip-path: none;
+}
+.turn-outline .turn-outline-row {
   display: flex;
   align-items: center;
-  gap: 9px;
+  justify-content: flex-start;
+  gap: 8px;
+  width: 100%;
+  height: 26px;
+  min-height: 26px;
+  flex-shrink: 0;
   border: 0;
   background: transparent;
-  min-height: 14px;
-  padding: 4px 2px;
+  padding: 0 2px;
+  color: var(--muted);
   font-size: calc(11px * var(--font-scale));
   text-align: left;
 }
-.turn-outline button > i {
-  display: block;
-  height: 3px;
-  width: 9px;
-  border-radius: 2px;
-  background: var(--muted);
-  opacity: 0.6;
+.turn-outline.expanded .turn-outline-row:hover {
+  /* The raw hover surface is too dark for small text in sepia and green. */
+  background: color-mix(in srgb, var(--hover) 40%, var(--surface));
+}
+.turn-outline.expanded .turn-outline-row.current {
+  background: var(--accent-soft);
+}
+.turn-outline-row.current .turn-title-text {
+  font-weight: 600;
+  color: var(--accent);
+}
+.turn-number {
+  width: 3ch;
+  flex-shrink: 0;
+  font-variant-numeric: tabular-nums;
+  overflow: hidden;
+}
+.turn-title {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  flex: 1;
+  min-width: 0;
+}
+.turn-title-text {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.turn-skill {
+  max-width: 40%;
+  flex-shrink: 0;
+  padding: 1px 4px;
+  border-radius: 4px;
+  color: var(--accent);
+  background: var(--accent-soft);
+  font-size: calc(10px * var(--font-scale));
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.turn-statistics {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 5px;
+  flex-shrink: 0;
+  font-size: calc(10px * var(--font-scale));
+  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
+}
+.turn-added {
+  color: var(--accent);
+}
+.turn-removed,
+.turn-failed-label {
+  color: var(--red);
+}
+.turn-tick-column {
+  display: flex;
+  justify-content: flex-end;
+  align-items: center;
+  width: 16px;
   flex-shrink: 0;
 }
-.turn-outline .modified > i {
+.turn-tick {
+  display: block;
+  height: 2px;
+  width: 8px;
+  border-radius: 2px;
+  background: var(--muted);
+  opacity: 0.55;
+}
+.turn-outline .modified .turn-tick {
   background: var(--accent);
 }
-.turn-outline .failed > i {
+.turn-outline .failed .turn-tick {
   background: var(--red);
 }
-.turn-outline .current > i {
+.turn-outline .running .turn-tick {
+  background: var(--warning);
+  animation: turn-tick-pulse 2.4s ease-in-out infinite;
+}
+.turn-outline .current .turn-tick {
   width: 16px;
   opacity: 1;
 }
-.turn-outline button > span {
-  display: none;
-  max-width: 280px;
+.turn-outline-summary {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  height: 28px;
+  min-height: 28px;
+  padding: 0 4px;
+  font-size: calc(11px * var(--font-scale));
   white-space: nowrap;
   overflow: hidden;
-  text-overflow: ellipsis;
 }
-.turn-outline small {
-  margin-left: 8px;
+.turn-outline-summary button {
+  padding: 2px 4px;
+  min-height: 22px;
+  font-size: inherit;
+  border: 0;
+  background: transparent;
   color: var(--muted);
+  opacity: 1;
 }
-.turn-outline:hover,
-.turn-outline:focus-within {
-  background: var(--surface);
-  border: 1px solid var(--line);
-  box-shadow: 0 6px 20px #0002;
+.turn-outline-summary button:hover:not(:disabled) {
+  background: color-mix(in srgb, var(--hover) 40%, var(--surface));
 }
-.turn-outline:hover button > span,
-.turn-outline:focus-within button > span {
-  display: block;
+.turn-outline-summary button[aria-pressed='true'] {
+  color: var(--accent);
+  background: var(--accent-soft);
+}
+.turn-outline-summary,
+.turn-number,
+.turn-title,
+.turn-statistics {
+  opacity: 0;
+  visibility: hidden;
+  transform: translateX(6px);
+  transition:
+    opacity 120ms ease,
+    transform 120ms ease;
+}
+.turn-outline.expanded .turn-outline-summary,
+.turn-outline.expanded .turn-number,
+.turn-outline.expanded .turn-title,
+.turn-outline.expanded .turn-statistics {
+  opacity: 1;
+  visibility: visible;
+  transform: none;
+}
+.turn-jump-highlight {
+  border-radius: 12px;
+  animation: turn-jump-flash 1s ease-out;
+}
+@keyframes turn-tick-pulse {
+  50% {
+    opacity: 0.4;
+  }
+}
+@keyframes turn-jump-flash {
+  0%,
+  65% {
+    background: var(--accent-soft);
+  }
+  100% {
+    background: transparent;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .turn-outline::before,
+  .turn-outline-summary,
+  .turn-number,
+  .turn-title,
+  .turn-statistics {
+    transition: none;
+    transform: none;
+  }
+  .turn-outline .running .turn-tick {
+    animation: none;
+  }
+  .turn-jump-highlight {
+    animation: none;
+    background: var(--accent-soft);
+  }
 }
 .composer-resize {
   height: 7px;

@@ -169,3 +169,33 @@ test('ordinary turn refresh preserves event history without reading or resending
   await f.internal.refresh(false);
   assert.equal(calls.filter((type) => type === 'get_messages').length, 1);
 });
+
+test('native boundary entries retain hidden context without settling the active task', async (t) => {
+  const f = await fixture(t);
+  f.service.runtime.status = 'running';
+  const internal = f.service as unknown as {
+    onEvent(event: object): void;
+    historyRevision: number;
+  };
+  const revision = internal.historyRevision;
+  const previousLength = f.service.runtime.messages.length;
+  internal.onEvent({
+    type: 'entry_appended',
+    entry: { type: 'custom', customType: 'desktop-goal', data: { status: 'active' } },
+  });
+  assert.equal(f.service.runtime.messages.length, previousLength, 'goal state is not a chat message');
+  internal.onEvent({
+    type: 'entry_appended',
+    entry: {
+      type: 'custom_message',
+      customType: 'desktop-goal-continuation',
+      content: 'Continue the active goal',
+      display: false,
+      timestamp: '2026-10-28T00:00:00.000Z',
+    },
+  });
+  assert.equal(f.service.runtime.status, 'running');
+  assert.equal(f.service.runtime.messages.at(-1)?.display, false);
+  assert.equal(f.service.runtime.messages.at(-1)?.content, 'Continue the active goal');
+  assert.equal(internal.historyRevision, revision + 1, 'settlement will reconcile appended context');
+});

@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import desktopBridge from '../electron/pi-bridge';
-import { APPROVAL_ALWAYS, APPROVAL_DENY, alwaysKey, describe } from '../shared/approval';
+import { APPROVAL_ALWAYS, APPROVAL_DENY, alwaysKey, decide, describe } from '../shared/approval';
 
 function bridge(mode: 'confirm' | 'readonly') {
   const handlers = new Map<string, (...args: any[]) => any>();
@@ -9,8 +9,15 @@ function bridge(mode: 'confirm' | 'readonly') {
   process.env.PI_DESKTOP_APPROVAL = mode;
   try {
     desktopBridge({
-      on: (name: string, handler: (...args: any[]) => any) => handlers.set(name, handler),
+      on: (name: string, handler: (...args: any[]) => any) => {
+        const previous = handlers.get(name);
+        handlers.set(name, async (...args: any[]) => {
+          const result = await previous?.(...args);
+          return result?.block ? result : ((await handler(...args)) ?? result);
+        });
+      },
       registerCommand: () => {},
+      registerTool: () => {},
       getAllTools: () => [{ name: 'external_writer', annotations: { readOnlyHint: true } }],
     } as never);
   } finally {
@@ -39,6 +46,29 @@ test('external read-only hints cannot bypass confirmation or read-only restricti
   }
 });
 
+test('only the two built-in Goal state tools bypass workspace approval', async () => {
+  for (const mode of ['confirm', 'readonly'] as const) {
+    for (const tool of ['desktop_goal_complete', 'desktop_goal_blocked'])
+      assert.equal(decide(mode, tool), 'allow', tool);
+    const unknown = 'desktop_goal_execute';
+    assert.equal(decide(mode, unknown), mode === 'confirm' ? 'ask' : 'deny');
+    let asked = 0;
+    const result = await bridge(mode).get('tool_call')!(
+      { toolName: unknown, input: {}, toolCallId: 'unknown-goal-tool' },
+      {
+        ui: {
+          select: async () => {
+            asked++;
+            return APPROVAL_DENY;
+          },
+        },
+      },
+    );
+    assert.equal(result?.block, true);
+    assert.equal(asked, mode === 'confirm' ? 1 : 0);
+  }
+});
+
 test('approval displays the entire command and grants only its exact text', () => {
   const prefix = 'echo ' + 'x'.repeat(5000);
   const first = describe('bash', { command: prefix + '; echo first' });
@@ -53,8 +83,11 @@ test('always-allow grants end when Pi starts a different session', async () => {
   const notifications: string[] = [];
   const ctx = {
     cwd: process.cwd(),
+    sessionManager: { getBranch: () => [], getSessionId: () => 'approval-test' },
     ui: {
       notify: (message: string) => notifications.push(message),
+      setStatus: () => {},
+      setWidget: () => {},
       select: async () => {
         asked++;
         return APPROVAL_ALWAYS;
@@ -67,7 +100,7 @@ test('always-allow grants end when Pi starts a different session', async () => {
   assert.equal(asked, 1);
   await handlers.get('session_start')?.({}, ctx);
   assert.ok(notifications.includes('__PI_DESKTOP__{"type":"desktop_session_start"}'));
-  assert.equal(notifications.at(-1), '__PI_DESKTOP__{"type":"desktop_approval_grants","grants":[]}');
+  assert.ok(notifications.includes('__PI_DESKTOP__{"type":"desktop_approval_grants","grants":[]}'));
   await handlers.get('tool_call')!(event, ctx);
   assert.equal(asked, 2);
 });

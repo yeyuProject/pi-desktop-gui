@@ -41,6 +41,12 @@ try {
   // Count actual component executions via React's DevTools commit hook, excluding memo bailouts.
   // Match the conversation's props because production function names are minified.
   await page.addInitScript(() => {
+    // bootstrap starts a fresh asynchronous environment probe on every document load.
+    // Its event legitimately re-renders App/Composer and must finish before timer measurements.
+    globalThis.auditEnvironmentReady = false;
+    window.desktop.onEvent((event) => {
+      if (event.type === 'environment') globalThis.auditEnvironmentReady = true;
+    });
     globalThis.auditConversationRenders = 0;
     globalThis.auditComposerRenders = 0;
     globalThis.auditAppRenders = 0;
@@ -164,6 +170,10 @@ try {
     if (spec.expand)
       while (await page.locator('.load-history').count()) await page.locator('.load-history').click();
     await page.evaluate(() => document.fonts.ready);
+    await page.waitForFunction(() => globalThis.auditEnvironmentReady === true);
+    await page.evaluate(
+      () => new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve))),
+    );
     await page.evaluate(() => {
       globalThis.auditLongTasks = [];
       globalThis.auditLongTaskObserver = new PerformanceObserver((list) =>
@@ -224,6 +234,7 @@ try {
         longTasks: globalThis.auditLongTasks,
         renderedMessages: document.querySelectorAll('.message').length,
         outlineButtons: document.querySelectorAll('.turn-outline button').length,
+        outlineRows: document.querySelectorAll('.turn-outline button[data-outline-index]').length,
         domElements: document.querySelectorAll('*').length,
       };
     });
@@ -237,6 +248,7 @@ try {
     result.cases.push(item);
     console.log(JSON.stringify(item));
     assert.ok(observation.outlineButtons <= 60, 'outline DOM must stay bounded');
+    assert.ok(observation.outlineRows <= 60, 'outline rows must stay bounded independently of filters');
     assert.equal(observation.renderedMessages, spec.patchLines ? 40 : spec.expand ? spec.messages : 80);
     const input = page.getByRole('textbox', { name: '任务输入' });
     await input.fill('');
@@ -350,11 +362,29 @@ try {
       await find.press('Escape');
       await expect(page.locator('.tool-search-content')).toHaveCount(0);
       console.log('PASS collapsed structured diffs, on-demand expansion, full output copy and search reveal');
+      const outline = page.getByRole('navigation', { name: '对话轮次' });
+      await outline.locator('button[data-outline-index]').first().focus();
+      await expect(outline).toHaveClass(/expanded/);
+      const modified = outline.getByRole('button', { name: '修改 1250', exact: true });
+      await modified.click();
+      await outline.locator('button[data-outline-index]').first().focus();
+      await page.keyboard.press('Home');
+      await expect(outline.locator('[data-outline-index="0"]')).toBeFocused();
+      await page.keyboard.press('End');
+      await expect(outline.locator('[data-outline-index="1249"]')).toBeFocused();
+      assert.equal(
+        await outline.locator('[data-outline-index="1249"]').getAttribute('data-turn-number'),
+        '1250',
+      );
+      assert.ok((await outline.locator('button').count()) <= 60);
+      assert.ok((await outline.locator('.turn-outline-row').count()) <= 60);
+      await modified.click();
+      console.log('PASS a 5,000-message modified-turn filter keeps keyboard navigation and DOM bounded');
     }
     if (item.p95Ms > 100) console.warn('Slow streaming update; inspect performance-ui.json on this host');
     if (spec.messages === 5000 && !spec.patchLines) {
       const outline = page.getByRole('navigation', { name: '对话轮次' });
-      await outline.locator('button').first().focus();
+      await outline.locator('button[data-outline-index]').first().focus();
       await page.keyboard.press('End');
       await expect(outline.locator('[data-outline-index="2499"]')).toBeFocused();
       await page.keyboard.press('Home');
@@ -362,6 +392,7 @@ try {
       await page.keyboard.press('Enter');
       await expect(page.locator('.message').filter({ hasText: 'Check module 0.' })).toBeVisible();
       assert.ok((await outline.locator('button').count()) <= 60);
+      assert.ok((await outline.locator('.turn-outline-row').count()) <= 60);
       await expect(page.locator('.message')).toHaveCount(80);
       await page.getByRole('button', { name: '加载更新的 80 条消息', exact: true }).click();
       await expect(page.locator('[data-message-index="80"]')).toBeVisible();

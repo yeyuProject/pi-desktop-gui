@@ -128,10 +128,44 @@ export interface TurnItem {
   turn: number;
   index: number;
   title: string;
+  tooltip: string;
+  skillName?: string;
   modified: boolean;
   failed: boolean;
   added: number;
   removed: number;
+}
+type TurnTitle = Pick<TurnItem, 'title' | 'tooltip' | 'skillName'>;
+const turnTitles = new WeakMap<Message, { content: Message['content']; value: TurnTitle }>();
+
+/** The skill-block grammar matches Pi 1.4 parseSkillBlock without importing its Node runtime. */
+export function turnTitle(message: Message): TurnTitle {
+  const cached = turnTitles.get(message);
+  if (cached && cached.content === message.content) return cached.value;
+  const text = splitUserContent(messageText(message)).text;
+  const skill = text.match(
+    /^<skill name="([^"]+)" location="([^"]+)">\n([\s\S]*?)\n<\/skill>(?:\n\n([\s\S]+))?$/,
+  );
+  const clean = (skill ? skill[4]?.trim() || `使用技能 ${skill[1]}` : text)
+    .replace(/^[ \t]*(?:(?:#{1,6}(?:[ \t]+|$)|>[ \t]*|(?:[-+*]|\d+[.)])(?:[ \t]+|$)))+/gm, '')
+    .replace(/\s+/g, ' ')
+    .trim();
+  const images = Array.isArray(message.content)
+    ? message.content.filter((block) => block.type === 'image').length
+    : 0;
+  const label = clean || (images ? `[图片 ×${images}]` : '（无文字）');
+  const characters: string[] = [];
+  for (const character of label) {
+    if (characters.length === 200) break;
+    characters.push(character);
+  }
+  const value: TurnTitle = {
+    title: characters.slice(0, 80).join(''),
+    tooltip: characters.join(''),
+    ...(skill ? { skillName: skill[1] } : {}),
+  };
+  turnTitles.set(message, { content: message.content, value });
+  return value;
 }
 const patchCounts = new WeakMap<
   ToolActivity,
@@ -159,7 +193,7 @@ export function conversationTurns(
       turns.push({
         turn: turns.length + 1,
         index,
-        title: splitUserContent(messageText(message)).text.slice(0, 36),
+        ...turnTitle(message),
         modified: false,
         failed: false,
         added: 0,

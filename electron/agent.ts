@@ -449,6 +449,24 @@ export class AgentService extends EventEmitter {
           ? undefined
           : { message: record.message ?? '', url: record.url, code: record.code };
         break;
+      case 'entry_appended': {
+        // Native boundary continuations append entries without message_start/message_end.
+        // Retain their context in history; the renderer respects custom messages' display flag.
+        const entry = record.entry;
+        if (entry.type === 'custom_message') {
+          r.messages.push({
+            role: 'custom',
+            customType: entry.customType,
+            content: entry.content,
+            display: entry.display,
+            details: entry.details,
+            timestamp: new Date(entry.timestamp).getTime(),
+          });
+        }
+        if (['custom_message', 'context_edit', 'compaction', 'branch_summary'].includes(entry.type))
+          this.historyRevision++;
+        break;
+      }
       case 'bash_execution_update': {
         const t = r.tools.find((t) => t.id === 'desktop-bash');
         if (t) t.output = (t.output + String(record.delta ?? '')).slice(-100000);
@@ -1353,6 +1371,11 @@ export class AgentService extends EventEmitter {
     const epoch = this.stopEpoch;
     return this.exclusive(() => this.sendInOperation(id, text, attachments, mode, images, epoch));
   }
+  openGoal(id: string) {
+    this.protectSession(id);
+    const epoch = this.stopEpoch;
+    return this.exclusive(() => this.sendInOperation(id, '/goal', [], 'steer', [], epoch, false));
+  }
   recover(id: string, continuePrompt?: string) {
     this.protectSession(id);
     const epoch = this.stopEpoch;
@@ -1372,6 +1395,7 @@ export class AgentService extends EventEmitter {
     mode: SendMode,
     images: ImageAttachment[],
     epoch: number,
+    consumeDraft = true,
   ) {
     this.store.assertWritable();
     if (epoch !== this.stopEpoch) throw new Error('任务已取消，内容保留在草稿中');
@@ -1494,14 +1518,17 @@ export class AgentService extends EventEmitter {
         const state = await this.rpc!.request('get_state');
         if (!state.isStreaming && !state.isCompacting && !state.pendingMessageCount) this.status('idle');
       }
-      if (this.store.matchesDraft(session, text, attachments, images)) {
+      if (consumeDraft && this.store.matchesDraft(session, text, attachments, images)) {
         session.draft = '';
         session.attachments = [];
         session.images = [];
         session.draftSnippets = [];
       }
       if (session.title === '新会话' || session.title === '新对话') {
-        session.title = text.trim().split('\n')[0].slice(0, 28) || images[0]?.name || '图片对话';
+        session.title =
+          text.trim() === '/goal'
+            ? 'Goal'
+            : text.trim().split('\n')[0].slice(0, 28) || images[0]?.name || '图片对话';
         void this.rpc!.request('set_session_name', { name: session.title }).catch(() => {});
       }
       this.activity();

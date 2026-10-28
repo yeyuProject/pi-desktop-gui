@@ -97,6 +97,8 @@ export function Conversation(
     [matchIndex, setMatchIndex] = useState(0);
   const [activeTurn, setActiveTurn] = useState(1),
     [jumpIndex, setJumpIndex] = useState<{ index: number } | null>(null);
+  const [turnJump, setTurnJump] = useState<{ index: number } | null>(null);
+  const requestedTurn = useRef<number | undefined>(undefined);
   const [historyWindow, setHistoryWindow] = useState<{ sessionId?: string; start: number }>();
   const findInput = useRef<HTMLInputElement>(null);
   const threadContent = useRef<HTMLDivElement>(null);
@@ -144,6 +146,7 @@ export function Conversation(
     [items, startIndex, endIndex],
   );
   const jump = (index: number) => {
+    requestedTurn.current = undefined;
     autoScroll.current = false;
     const target = messageWindow(messages.length, index);
     setHistoryWindow(
@@ -152,7 +155,56 @@ export function Conversation(
     setMessageLimit(messagePageSize);
     setJumpIndex({ index });
   };
+  const jumpToTurn = (index: number) => {
+    jump(index);
+    setTurnJump({ index });
+    const turn = turns.find((item) => item.index === index);
+    if (turn) {
+      requestedTurn.current = turn.turn;
+      setActiveTurn(turn.turn);
+    }
+  };
+  useEffect(() => {
+    requestedTurn.current = undefined;
+  }, [turns.length]);
+  useEffect(() => {
+    const navigate = (event: Event) => {
+      const direction = (event as CustomEvent).detail;
+      if ((direction !== -1 && direction !== 1) || !turns.length) return;
+      const current = Math.max(
+        0,
+        turns.findIndex((turn) => turn.turn === (requestedTurn.current ?? activeTurn)),
+      );
+      const next = Math.max(0, Math.min(turns.length - 1, current + direction));
+      jumpToTurn(turns[next].index);
+    };
+    window.addEventListener('pi:turn', navigate);
+    return () => window.removeEventListener('pi:turn', navigate);
+  }, [turns, activeTurn, selected?.id]);
+  useEffect(() => {
+    if (!turnJump) return;
+    let element: HTMLElement | null | undefined;
+    let clear: ReturnType<typeof setTimeout> | undefined;
+    const frame = requestAnimationFrame(() => {
+      element = thread.current?.querySelector<HTMLElement>(`[data-message-index="${turnJump.index}"]`);
+      if (!element) return;
+      element.classList.remove('turn-jump-highlight');
+      // A repeated click on the same turn should restart the one-second feedback.
+      void element.offsetWidth;
+      element.classList.add('turn-jump-highlight');
+      clear = setTimeout(() => {
+        element?.classList.remove('turn-jump-highlight');
+        setTurnJump(null);
+      }, 1000);
+    });
+    return () => {
+      cancelAnimationFrame(frame);
+      clearTimeout(clear);
+      element?.classList.remove('turn-jump-highlight');
+    };
+  }, [turnJump, selected?.id]);
   const showLatest = () => {
+    requestedTurn.current = undefined;
     setHistoryWindow(undefined);
     setJumpIndex(null);
     autoScroll.current = true;
@@ -178,6 +230,9 @@ export function Conversation(
     setQuery('');
     setMatchIndex(0);
     setJumpIndex(null);
+    setTurnJump(null);
+    setActiveTurn(1);
+    requestedTurn.current = undefined;
     setHistoryWindow(undefined);
   }, [selected?.id]);
   useEffect(() => {
@@ -391,7 +446,29 @@ export function Conversation(
       )}
       <div
         className="thread"
+        role="region"
+        aria-label="对话内容"
+        tabIndex={-1}
         ref={thread}
+        onScrollEnd={() => {
+          requestedTurn.current = undefined;
+        }}
+        onWheel={() => {
+          requestedTurn.current = undefined;
+        }}
+        onTouchStart={() => {
+          requestedTurn.current = undefined;
+        }}
+        onPointerDown={() => {
+          requestedTurn.current = undefined;
+        }}
+        onKeyDown={(event) => {
+          if (
+            !event.altKey &&
+            ['ArrowUp', 'ArrowDown', 'PageUp', 'PageDown', 'Home', 'End', ' '].includes(event.key)
+          )
+            requestedTurn.current = undefined;
+        }}
         onScroll={() => {
           const el = thread.current;
           if (!el) return;
@@ -404,6 +481,13 @@ export function Conversation(
           if (atBottom || sameViewport) autoScroll.current = atBottom;
           setNewContent(!autoScroll.current);
           const top = el.getBoundingClientRect().top;
+          if (requestedTurn.current !== undefined) {
+            const target = el.querySelector<HTMLElement>(`[data-turn="${requestedTurn.current}"]`);
+            if (target && Math.abs(target.getBoundingClientRect().top - top) <= 2)
+              requestedTurn.current = undefined;
+            // Intermediate smooth-scroll positions must not replace the requested navigation target.
+            return;
+          }
           const visible = [...el.querySelectorAll<HTMLElement>('[data-turn]')].findLast(
             (node) => node.getBoundingClientRect().top <= top + 100,
           );
@@ -569,7 +653,16 @@ export function Conversation(
           )}
         </div>
       </div>
-      {turns.length >= 3 && <TurnOutline key={selected?.id} turns={turns} active={activeTurn} jump={jump} />}
+      {turns.length >= 3 && (
+        <TurnOutline
+          key={selected?.id}
+          turns={turns}
+          active={activeTurn}
+          running={ownRuntime && running}
+          jump={jumpToTurn}
+          focusConversation={() => thread.current?.focus({ preventScroll: true })}
+        />
+      )}
       {(newContent || endIndex < messages.length) && (
         <button className="new-content" title="滚到底部并继续跟随输出" onClick={showLatest}>
           <ArrowDown size={14} />
