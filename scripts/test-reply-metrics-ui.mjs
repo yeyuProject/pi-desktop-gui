@@ -33,11 +33,17 @@ try {
   const expectedSpeed = `${(20 / (reply.durationMs / 1000)).toFixed(1)} TPS`;
   assert.equal((await speed.textContent()).trim(), `平均输出速度 ${expectedSpeed}`);
   assert.equal(await page.locator('.message.user .reply-speed').count(), 0);
-  assert.equal(
-    await speed.evaluate((element) => element.previousElementSibling?.className),
-    'message-content',
-    'TPS is displayed below the reply content',
-  );
+  const placement = await speed.evaluate((element) => ({
+    speedTop: element.getBoundingClientRect().top,
+    contentBottom: element.closest('.message').querySelector('.message-content').getBoundingClientRect()
+      .bottom,
+  }));
+  assert.ok(placement.speedTop >= placement.contentBottom, 'TPS is displayed below the reply content');
+  await page
+    .locator('.message.assistant')
+    .last()
+    .getByRole('button', { name: '复制回复', exact: true })
+    .waitFor();
   await page.screenshot({ path: path.join(output, 'reply-tps.png') });
 
   await page.getByRole('button', { name: '选择模型', exact: true }).click();
