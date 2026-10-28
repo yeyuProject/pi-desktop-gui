@@ -956,6 +956,27 @@ export async function verifyMessageContentUI({ app, page, output }) {
   await previewPanel.getByRole('combobox', { name: '侧边上下文范围' }).selectOption('all');
   await expect(previewPanel.getByRole('status')).toContainText(/已省略前 \d+ 轮/);
   await previewPanel.getByRole('button', { name: '关闭侧边对话' }).click();
+  await app.evaluate(({ BrowserWindow }) => {
+    globalThis.outlineUiRuntime.messages = [
+      {
+        role: 'bashExecution',
+        command: 'echo FIRST_SHELL_OUTPUT',
+        output: 'FIRST_SHELL_OUTPUT',
+        content: '',
+        timestamp: 1800000004000,
+        exitCode: 0,
+      },
+    ];
+    globalThis.outlineUiRuntime.tools = [];
+    BrowserWindow.getAllWindows()[0].webContents.send('desktop:event', {
+      type: 'runtime',
+      runtime: globalThis.outlineUiRuntime,
+    });
+  });
+  await choose(thread.locator('.bash-message .ansi-output'));
+  await selectionMenu.getByRole('button', { name: '引用', exact: true }).click();
+  assert.equal((await quotes()).at(-1).turn, 0);
+  await expect(page.locator('.draft-quotes')).toContainText('工具输出 · FIRST_SHELL_OUTPUT');
   console.log(
     'PASS UI7 folding, saved views, section search and turn copying; C1 code/tool/thinking selection, source jumps, cross-message clipping and side entry',
   );

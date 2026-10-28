@@ -10,8 +10,12 @@ export async function verifyQuoteSideChatUI({ app, page, fixture, provider, outp
     page.locator(`.session-row[data-session-id="${session.id}"] > button`).first(),
   ).toHaveAttribute('aria-current', 'page');
   const snapshot = () => page.evaluate(() => window.desktop.invoke('bootstrap'));
-  const finish = () =>
-    expect.poll(async () => (await snapshot()).runtime.status, { timeout: 30000 }).toBe('completed');
+  let finishedRequests = provider.requests.length;
+  const finish = async () => {
+    await expect.poll(() => provider.requests.length, { timeout: 30000 }).toBeGreaterThan(finishedRequests);
+    finishedRequests = provider.requests.length;
+    await expect.poll(async () => (await snapshot()).runtime.status, { timeout: 30000 }).toBe('completed');
+  };
   for (const question of ['引用测试的第一问', '引用测试的第二问']) {
     await input.fill(question);
     await page.getByRole('button', { name: '发送任务', exact: true }).click();

@@ -61,6 +61,7 @@ export function quoteMessageIndex(messages: readonly Message[], quote: DraftQuot
 
 export function quoteLabel(quote: Pick<DraftQuote, 'role' | 'turn' | 'section'>): string {
   if (quote.role === 'side') return '侧边对话';
+  if (quote.section === 'tool' && quote.turn === 0) return '工具输出';
   const section = {
     text: quote.role === 'assistant' ? 'Pi 回复' : '你',
     thinking: '思考过程',

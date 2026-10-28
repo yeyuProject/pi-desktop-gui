@@ -87,6 +87,17 @@ test('a quote from running tool output keeps its source after the result gets a 
   ];
   assert.equal(quoteMessageIndex(messages, restored), 1);
   assert.equal(mergeDraftQuotes([quote], [{ ...quote, id: 'different', toolCallId: 'call-2' }]).length, 2);
+  const shellQuote = { ...quote, toolCallId: undefined, turn: 0 };
+  const shellInput = formatMessageQuotes([shellQuote]);
+  assert.ok(shellInput.startsWith('> [引用 工具输出]'));
+  assert.equal(
+    quoteMessageIndex(
+      [{ role: 'bashExecution', content: '', output: 'running output', timestamp: 100 }],
+      shellQuote,
+    ),
+    0,
+  );
+  assert.equal(splitMessageQuotes(shellInput).quotes[0].turn, 0);
 });
 
 test('turn titles remove native file attachments and show the user message from a native skill invocation', () => {
