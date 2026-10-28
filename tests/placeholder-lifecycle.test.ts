@@ -13,6 +13,8 @@ import { Workspace } from '../electron/workspace';
 import { validateImages } from '../electron/images';
 import { PiRpc } from '../electron/rpc';
 import { composeDraftText, matchesDraft } from '../shared/draft';
+import { composeQuotedInput, isDraftQuote } from '../shared/message-content';
+import { SideChats } from '../electron/side-chats';
 import type { AppEvent, StateSnapshot } from '../shared/types';
 
 // Compile the production IPC handlers/boundaries, rather than copying their behavior.
@@ -100,9 +102,13 @@ async function fixture(t: TestContext, dependencies: Record<string, unknown> = {
       workspace,
       removeSessionScratch: async () => {},
       service: agents,
+      sideFlight: undefined,
+      sideChats: new SideChats(dir),
       send,
       validateImages,
       composeDraftText,
+      composeQuotedInput,
+      isDraftQuote,
       matchesDraft,
       fs,
       path,

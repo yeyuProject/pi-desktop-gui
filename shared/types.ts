@@ -10,6 +10,9 @@ import type { PiCompatibility } from './pi-version';
 import type { UpdateState } from './app-update';
 import type { ModelErrorKind } from './errors';
 import type { DraftSnippet } from './draft';
+import type { DraftQuote } from './message-content';
+import type { SideChat, SideChatRequest } from './side-chat';
+export type { DraftQuote } from './message-content';
 import type { NestedToolCalls } from '@earendil-works/pi-ai';
 export type { DraftSnippet } from './draft';
 export type { ApprovalMode, ApprovalRequest } from './approval';
@@ -43,7 +46,9 @@ export interface Session {
   attachments: string[];
   images?: DraftImage[];
   draftSnippets?: DraftSnippet[];
+  draftQuotes?: DraftQuote[];
   stats?: { tokens?: number; cost?: number };
+  sideUsage?: { tokens: number; cost: number; updatedAt: number };
   cwd?: string;
   updatedAt: number;
   lastStatus: RunStatus;
@@ -68,6 +73,7 @@ export interface Settings {
   fontScale: number;
   sidebarWidth: number;
   inspectorWidth: number;
+  sideChatWidth?: number;
   inspectorSplit: number;
   onboardingDone: boolean;
   notifyOnFinish: boolean;
@@ -379,6 +385,8 @@ export type RuntimePatch = Partial<Omit<Runtime, 'messages' | 'tools'>> & {
   toolCount: number;
 };
 export type AppEvent =
+  | { type: 'sideChat'; chat: SideChat }
+  | { type: 'sideChatDelta'; sessionId: string; id: string; text: string }
   | { type: 'action'; action: import('./workbench-actions').WorkbenchAction }
   | { type: 'appDialog'; dialog: AppDialog }
   | { type: 'appDialogsCancelled' }
@@ -454,7 +462,15 @@ export interface ApiMap {
     result: string[];
   };
   setEntryLabel: { args: [string, string, string]; result: void };
-  saveDraft: { args: [string, string, string[], ImageAttachment[]?, DraftSnippet[]?]; result: void };
+  saveDraft: {
+    args: [string, string, string[], ImageAttachment[]?, DraftSnippet[]?, DraftQuote[]?];
+    result: void;
+  };
+  sideChatRead: { args: [string]; result: SideChat };
+  sideChatSend: { args: [string, SideChatRequest]; result: void };
+  sideChatStop: { args: [string]; result: void };
+  sideChatClear: { args: [string]; result: void };
+  sideChatContinue: { args: [string, string]; result: Session };
   flushDraft: { args: []; result: void };
   consumeDraft: { args: [string, string, string[], ImageAttachment[]]; result: void };
   saveView: { args: [string, number, string[]]; result: void };

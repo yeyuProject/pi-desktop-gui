@@ -1,4 +1,12 @@
-import { splitUserContent } from '../shared/message-content';
+import {
+  composeQuotedInput,
+  splitUserContent,
+  userMessageInput,
+  parseUserMessage,
+  mergeDraftQuotes,
+  type DraftQuote,
+} from '../shared/message-content';
+import type { SideChatInput, SideChatResult } from '../shared/side-chat';
 import { composeDraftText, type DraftSnippet } from '../shared/draft';
 import fs from 'node:fs/promises';
 import path from 'node:path';
@@ -94,6 +102,7 @@ const sessionActivityEvents = new Set([
   'agent_settled',
 ]);
 interface QueuedDraft {
+  quotes: DraftQuote[];
   text: string;
   original: string;
   attachments: string[];
@@ -106,6 +115,7 @@ interface QueuedDraft {
 export class AgentService extends EventEmitter {
   runtime: Runtime = emptyRuntime();
   private rpc?: PiRpc;
+  private sideRequest?: { id: string; done: Promise<SideChatResult> };
   private modelReader?: PiRpc;
   private modelCatalogRevision = 0;
   private publishing?: NodeJS.Timeout;
@@ -149,6 +159,7 @@ export class AgentService extends EventEmitter {
   }
   get requiresStopConfirmation() {
     return (
+      Boolean(this.sideRequest) ||
       busy(this.runtime.status) ||
       this.probing ||
       this.connecting ||
@@ -441,6 +452,9 @@ export class AgentService extends EventEmitter {
   private onEvent(record: any) {
     const r = this.runtime;
     switch (record.type) {
+      case 'desktop_side_chat_delta':
+        this.emit('sideChatDelta', record);
+        return;
       case 'desktop_approval_grants':
         r.approvalGrants = record.grants;
         break;
@@ -1491,6 +1505,7 @@ export class AgentService extends EventEmitter {
           attachments: [...attachments],
           images: structuredClone(images),
           snippets: matches ? structuredClone(session.draftSnippets ?? []) : [],
+          quotes: matches ? structuredClone(session.draftQuotes ?? []) : parseUserMessage(text).quotes,
           mode,
           observed: false,
         };
@@ -1523,6 +1538,7 @@ export class AgentService extends EventEmitter {
         session.attachments = [];
         session.images = [];
         session.draftSnippets = [];
+        session.draftQuotes = [];
       }
       if (session.title === '新会话' || session.title === '新对话') {
         session.title =
@@ -1747,7 +1763,8 @@ export class AgentService extends EventEmitter {
     );
     const session = this.store.session(id);
     if (action === 'regenerate') return this.send(id, restored.text, [], 'steer', restored.images);
-    session.draft = splitUserContent(restored.text).text;
+    session.draft = userMessageInput(restored.text);
+    session.draftQuotes = parseUserMessage(restored.text).quotes;
     session.draftSnippets = [];
     session.attachments = [];
     session.images = restored.images;
@@ -1780,7 +1797,8 @@ export class AgentService extends EventEmitter {
     for (const expanded of returned) {
       const index = candidates.findIndex((draft) => draft.text === expanded);
       const draft = index < 0 ? undefined : candidates.splice(index, 1)[0];
-      const text = draft?.original ?? splitUserContent(expanded).text;
+      const text = draft?.original ?? userMessageInput(expanded);
+      const quotes = draft?.quotes ?? parseUserMessage(expanded).quotes;
       const attachments = [...new Set([...session.attachments, ...(draft?.attachments ?? [])])];
       const separator =
         (session.draft || session.draftSnippets?.length) && (text || draft?.snippets.length) ? '\n\n' : '';
@@ -1789,9 +1807,12 @@ export class AgentService extends EventEmitter {
         if (
           attachments.length > 20 ||
           Buffer.byteLength(
-            composeDraftText(session.draft, session.draftSnippets ?? []) +
-              separator +
-              composeDraftText(text, draft?.snippets ?? []),
+            composeQuotedInput(
+              composeDraftText(session.draft, session.draftSnippets ?? []) +
+                separator +
+                composeDraftText(text, draft?.snippets ?? []),
+              mergeDraftQuotes(session.draftQuotes ?? [], quotes),
+            ),
             'utf8',
           ) >
             1024 * 1024
@@ -1799,6 +1820,7 @@ export class AgentService extends EventEmitter {
           throw new Error('草稿容量不足');
         this.store.appendDraftImages(session, draft?.images ?? []);
         session.draft += separator + text;
+        session.draftQuotes = mergeDraftQuotes(session.draftQuotes ?? [], quotes);
         session.attachments = attachments;
         session.draftSnippets = [
           ...(session.draftSnippets ?? []),
@@ -1816,6 +1838,7 @@ export class AgentService extends EventEmitter {
         recovered.images = draft?.images ?? [];
         recovered.attachments = draft?.attachments ?? [];
         recovered.draftSnippets = draft?.snippets ?? [];
+        recovered.draftQuotes = quotes;
         this.runtime.notices.push('未发送的消息已保存在新的恢复会话中。');
       }
     }
@@ -2195,7 +2218,50 @@ export class AgentService extends EventEmitter {
       throw error;
     }
   }
+  sideChat(
+    id: string,
+    request: { id: string; messages: SideChatInput[] },
+    delta: (text: string) => void,
+  ): Promise<SideChatResult> {
+    if (this.sideRequest) return Promise.reject(new Error('侧边对话正在回答，请先等待或停止'));
+    if (!this.rpc || this.rpc.closed || !this.runtime.connected || this.runtime.sessionId !== id)
+      return Promise.reject(new Error('请先连接主会话，再发送侧边提问'));
+    if (!this.runtime.model) return Promise.reject(new Error('请先在主会话中选择模型'));
+    const rpc = this.rpc;
+    const started = Date.now();
+    const listener = (event: { id: string; text: string }) => {
+      if (event.id === request.id && typeof event.text === 'string') delta(event.text);
+    };
+    this.on('sideChatDelta', listener);
+    this.diagnostic(
+      `side_chat start sessionId=${id} requestId=${request.id} provider=${this.runtime.model.provider} model=${this.runtime.model.id}`,
+    );
+    const done = rpc
+      .bridge('side_chat', request)
+      .catch((error) => {
+        this.diagnostic(
+          `side_chat failed sessionId=${id} requestId=${request.id} costMs=${Date.now() - started} error=${errorText(error)}`,
+        );
+        throw error;
+      })
+      .finally(() => {
+        this.off('sideChatDelta', listener);
+        this.sideRequest = undefined;
+        this.diagnostic(
+          `side_chat end sessionId=${id} requestId=${request.id} costMs=${Date.now() - started}`,
+        );
+      });
+    this.sideRequest = { id: request.id, done };
+    return done;
+  }
+  async stopSideChat() {
+    const request = this.sideRequest;
+    if (!request) return;
+    if (this.rpc && !this.rpc.closed) await this.rpc.bridge('side_chat_abort', { id: request.id });
+    await request.done.catch(() => {});
+  }
   async disconnect() {
+    await this.stopSideChat();
     await this.crashCleanup;
     this.assertCommandsStopped();
     if (this.connecting || this.pendingOperations > 0)
@@ -2318,6 +2384,7 @@ export class AgentService extends EventEmitter {
     return this.readTranscript(s.file, live, id);
   }
   async dispose() {
+    await this.stopSideChat();
     this.shutdown = true;
     this.stopEpoch++;
     this.stopRequested = true;

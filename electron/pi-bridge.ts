@@ -20,6 +20,7 @@ import {
 } from '../shared/pi-bridge';
 import { classifyReadTarget, classifyWriteTarget } from './approval-paths';
 import { registerDesktopGoal } from './pi-goal';
+import { streamSideChat } from './pi-side-chat';
 import {
   APPROVAL_ALLOW,
   APPROVAL_ALWAYS,
@@ -35,6 +36,7 @@ import {
 
 export default function desktopBridge(pi: ExtensionAPI) {
   let authAbort: AbortController | undefined;
+  let sideChat: { id: string; controller: AbortController } | undefined;
   let approvalMode: ApprovalMode =
     (['auto', 'confirm', 'readonly'] as const).find((m) => m === process.env.PI_DESKTOP_APPROVAL) ?? 'auto';
   let approvalGrants: ApprovalGrant[] = [];
@@ -177,6 +179,24 @@ export default function desktopBridge(pi: ExtensionAPI) {
         const p = request.params ?? {};
         let data: unknown;
         switch (request.method) {
+          case 'side_chat': {
+            if (sideChat) throw new Error('侧边对话正在回答，请先等待或停止');
+            const controller = new AbortController();
+            sideChat = { id: p.id, controller };
+            try {
+              data = await streamSideChat(ctx, p, controller.signal, (text) =>
+                emit({ type: 'desktop_side_chat_delta', id: p.id, text }),
+              );
+            } finally {
+              sideChat = undefined;
+            }
+            break;
+          }
+          case 'side_chat_abort':
+            if (typeof p.id !== 'string') throw new Error('侧边提问标识无效');
+            if (sideChat && sideChat.id === p.id) sideChat.controller.abort();
+            data = { stopped: true };
+            break;
           case 'task_options': {
             const model = ctx.modelRegistry.find(p.provider, p.modelId);
             if (!model) throw new Error('该模型当前不可用，请刷新模型列表');

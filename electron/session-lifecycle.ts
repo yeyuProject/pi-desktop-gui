@@ -15,6 +15,8 @@ export function hasSessionData(session: Session): boolean {
     session.attachments.length ||
     session.images?.length ||
     session.draftSnippets?.length ||
+    session.draftQuotes?.length ||
+    session.sideUsage ||
     session.stats?.tokens ||
     session.stats?.cost,
   );

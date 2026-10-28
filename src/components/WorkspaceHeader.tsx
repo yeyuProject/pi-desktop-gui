@@ -56,6 +56,9 @@ export function WorkspaceHeader(
         </div>
       </div>
       <div className="header-actions">
+        <button disabled={!selected} onClick={() => window.dispatchEvent(new Event('pi:side'))}>
+          侧边对话
+        </button>
         {waiting.length > 0 && (
           <button
             className="attention-button"

@@ -1,6 +1,7 @@
 import path from 'node:path';
 import { THEMES } from '../shared/window-theme';
 import { busy, type AppState, type Project, type Session, type Settings } from '../shared/types';
+import { isDraftQuote } from '../shared/message-content';
 
 export const defaultSettings: Settings = {
   piPath: '',
@@ -15,6 +16,7 @@ export const defaultSettings: Settings = {
   fontScale: 1,
   sidebarWidth: 240,
   inspectorWidth: 380,
+  sideChatWidth: 360,
   inspectorSplit: 40,
   onboardingDone: false,
   notifyOnFinish: true,
@@ -102,6 +104,13 @@ export function parseState(value: unknown) {
       !optionalPath(row.file) ||
       !optionalPath(row.cwd) ||
       (row.expandedTools !== undefined && !strings(row.expandedTools)) ||
+      (row.draftQuotes !== undefined &&
+        (!Array.isArray(row.draftQuotes) || !row.draftQuotes.every(isDraftQuote))) ||
+      (row.sideUsage !== undefined &&
+        (!object(row.sideUsage) ||
+          !timestamp(row.sideUsage.tokens) ||
+          !timestamp(row.sideUsage.cost) ||
+          !timestamp(row.sideUsage.updatedAt))) ||
       (row.draftSnippets !== undefined &&
         (!Array.isArray(row.draftSnippets) ||
           row.draftSnippets.some(

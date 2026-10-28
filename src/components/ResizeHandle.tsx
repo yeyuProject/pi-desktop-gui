@@ -2,7 +2,7 @@ import { useEffect, useRef, type PointerEvent } from 'react';
 
 interface Props {
   label: string;
-  variable: '--sidebar-width' | '--inspector-width';
+  variable: '--sidebar-width' | '--inspector-width' | '--side-chat-width';
   value: number;
   min: number;
   max: number;

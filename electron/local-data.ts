@@ -9,6 +9,7 @@ export async function removeSessionScratch(directory: string, id: string) {
   validId(id);
   for (const name of [`draft-${id}.txt`, `desktop-bridge-${id}.mjs`])
     await fs.rm(path.join(directory, name), { force: true });
+  await fs.rm(path.join(directory, 'side-chats', id + '.json'), { force: true });
 }
 export async function clearDesktopRecords(directory: string) {
   const entries = await fs.readdir(directory);
@@ -16,7 +17,15 @@ export async function clearDesktopRecords(directory: string) {
     if (
       /^state(?:\.[\w.-]+)?\.json(?:\.tmp)?$/.test(name) ||
       /^(?:draft-|desktop-bridge-|export-)[\w.-]+$/.test(name) ||
-      ['draft-images', 'baselines', 'sessions', 'chats', 'window.json', 'update-install.json'].includes(name)
+      [
+        'draft-images',
+        'baselines',
+        'sessions',
+        'chats',
+        'side-chats',
+        'window.json',
+        'update-install.json',
+      ].includes(name)
     )
       await fs.rm(path.join(directory, name), { recursive: true, force: true });
   }

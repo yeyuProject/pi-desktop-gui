@@ -2,6 +2,7 @@ import { useRuntime } from './useRuntime';
 import { useHistory } from './useHistory';
 import { useStableCallbacks } from './useStableCallbacks';
 import { useDraft } from './useDraft';
+import { useSideChat } from './useSideChat';
 import { useShortcuts } from './useShortcuts';
 import { useWorkspace } from './useWorkspace';
 import { useEffect, useMemo, useRef, useState } from 'react';
@@ -165,6 +166,7 @@ export function useWorkbench() {
     isReadingAttachments,
     getDraftRevision,
   } = draftState;
+  const sideChat = useSideChat(selected, runtime, storage, draftState.addQuote);
   const workspace = useWorkspace({
     state,
     selected,
@@ -239,6 +241,7 @@ export function useWorkbench() {
     document.documentElement.style.setProperty('--font-scale', String(appearance.fontScale));
     document.documentElement.style.setProperty('--sidebar-width', appearance.sidebarWidth + 'px');
     document.documentElement.style.setProperty('--inspector-width', appearance.inspectorWidth + 'px');
+    document.documentElement.style.setProperty('--side-chat-width', (appearance.sideChatWidth ?? 360) + 'px');
   }, [state?.settings, settingsOpen, prefs]);
 
   useEffect(() => {
@@ -610,6 +613,11 @@ export function useWorkbench() {
   }, [liveTools, messages]);
   const canRerun =
     !actionsLocked && (ownRuntime ? runtime.approvalMode : selected?.approvalMode) !== 'readonly';
+  const quoteSourceKey = messages
+    .filter((m) => m.timestamp !== undefined)
+    .map((m) => `${m.role}:${m.timestamp}`)
+    .join('|');
+  const quoteSources = useMemo(() => new Set(quoteSourceKey.split('|')), [quoteSourceKey]);
   const messageContext: MessageContext = useMemo(
     () => ({
       running: ownRunning,
@@ -619,6 +627,7 @@ export function useWorkbench() {
       toolFor: toolLookup,
       canRerun,
       checkpointRevision,
+      quoteSources,
       ...stableHandlers,
     }),
     [
@@ -630,6 +639,7 @@ export function useWorkbench() {
       stableHandlers,
       canRerun,
       checkpointRevision,
+      quoteSources,
     ],
   );
   const { stopArmed, runAction } = useShortcuts({
@@ -653,6 +663,7 @@ export function useWorkbench() {
     {
       ...workspace,
       ...draftState,
+      sideChat,
       askHunk,
       rerunCommand,
       update,

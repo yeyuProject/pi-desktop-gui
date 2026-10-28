@@ -12,10 +12,61 @@ import {
 import { SessionSearch } from '../src/lib/session-search';
 import { parseArgumentHint, parsePromptArguments, formatPromptArguments } from '../src/lib/prompt-arguments';
 import { tokenizeCode } from '../src/lib/code-tokens';
-import { splitUserContent } from '../src/lib/message-content';
+import {
+  parseSkillBlock as parseDesktopSkillBlock,
+  splitUserContent,
+  userMessageInput,
+} from '../src/lib/message-content';
 import type { Message, ToolActivity } from '../shared/types';
 import { parseCommandArgs } from '../node_modules/@earendil-works/pi-coding-agent/dist/core/prompt-templates.js';
 import { parseSkillBlock } from '../node_modules/@earendil-works/pi-coding-agent/dist/core/agent-session.js';
+import {
+  composeQuotedInput,
+  formatMessageQuotes,
+  mergeDraftQuotes,
+  parseUserMessage,
+  splitMessageQuotes,
+  truncateQuote,
+  type DraftQuote,
+} from '../shared/message-content';
+
+test('conversation quotes round-trip their exact source, text order and native skill invocation', () => {
+  const first: DraftQuote = {
+    id: 'q1',
+    role: 'assistant',
+    turn: 3,
+    messageTimestamp: 123,
+    section: 'code',
+    text: 'const x = 1;\n> nested\n\nlast',
+  };
+  const second: DraftQuote = {
+    ...first,
+    id: 'q2',
+    role: 'toolResult',
+    section: 'tool',
+    messageTimestamp: 124,
+    text: 'output',
+  };
+  const quotes = [first, second];
+  const input = composeQuotedInput('这两处冲突吗', quotes);
+  assert.deepEqual(splitMessageQuotes(input), { quotes, text: '这两处冲突吗' });
+  assert.equal(userMessageInput(input), '这两处冲突吗');
+  assert.equal(turnTitle({ role: 'user', content: input }).title, '这两处冲突吗');
+  assert.deepEqual(mergeDraftQuotes([first], [{ ...first, id: 'duplicate' }, second]), quotes);
+  const command = composeQuotedInput('/skill:review 帮我看看', quotes);
+  assert.ok(command.startsWith('/skill:review '));
+  const expanded = `<skill name="review" location="/fixture/SKILL.md">\nbody\n</skill>\n\n${command.slice('/skill:review '.length)}`;
+  assert.equal(userMessageInput(expanded), '/skill:review 帮我看看');
+  assert.deepEqual(parseUserMessage(expanded).quotes, quotes);
+  assert.equal(splitMessageQuotes('> [引用 第 1 轮 Pi 回复]\n> ordinary Markdown').quotes.length, 0);
+  const invalid = '> [引用 第 1 轮 Pi 回复](pi-quote:malformed)\n> text';
+  assert.equal(splitMessageQuotes(invalid).text, invalid);
+  const truncated = { ...first, text: '龙'.repeat(8000), truncated: true };
+  assert.deepEqual(splitMessageQuotes(formatMessageQuotes([truncated])).quotes, [truncated]);
+  const long = truncateQuote({ ...first, text: '🐉'.repeat(8001) });
+  assert.equal(Array.from(long.text).length, 8000);
+  assert.equal(long.truncated, true);
+});
 
 test('turn titles remove native file attachments and show the user message from a native skill invocation', () => {
   const skill = '<skill name="review" location="/fixture/SKILL.md">\nSkill instructions\n</skill>';
@@ -53,8 +104,56 @@ test('turn title skill recognition follows Pi parseSkillBlock instead of guessin
   ];
   for (const content of candidates) {
     const native = parseSkillBlock(content);
+    assert.deepEqual(parseDesktopSkillBlock(content), native);
     assert.equal(turnTitle({ role: 'user', content }).skillName, native?.name);
   }
+});
+
+test('skill input recovery strips attached files and restores only the native invocation and user arguments', () => {
+  const body = Array.from({ length: 300 }, (_, i) => `Instruction ${i + 1}`).join('\n');
+  const skill = `<skill name="review" location="C:/skills/review/SKILL.md">\n${body}\n</skill>`;
+  const attachment = '\n\n<project_file path="src/api.ts">\nfile contents\n</project_file>';
+  const content = skill + '\n\n帮我看看\n保留参数' + attachment;
+  assert.equal(parseDesktopSkillBlock(splitUserContent(content).text)?.content, body);
+  assert.equal(userMessageInput(content), '/skill:review 帮我看看\n保留参数');
+  assert.equal(userMessageInput(skill), '/skill:review');
+  assert.equal(userMessageInput('  ordinary input\n' + attachment), '  ordinary input\n');
+  const malformed = '<skill name="review">\nDo not guess\n</skill>';
+  assert.equal(userMessageInput(malformed), malformed);
+  assert.equal(content, skill + '\n\n帮我看看\n保留参数' + attachment);
+});
+
+test('turn replies select the last assistant body across tools and thinking and hide only the running turn', () => {
+  const messages: Message[] = [
+    { role: 'user', content: 'first' },
+    { role: 'assistant', content: 'intermediate answer' },
+    { role: 'assistant', content: [{ type: 'toolCall', id: 'read', name: 'read' }] },
+    { role: 'toolResult', toolCallId: 'read', content: 'must not copy tool output' },
+    {
+      role: 'assistant',
+      content: [
+        { type: 'thinking', thinking: 'private thought' },
+        { type: 'text', text: 'final answer' },
+      ],
+    },
+    { role: 'assistant', content: [{ type: 'thinking', thinking: 'later thought without body' }] },
+    { role: 'user', content: 'no reply' },
+    { role: 'assistant', content: '  \n' },
+    { role: 'user', content: 'last' },
+    { role: 'assistant', content: 'streaming reply' },
+  ];
+  const completed = conversationTurns(messages, () => tool('read'));
+  assert.deepEqual(
+    completed.map((turn) => turn.replyIndex),
+    [4, undefined, 9],
+  );
+  assert.deepEqual(
+    conversationTurns(messages, () => tool('read'), true).map((turn) => turn.replyIndex),
+    [4, undefined, undefined],
+  );
+  assert.equal(completed[0].index, 0);
+  assert.ok(Array.isArray(messages[4].content));
+  assert.equal(messages[4].content[0].type, 'thinking');
 });
 
 test('turn titles normalize multiline Markdown and distinguish image-only and empty requests', () => {

@@ -1,11 +1,11 @@
 import { messageText, type ContentBlock, type Message, type ToolActivity } from '../../shared/types';
 import { stripAnsi } from './ansi';
-import { splitUserContent } from './message-content';
+import { parseUserMessage } from './message-content';
 
 export interface SessionMatch {
   messageIndex?: number;
   toolId?: string;
-  section: 'text' | 'thinking' | 'attachment' | 'tool';
+  section: 'text' | 'skill' | 'quote' | 'thinking' | 'attachment' | 'tool';
   snippet: string;
   text: string;
   query: string;
@@ -61,8 +61,13 @@ export class SessionSearch {
       );
     } else {
       if (message.role === 'user') {
-        const parsed = splitUserContent(messageText(message));
-        parts.push(part(parsed.text, { section: 'text' }));
+        const parsed = parseUserMessage(messageText(message));
+        const skill = parsed.skill;
+        if (skill) parts.push(part(skill.content, { section: 'skill' }));
+        parsed.quotes.forEach((quote, blockIndex) =>
+          parts.push(part(quote.text, { section: 'quote', blockIndex })),
+        );
+        parts.push(part(parsed.text || (skill ? `使用技能 ${skill.name}` : ''), { section: 'text' }));
         parsed.files.forEach((file, blockIndex) =>
           parts.push(part(file.path + '\n' + file.text, { section: 'attachment', blockIndex })),
         );

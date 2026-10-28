@@ -83,6 +83,18 @@ export function validateRpcResult(command: string, value: unknown) {
 
 export function validateBridgeResult(method: string, value: unknown) {
   if (
+    method === 'side_chat' &&
+    (!object(value) ||
+      typeof value.text !== 'string' ||
+      typeof value.aborted !== 'boolean' ||
+      !object(value.usage) ||
+      !numbers(value.usage.tokens) ||
+      value.usage.tokens < 0 ||
+      !numbers(value.usage.cost) ||
+      value.usage.cost < 0)
+  )
+    incompatible('侧边回答', '回答或费用数据无效');
+  if (
     method === 'options' &&
     (!object(value) ||
       value.protocolVersion !== DESKTOP_BRIDGE_PROTOCOL ||

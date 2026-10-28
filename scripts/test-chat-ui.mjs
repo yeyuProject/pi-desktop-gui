@@ -3,7 +3,12 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs/promises';
 import path from 'node:path';
 import { createLocalProvider, prepareRealPiFixture } from '../tests/support/local-provider.ts';
-import { verifyTurnOutlineUI } from '../tests/support/turn-outline-ui.mjs';
+import {
+  verifyTurnOutlineUI,
+  verifyNativeSkillUI,
+  verifyMessageContentUI,
+} from '../tests/support/turn-outline-ui.mjs';
+import { verifyQuoteSideChatUI } from '../tests/support/quote-side-chat-ui.mjs';
 
 const provider = await createLocalProvider({ holdSlowResponses: true });
 const fixture = await prepareRealPiFixture(provider.baseUrl, 'chat-ui');
@@ -539,8 +544,11 @@ try {
   console.log(
     'PASS a new chat initializes independently while the existing response keeps running; stop targets only that response',
   );
+  const quoteSideChat = await verifyQuoteSideChatUI({ app, page, fixture, provider, output });
+  const nativeSkill = await verifyNativeSkillUI({ app, page, fixture, provider });
   const requestsBeforeOutline = provider.requests.length;
   const outline = await verifyTurnOutlineUI({ app, page, output });
+  const messageContent = await verifyMessageContentUI({ app, page, output });
   assert.equal(
     provider.requests.length,
     requestsBeforeOutline,
@@ -578,6 +586,9 @@ try {
         ],
         consoleErrors: errors,
         outline,
+        nativeSkill,
+        quoteSideChat,
+        messageContent,
       },
       null,
       2,

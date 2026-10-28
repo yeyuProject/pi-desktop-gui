@@ -117,7 +117,7 @@ export async function createLocalProvider(options: { holdSlowResponses?: boolean
             : `printf 'WAITING_FOR_STOP\\n'; sleep ${prompt.includes('E2E_ORPHAN') ? 2 : 30}; printf 'NOT_STOPPED' > should-not-exist.txt`),
       });
     }
-    if (prompt.includes('E2E_SLOW')) {
+    if (prompt.includes('E2E_SLOW') || prompt.includes('E2E_SIDE_HOLD')) {
       if (options.holdSlowResponses) {
         // A fixture-controlled gate: only client cancellation or provider.close ends this stream.
         // Tests can wait for unrelated startup without racing the default 20-second response.
@@ -134,6 +134,13 @@ export async function createLocalProvider(options: { holdSlowResponses?: boolean
         }
       }, 20000);
       res.on('close', () => clearTimeout(timer));
+      return;
+    }
+    if (prompt.startsWith('E2E_USAGE_SIDE')) {
+      chunk({ role: 'assistant', content: '侧边回答：' });
+      await new Promise((resolve) => setTimeout(resolve, 30));
+      chunk({ content: '这是独立的问答结果。' });
+      done();
       return;
     }
     chunk({ role: 'assistant', content: 'OK' });

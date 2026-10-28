@@ -249,6 +249,21 @@ try {
     console.log(JSON.stringify(item));
     assert.ok(observation.outlineButtons <= 60, 'outline DOM must stay bounded');
     assert.ok(observation.outlineRows <= 60, 'outline rows must stay bounded independently of filters');
+    if (spec.messages === 5000 && !spec.patchLines) {
+      const outline = page.getByRole('navigation', { name: '对话轮次' });
+      const rows = outline.locator('button[data-outline-index]');
+      await rows.last().focus();
+      await rows.nth((await rows.count()) - 2).hover();
+      await expect(outline.locator('.turn-copy')).toHaveCount(2);
+      observation.outlineButtonsOnInteraction = await outline.locator('button').count();
+      assert.ok(
+        observation.outlineButtonsOnInteraction <= 60,
+        'hover and keyboard copy controls must stay within the DOM budget',
+      );
+      await page.locator('.thread').focus();
+      const viewport = await page.locator('.thread').boundingBox();
+      await page.mouse.move(viewport.x + 20, viewport.y + 20);
+    }
     assert.equal(observation.renderedMessages, spec.patchLines ? 40 : spec.expand ? spec.messages : 80);
     const input = page.getByRole('textbox', { name: '任务输入' });
     await input.fill('');

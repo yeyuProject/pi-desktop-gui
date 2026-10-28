@@ -1,11 +1,11 @@
 import { Children, isValidElement, memo, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
-import { FileText, Copy, Check, WrapText } from 'lucide-react';
+import { FileText, Copy, Check, WrapText, BookOpen, ChevronDown, ChevronRight } from 'lucide-react';
 import Markdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import { type Message } from '../../../shared/types';
 import { Lightbox } from '../Lightbox';
 import { tokenizeCode } from '../../lib/code-tokens';
-import { splitUserContent } from '../../lib/message-content';
+import { parseUserMessage, quoteLabel, type DraftQuote } from '../../lib/message-content';
 import { SearchHighlight } from './SearchHighlight';
 import type { SessionMatch } from '../../lib/session-search';
 import { streamingMarkdown, type MarkdownParts } from '../../lib/streaming-markdown';
@@ -159,11 +159,86 @@ export function MessageImages({ message }: { message: Message }) {
     </div>
   );
 }
-export function UserMessage({ text, match }: { text: string; match?: SessionMatch }) {
-  const parsed = useMemo(() => splitUserContent(text), [text]);
+export function UserMessage({
+  text,
+  match,
+  viewId,
+  expanded,
+  toggle,
+  copy,
+  quoteSources,
+}: {
+  text: string;
+  match?: SessionMatch;
+  viewId: number;
+  expanded: string[];
+  toggle: (id: string, open: boolean) => void;
+  copy: (text: string) => void;
+  quoteSources?: Set<string>;
+}) {
+  const parsed = useMemo(() => parseUserMessage(text), [text]);
+  const skill = parsed.skill;
+  const body = parsed.text || (skill ? `使用技能 ${skill.name}` : '');
+  const lines = useMemo(() => body.split(/\r?\n/).length, [body]);
+  const long = lines > 12 || body.length > 1200;
+  const skillId = `skill:${viewId}`,
+    promptId = `prompt:${viewId}`;
+  const skillOpen = expanded.includes(skillId) || match?.section === 'skill';
+  const promptOpen = expanded.includes(promptId) || match?.section === 'text';
+  useEffect(() => {
+    if (skill && match?.section === 'skill' && !expanded.includes(skillId)) toggle(skillId, true);
+    if (long && match?.section === 'text' && !expanded.includes(promptId)) toggle(promptId, true);
+  }, [match, skill, long, expanded, skillId, promptId, toggle]);
   return (
     <>
-      <RichText text={parsed.text} />
+      {skill && (
+        <div className="message-attachment message-skill">
+          <button
+            className="skill-toggle"
+            aria-expanded={skillOpen}
+            title={skill.location}
+            onClick={() => toggle(skillId, !skillOpen)}
+          >
+            {skillOpen ? <ChevronDown size={13} /> : <ChevronRight size={13} />}
+            <BookOpen size={13} />
+            技能 · {skill.name} · {skill.content.split(/\r?\n/).length} 行
+          </button>
+          {skillOpen && (
+            <>
+              <button className="skill-copy" onClick={() => copy(skill.content)}>
+                <Copy size={13} />
+                复制技能正文
+              </button>
+              <div className="skill-content" data-search-section="skill">
+                <RichText text={skill.content} />
+              </div>
+            </>
+          )}
+        </div>
+      )}
+      {parsed.quotes.map((quote, index) => (
+        <QuoteCard
+          key={quote.id}
+          quote={quote}
+          available={quoteSources?.has(`${quote.role}:${quote.messageTimestamp}`) ?? false}
+          match={match?.section === 'quote' && match.blockIndex === index ? match : undefined}
+        />
+      ))}
+      <div
+        className={`user-message-text${long && !promptOpen ? ' collapsed' : ''}`}
+        data-search-section="text"
+      >
+        <RichText text={body} />
+      </div>
+      {long && (
+        <button
+          className="user-message-expand"
+          aria-expanded={promptOpen}
+          onClick={() => toggle(promptId, !promptOpen)}
+        >
+          {promptOpen ? '收起' : `展开全文（共 ${lines} 行）`}
+        </button>
+      )}
       {parsed.files.map((file, i) => (
         <details
           className="message-attachment"
@@ -186,5 +261,40 @@ export function UserMessage({ text, match }: { text: string; match?: SessionMatc
         </details>
       ))}
     </>
+  );
+}
+
+export function QuoteCard({
+  quote,
+  available,
+  match,
+}: {
+  quote: DraftQuote;
+  available: boolean;
+  match?: SessionMatch;
+}) {
+  const [expanded, setExpanded] = useState(false);
+  const long = quote.text.split(/\r?\n/).length > 4;
+  const open = expanded || Boolean(match);
+  return (
+    <div className="message-quote" data-search-section="quote">
+      <button
+        className="quote-origin"
+        disabled={!available}
+        title={available ? '回到引用原文' : '原文已不在当前会话分支'}
+        onClick={() => window.dispatchEvent(new CustomEvent('pi:quote', { detail: quote }))}
+      >
+        ❝ {quoteLabel(quote)}
+        {quote.truncated ? '（已截断）' : ''}
+      </button>
+      <pre className={long && !open ? 'quote-text collapsed' : 'quote-text'}>
+        <SearchHighlight text={quote.text} query={match?.query} activeStart={match?.start} />
+      </pre>
+      {long && (
+        <button className="quote-expand" aria-expanded={open} onClick={() => setExpanded(!open)}>
+          {open ? '收起引用' : '展开引用'}
+        </button>
+      )}
+    </div>
   );
 }

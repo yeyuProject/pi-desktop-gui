@@ -1,5 +1,5 @@
 import { messageText, type Message, type ToolActivity } from '../../shared/types';
-import { splitUserContent } from './message-content';
+import { parseUserMessage } from './message-content';
 const readOnly = new Set(['read', 'grep', 'find', 'ls', 'tool_search']);
 
 /** Nested calls have live tool events but no separate transcript message. */
@@ -130,6 +130,7 @@ export interface TurnItem {
   title: string;
   tooltip: string;
   skillName?: string;
+  replyIndex?: number;
   modified: boolean;
   failed: boolean;
   added: number;
@@ -138,15 +139,11 @@ export interface TurnItem {
 type TurnTitle = Pick<TurnItem, 'title' | 'tooltip' | 'skillName'>;
 const turnTitles = new WeakMap<Message, { content: Message['content']; value: TurnTitle }>();
 
-/** The skill-block grammar matches Pi 1.4 parseSkillBlock without importing its Node runtime. */
 export function turnTitle(message: Message): TurnTitle {
   const cached = turnTitles.get(message);
   if (cached && cached.content === message.content) return cached.value;
-  const text = splitUserContent(messageText(message)).text;
-  const skill = text.match(
-    /^<skill name="([^"]+)" location="([^"]+)">\n([\s\S]*?)\n<\/skill>(?:\n\n([\s\S]+))?$/,
-  );
-  const clean = (skill ? skill[4]?.trim() || `使用技能 ${skill[1]}` : text)
+  const { text, skill } = parseUserMessage(messageText(message));
+  const clean = (text || (skill ? `使用技能 ${skill.name}` : ''))
     .replace(/^[ \t]*(?:(?:#{1,6}(?:[ \t]+|$)|>[ \t]*|(?:[-+*]|\d+[.)])(?:[ \t]+|$)))+/gm, '')
     .replace(/\s+/g, ' ')
     .trim();
@@ -162,7 +159,7 @@ export function turnTitle(message: Message): TurnTitle {
   const value: TurnTitle = {
     title: characters.slice(0, 80).join(''),
     tooltip: characters.join(''),
-    ...(skill ? { skillName: skill[1] } : {}),
+    ...(skill ? { skillName: skill.name } : {}),
   };
   turnTitles.set(message, { content: message.content, value });
   return value;
@@ -185,6 +182,7 @@ function countChanges(tool: ToolActivity) {
 export function conversationTurns(
   messages: Message[],
   toolFor: (message: Message) => ToolActivity,
+  running = false,
 ): TurnItem[] {
   const turns: TurnItem[] = [];
   for (let index = 0; index < messages.length; index++) {
@@ -202,6 +200,13 @@ export function conversationTurns(
     const current = turns.at(-1);
     if (!current) continue;
     if (
+      message.role === 'assistant' &&
+      (typeof message.content === 'string'
+        ? message.content.trim()
+        : message.content.some((block) => block.type === 'text' && block.text?.trim()))
+    )
+      current.replyIndex = index;
+    if (
       message.errorMessage ||
       message.isError ||
       (message.role === 'bashExecution' && Number(message.exitCode))
@@ -216,6 +221,7 @@ export function conversationTurns(
       current.removed += counts.removed;
     }
   }
+  if (running && turns.length) turns.at(-1)!.replyIndex = undefined;
   return turns;
 }
 

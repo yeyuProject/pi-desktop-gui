@@ -337,6 +337,7 @@ export class SessionAgents extends EventEmitter {
   async stop() {
     const results = await Promise.allSettled(
       [...this.agents.values()].map(async (agent) => {
+        await agent.stopSideChat();
         await agent.stop();
         agent.assertCommandsStopped();
       }),
