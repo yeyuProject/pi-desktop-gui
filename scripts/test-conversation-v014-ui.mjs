@@ -274,7 +274,10 @@ try {
   );
   assert.equal(reruns.at(-2).args[1], '!!npm test');
   assert.equal(reruns.at(-1).args[1], '!npm test');
-  await page.getByTitle(/^第 2 轮：/).click();
+  const outline = page.getByRole('navigation', { name: '对话轮次' });
+  await outline.locator('button[data-outline-index]').first().focus();
+  await page.keyboard.press('Home');
+  await outline.getByRole('button', { name: /^第 2 轮：/ }).click();
   await page.waitForFunction(
     () => document.querySelector('[data-message-index="2"]')?.getBoundingClientRect().top < 250,
   );
