@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react';
 import { type ExtensionDialog, type Runtime } from '../../shared/types';
 import { Modal } from './Modal';
 import { GoalDialog } from './GoalDialog';
-import { GOAL_DIALOG_TITLE } from '../../shared/goal';
+import { GOAL_DIALOG_TITLE, GOAL_EDIT_DIALOG_TITLE } from '../../shared/goal';
 
 export function ExtensionPrompt({
   request,
@@ -17,19 +17,28 @@ export function ExtensionPrompt({
 }) {
   const [value, setValue] = useState(request.prefill ?? request.options?.[0] ?? '');
   const [now, setNow] = useState(Date.now());
+  const [editingGoal] = useState(runtime.goal);
   useEffect(() => {
     if (!request.expiresAt) return;
     const timer = setInterval(() => setNow(Date.now()), 500);
     return () => clearInterval(timer);
   }, [request.expiresAt]);
   const left = request.expiresAt ? Math.max(0, Math.ceil((request.expiresAt - now) / 1000)) : undefined;
-  if (request.title === GOAL_DIALOG_TITLE)
+  if (request.title === GOAL_DIALOG_TITLE || request.title === GOAL_EDIT_DIALOG_TITLE)
     return (
       <GoalDialog
         runtime={runtime}
+        editing={request.title === GOAL_EDIT_DIALOG_TITLE}
+        initialObjective={request.title === GOAL_EDIT_DIALOG_TITLE ? editingGoal?.objective : undefined}
         close={() => void respond({ cancelled: true })}
         submit={async (objective, tokenBudget) => {
-          await respond({ value: JSON.stringify({ action: 'start', objective, tokenBudget }) });
+          await respond({
+            value: JSON.stringify(
+              request.title === GOAL_EDIT_DIALOG_TITLE
+                ? { action: 'edit', goalId: editingGoal?.id, revision: editingGoal?.revision, objective }
+                : { action: 'start', objective, tokenBudget },
+            ),
+          });
         }}
       />
     );

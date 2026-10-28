@@ -456,6 +456,15 @@ export class AgentService extends EventEmitter {
     switch (record.type) {
       case 'desktop_goal':
         r.goal = record.goal;
+        if (record.open) r.goalOpenRequest = (r.goalOpenRequest ?? 0) + 1;
+        if (r.goal?.status === 'active' && r.sessionId) {
+          const session = this.store.session(r.sessionId);
+          if (session.title === '新会话' || session.title === '新对话') {
+            session.title = r.goal.objective.split(/\r?\n/)[0].slice(0, 28);
+            void this.rpc?.request('set_session_name', { name: session.title }).catch(() => {});
+            this.activity();
+          }
+        }
         delete r.widgets['desktop-goal'];
         delete r.statuses['desktop-goal'];
         this.publish(true);
@@ -1573,11 +1582,11 @@ export class AgentService extends EventEmitter {
         session.draftSnippets = [];
         session.draftQuotes = [];
       }
-      if (session.title === '新会话' || session.title === '新对话') {
-        session.title =
-          text.trim() === '/goal'
-            ? 'Goal'
-            : text.trim().split('\n')[0].slice(0, 28) || images[0]?.name || '图片对话';
+      if (
+        (session.title === '新会话' || session.title === '新对话') &&
+        !/^\/goal(?:\s|$)/.test(text.trim())
+      ) {
+        session.title = text.trim().split('\n')[0].slice(0, 28) || images[0]?.name || '图片对话';
         void this.rpc!.request('set_session_name', { name: session.title }).catch(() => {});
       }
       this.activity();

@@ -30,7 +30,7 @@ import { createWorkspaceHandlers, type WorkspaceHandlerName } from './ipc/worksp
 import { WorkspaceWatcher } from './workspace-watch';
 import { isEmptySession, hasSessionData, fillSessionUsage } from './session-maintenance';
 import { aggregateUsage } from '../shared/usage';
-import { validateGoalAction } from '../shared/goal';
+import { validateGoalAction, goalNotificationTitle } from '../shared/goal';
 import { composeDraftText } from '../shared/draft';
 import { isDraftQuote } from '../shared/message-content';
 import { splitMessageQuotes } from '../shared/message-content';
@@ -234,7 +234,10 @@ const save = async () => {
   await store.save();
   send({ type: 'state', state: store.state });
 };
-const attention = new Map<string, { status: string; dialogs: number }>();
+const attention = new Map<
+  string,
+  { status: string; dialogs: number; goalKey?: string; goalOutcome?: { title: string; body: string } }
+>();
 function updateAttentionBadge() {
   const count = [...attention.values()].reduce((sum, item) => sum + item.dialogs, 0);
   app.setBadgeCount(count);
@@ -250,7 +253,20 @@ let _lastToast: Notification | undefined;
 function notifyAttention(runtime: Runtime) {
   if (!runtime.sessionId) return;
   const previous = attention.get(runtime.sessionId);
-  attention.set(runtime.sessionId, { status: runtime.status, dialogs: runtime.dialogs.length });
+  const finished = !!previous && busy(previous.status) && !busy(runtime.status);
+  const goal = runtime.goal;
+  const goalKey = goal ? `${goal.id}:${goal.revision}:${goal.status}` : undefined;
+  const goalTitle = goal && goalNotificationTitle(goal.status);
+  const goalOutcome =
+    goalTitle && goal && previous?.goalKey !== goalKey
+      ? { title: goalTitle, body: redact(goal.reason || goal.summary || '点击查看结果').slice(0, 160) }
+      : previous?.goalOutcome;
+  attention.set(runtime.sessionId, {
+    status: runtime.status,
+    dialogs: runtime.dialogs.length,
+    goalKey,
+    goalOutcome: !finished && busy(runtime.status) ? goalOutcome : undefined,
+  });
   updateAttentionBadge();
   if (
     !window ||
@@ -262,12 +278,15 @@ function notifyAttention(runtime: Runtime) {
   if (!Notification.isSupported()) return;
   const session = store.state.sessions.find((s) => s.id === runtime.sessionId);
   if (!session) return;
-  const finished = busy(previous.status) && !busy(runtime.status);
   let title: string, body: string;
   if (runtime.dialogs.length > previous.dialogs) {
     if (store.state.settings.notifyOnApproval === false) return;
     title = 'Pi 需要你的回复';
     body = runtime.dialogs.at(-1)?.title || session.title;
+  } else if (finished && goalOutcome) {
+    if (!store.state.settings.notifyOnFinish) return;
+    title = goalOutcome.title + ' · ' + session.title;
+    body = goalOutcome.body;
   } else if (finished && runtime.status === 'completed') {
     if (!store.state.settings.notifyOnFinish) return;
     title = '任务已完成 · ' + session.title;

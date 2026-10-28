@@ -13,7 +13,10 @@ let service = new AgentService(fixture.store, new Workspace(fixture.dataDir));
 interface GoalState {
   id: string;
   objective: string;
-  status: 'active' | 'paused' | 'blocked' | 'completed';
+  status: 'active' | 'paused' | 'blocked' | 'budget_limited' | 'usage_limited' | 'completed';
+  revision: number;
+  billedTokensUsed: number;
+  timeUsedMs: number | null;
   tokenBudget?: number;
   tokensUsed: number;
   continuations: number;
@@ -57,8 +60,8 @@ try {
   await service.connect(fixture.sessionId);
   assert.ok(service.runtime.commands.some((command) => command.name === 'goal'));
   const resources = await service.admin(fixture.sessionId, 'resources');
-  assert.ok(resources.activeTools.includes('desktop_goal_complete'));
-  assert.ok(resources.activeTools.includes('desktop_goal_blocked'));
+  assert.ok(resources.activeTools.includes('desktop_goal_update'));
+  assert.ok(resources.activeTools.includes('desktop_goal_plan'));
 
   provider.reset('continue');
   await send('/goal Complete the deterministic integration verification.');
@@ -71,11 +74,8 @@ try {
     'a partial text response must continue once, and completion must not start a third request',
   );
   assert.equal(completed.continuations, 1);
-  assert.ok(completed.summary && completed.evidence);
-  assert.equal(
-    service.runtime.tools.findLast((tool) => tool.name === 'desktop_goal_complete')?.status,
-    'done',
-  );
+  assert.ok(completed.summary);
+  assert.equal(service.runtime.tools.findLast((tool) => tool.name === 'desktop_goal_update')?.status, 'done');
   await send('/goal status');
   await settled();
   assert.equal(provider.count, 2, 'reading Goal status must not call the model');
@@ -93,7 +93,7 @@ try {
     2,
     'a rejected mixed completion must be followed by one standalone completion',
   );
-  const completionTools = service.runtime.tools.filter((tool) => tool.name === 'desktop_goal_complete');
+  const completionTools = service.runtime.tools.filter((tool) => tool.name === 'desktop_goal_update');
   assert.deepEqual(
     completionTools.map((tool) => tool.status),
     ['error', 'done'],
@@ -171,22 +171,87 @@ try {
   await send('/goal clear');
   provider.reset('budget');
   await send('/goal --tokens 100 Stop this goal when the first response exhausts its token allowance.');
-  await until(async () => (await goalState())?.status === 'paused', 'Token limit did not pause the Goal');
+  await until(
+    async () => (await goalState())?.status === 'budget_limited',
+    'Token limit did not limit the Goal',
+  );
   await settled();
   const limited = (await goalState())!;
   assert.equal(limited.tokenBudget, 100);
   assert.equal(
     limited.tokensUsed,
-    120,
+    240,
     'use authoritative Pi-reported tokens, including the response that crossed the limit',
   );
   assert.ok(limited.reason, 'the budget stop must explain why work stopped');
-  assert.equal(provider.count, 1, 'budget exhaustion must not request an automatic continuation');
+  assert.equal(provider.count, 2, 'budget exhaustion allows one wrap-up request');
+  assert.equal(service.runtime.tools.findLast((tool) => tool.name === 'read')?.status, 'done');
+  assert.ok(JSON.stringify(provider.requests.at(-1)?.body).includes('Goal 已达到用量上限。'));
   await send('/goal status');
   await settled();
-  assert.equal(provider.count, 1);
+  assert.equal(provider.count, 2);
   assert.deepEqual(provider.errors, []);
-  console.log('PASS real Pi token accounting pauses exhausted Goals without another automatic request');
+  console.log('PASS real Pi budget exhaustion finishes current tools and sends one wrap-up request');
+  await send('/goal clear');
+  provider.reset('long');
+  await send('/goal Keep working through thirty automatic continuations.');
+  await until(async () => (await goalState())?.status === 'completed', 'Long Goal did not complete');
+  await settled();
+  assert.equal(provider.count, 61);
+  assert.equal((await goalState())!.continuations, 30);
+  console.log('PASS thirty real Pi continuations complete without a hard limit');
+
+  await send('/goal clear');
+  provider.reset('cached');
+  await send('/goal Verify cached usage across ten requests.');
+  await until(async () => (await goalState())?.status === 'completed', 'Cached Goal did not complete');
+  await settled();
+  assert.equal(provider.count, 10);
+  assert.equal((await goalState())!.tokensUsed, 15000);
+  assert.equal((await goalState())!.billedTokensUsed, 915000);
+  console.log('PASS real provider normalization excludes cached input');
+
+  await send('/goal clear');
+  provider.reset('quota');
+  await send('/goal Show a distinct quota state.');
+  await until(async () => (await goalState())?.status === 'usage_limited', 'Quota state missing');
+  await settled();
+  console.log('PASS provider quota errors stop in usage_limited');
+
+  await send('/goal clear');
+  provider.reset('edit');
+  await send('/goal Original objective before steering.');
+  await until(() => provider.count === 1, 'Edit scenario did not start');
+  const editing = (await goalState())!;
+  await service.goalAction(fixture.sessionId, {
+    action: 'edit',
+    goalId: editing.id,
+    revision: editing.revision,
+    objective: 'Updated objective after steering.',
+  });
+  assert.equal((await goalState())!.revision, 2);
+  provider.release();
+  await until(async () => (await goalState())?.status === 'completed', 'Edited Goal did not complete');
+  await settled();
+  assert.equal(provider.count, 2);
+  assert.ok(JSON.stringify(provider.requests.at(-1)?.body).includes('Updated objective after steering.'));
+  assert.ok(
+    service.runtime.messages.some(
+      (message) =>
+        message.role === 'custom' && message.customType === 'desktop-goal-updated' && message.display,
+    ),
+  );
+  console.log('PASS edit during streaming steers the new objective and revision');
+
+  await send('/goal clear');
+  provider.reset('budget-ignore');
+  await send('/goal --tokens 100 Bound wrap-up even when the model continues calling tools.');
+  await until(async () => (await goalState())?.status === 'budget_limited', 'Wrap-up guard not started');
+  await settled();
+  assert.ok(provider.count <= 4, `Wrap-up exceeded three requests: ${provider.count}`);
+  assert.equal((await goalState())!.status, 'budget_limited');
+  assert.deepEqual(provider.errors, []);
+  console.log('PASS ignored wrap-up is bounded to three additional model requests');
 } finally {
   await service.dispose().catch(() => {});
   await provider.close();

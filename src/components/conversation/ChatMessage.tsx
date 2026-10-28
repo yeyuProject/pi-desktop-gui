@@ -132,6 +132,12 @@ export const ChatMessage = memo(
           </small>
         </article>
       );
+    if (m.role === 'custom' && m.customType === 'desktop-goal-updated')
+      return (
+        <div className="goal-updated-divider" role="separator">
+          目标已修改
+        </div>
+      );
     if (m.role === 'custom' || m.role === 'branchSummary' || m.role === 'compactionSummary')
       return (
         <article className="message">

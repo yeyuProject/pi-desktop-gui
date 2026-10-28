@@ -234,6 +234,7 @@ export interface ProviderInfo {
 }
 export interface Runtime {
   goal?: GoalSnapshot | null;
+  goalOpenRequest?: number;
   sessionId?: string;
   status: RunStatus;
   messages: Message[];
