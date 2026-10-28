@@ -157,9 +157,11 @@ export class AgentService extends EventEmitter {
   get hasPendingWork() {
     return this.pendingOperations > 0 || this.requiresStopConfirmation;
   }
+  get sideChatRunning() {
+    return Boolean(this.sideRequest);
+  }
   get requiresStopConfirmation() {
     return (
-      Boolean(this.sideRequest) ||
       busy(this.runtime.status) ||
       this.probing ||
       this.connecting ||
@@ -452,6 +454,12 @@ export class AgentService extends EventEmitter {
   private onEvent(record: any) {
     const r = this.runtime;
     switch (record.type) {
+      case 'desktop_goal':
+        r.goal = record.goal;
+        delete r.widgets['desktop-goal'];
+        delete r.statuses['desktop-goal'];
+        this.publish(true);
+        return;
       case 'desktop_side_chat_delta':
         this.emit('sideChatDelta', record);
         return;
@@ -863,6 +871,24 @@ export class AgentService extends EventEmitter {
     if (file) {
       try {
         const transcript = await readSessionFile(file);
+        if (
+          this.runtime === runtime &&
+          !runtime.connected &&
+          !this.connecting &&
+          (transcript.goal || runtime.goal) &&
+          (!runtime.sessionId || runtime.sessionId === sessionId)
+        ) {
+          runtime.sessionId = sessionId;
+          runtime.goal = transcript.goal
+            ? {
+                ...transcript.goal,
+                ...(transcript.goal.status === 'active'
+                  ? { status: 'paused', reason: '会话已停止，点击继续后重新连接并恢复 Goal。' }
+                  : {}),
+              }
+            : null;
+          this.publish(true);
+        }
         const session = this.store.state?.sessions?.find((item) => item.id === sessionId);
         if (session && session.historyNotice !== transcript.warning) {
           session.historyNotice = transcript.warning;
@@ -1389,6 +1415,13 @@ export class AgentService extends EventEmitter {
     this.protectSession(id);
     const epoch = this.stopEpoch;
     return this.exclusive(() => this.sendInOperation(id, '/goal', [], 'steer', [], epoch, false));
+  }
+  async goalAction(id: string, action: import('../shared/goal').GoalAction) {
+    this.protectSession(id);
+    if (!this.rpc || this.rpc.closed || !this.runtime.connected) await this.connect(id);
+    if (!this.rpc || this.rpc.closed || !this.runtime.connected || this.runtime.sessionId !== id)
+      throw new Error('请先连接主会话，再管理 Goal。');
+    await this.rpc.bridge('goal_action', action);
   }
   recover(id: string, continuePrompt?: string) {
     this.protectSession(id);
@@ -2283,6 +2316,7 @@ export class AgentService extends EventEmitter {
         this.runtime.followUp.length
       )
         return false;
+      await this.stopSideChat();
       await this.closeRpc();
       this.publish(true);
       return true;

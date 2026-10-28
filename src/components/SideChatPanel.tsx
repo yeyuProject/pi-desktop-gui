@@ -78,9 +78,7 @@ export function SideChatPanel({
               ? runtime.model?.name || runtime.model?.id || '未选择模型'
               : '尚未连接'}
           </span>
-          {!!sideChat.chat?.omittedTurns && (
-            <small role="status">已省略前 {sideChat.chat.omittedTurns} 轮</small>
-          )}
+          {!!sideChat.omittedTurns && <small role="status">已省略前 {sideChat.omittedTurns} 轮</small>}
         </div>
         <div className="side-chat-messages" ref={output}>
           {!sideChat.chat?.messages.length && <p className="muted">在这里问一个相关问题，回答会单独保存。</p>}

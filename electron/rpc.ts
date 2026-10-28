@@ -172,7 +172,7 @@ export class PiRpc extends EventEmitter {
       });
     });
   }
-  async bridge(method: string, params: unknown = {}) {
+  async bridge(method: string, params: unknown = {}, timeout = 600_000) {
     const { commands } = await this.request('get_commands');
     if (!commands.some((command) => command.name === DESKTOP_BRIDGE_COMMAND))
       throw new Error('Pi 桌面适配扩展未加载，已停止调用。请打开诊断检查扩展错误并重新连接。');
@@ -196,12 +196,22 @@ export class PiRpc extends EventEmitter {
             ' ' +
             Buffer.from(JSON.stringify({ id, method, params })).toString('base64'),
         },
-        600_000,
+        timeout,
       );
       if (!received) throw new Error('Pi 桌面适配未响应，请重新连接');
       if (result.error) throw new Error(result.error);
       validateBridgeResult(method, result.data);
       return result.data;
+    } catch (error) {
+      if (
+        method === 'side_chat' &&
+        error instanceof Error &&
+        error.cause instanceof Error &&
+        error.cause.message === 'Pi request timed out: prompt'
+      ) {
+        await this.bridge('side_chat_abort', { id: (params as { id: string }).id }, 5000).catch(() => {});
+      }
+      throw error;
     } finally {
       this.off('event', listener);
     }

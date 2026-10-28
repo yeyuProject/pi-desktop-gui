@@ -4,6 +4,7 @@ import fs from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import { stripTypeScriptTypes } from 'node:module';
+import { formatMessageQuotes, splitMessageQuotes } from '../shared/message-content.ts';
 
 // Exercise the production boundaries with deterministic filesystem faults, without
 // starting Electron/Pi. Real-Pi and Store/selection coverage lives in the TS suites.
@@ -16,6 +17,97 @@ async function boundary(file, start, end, wrap, dependencies) {
     stripTypeScriptTypes(`function load() { ${wrap(body)} }`) + '\nreturn load();',
   )(...Object.values(dependencies));
 }
+
+test('deleting a side-only session aborts and saves its answer before asking for confirmation', async () => {
+  const calls = [];
+  let finish;
+  const flight = {
+    sessionId: 'chat',
+    id: 'answer',
+    done: new Promise((resolve) => {
+      finish = resolve;
+    }),
+  };
+  const handlers = await boundary(
+    '../electron/main.ts',
+    '  deleteSession: async (id)',
+    '  pinSession:',
+    (body) => `return { ${body} };`,
+    {
+      text() {},
+      assertTerminalClosed: async () => {},
+      sideFlight: flight,
+      store: { session: () => ({ id: 'chat', title: '侧边测试' }) },
+      service: {
+        active: () => false,
+        get: () => ({
+          stopSideChat: async () => {
+            calls.push('abort');
+            finish();
+            await flight.done;
+            calls.push('saved');
+          },
+        }),
+      },
+      showAppDialog: async () => {
+        assert.equal(flight.cancelled, true);
+        calls.push('confirm');
+        return { response: 0 };
+      },
+    },
+  );
+  assert.equal(await handlers.deleteSession('chat'), false);
+  assert.deepEqual(calls, ['abort', 'saved', 'confirm']);
+});
+
+test('continuing a side answer inherits its project and recovers quoted text as draft chips', async () => {
+  const quote = {
+    id: 'quote',
+    role: 'assistant',
+    turn: 2,
+    messageTimestamp: 10,
+    section: 'text',
+    text: '引用原文',
+  };
+  const session = { id: 'new' };
+  let selected;
+  const handlers = await boundary(
+    '../electron/main.ts',
+    '  sideChatContinue:',
+    '  rendererReady:',
+    (body) => `return { ${body} };`,
+    {
+      text() {},
+      splitMessageQuotes,
+      store: {
+        assertWritable() {},
+        session: () => ({ projectId: 'project' }),
+        createSession: (project) => {
+          session.projectId = project;
+          return session;
+        },
+        selectSession: (id) => {
+          selected = id;
+        },
+      },
+      sideChats: {
+        read: async () => ({
+          messages: [
+            { role: 'user', id: 'q', content: formatMessageQuotes([quote]) + '\n\n原问题' },
+            { role: 'assistant', id: 'a', content: '侧边答案' },
+          ],
+        }),
+      },
+      save: async () => {},
+    },
+  );
+  await handlers.sideChatContinue('source', 'a');
+  assert.equal(session.projectId, 'project');
+  assert.equal(selected, 'new');
+  assert.deepEqual(session.draftQuotes, [quote]);
+  assert.match(session.draft, /原问题[\s\S]*侧边答案/);
+  assert.doesNotMatch(session.draft, /pi-quote:/);
+});
 
 for (const code of ['ENOENT', 'EACCES', 'EIO']) {
   test(`model copy ${code}: fallback only for missing source, always clean up`, async (t) => {

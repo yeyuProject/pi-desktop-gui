@@ -24,7 +24,7 @@ import { SearchHighlight } from './conversation/SearchHighlight';
 import { sessionModelState } from '../lib/session-model';
 import '../styles/conversation-v014.css';
 import { SelectionMenu } from './conversation/SelectionMenu';
-import type { DraftQuote } from '../../shared/message-content';
+import { quoteMessageIndex, type DraftQuote } from '../../shared/message-content';
 
 function turnScrollTop(container: HTMLElement, target: HTMLElement) {
   const bounds = (target.querySelector('.message.user') ?? target).getBoundingClientRect();
@@ -189,15 +189,28 @@ export function Conversation(
         window.dispatchEvent(new CustomEvent('pi:side', { detail: { show: true } }));
         return;
       }
-      const index = messages.findIndex(
-        (m) => m.timestamp === quote.messageTimestamp && m.role === quote.role,
-      );
-      if (index < 0) {
+      const liveTool = quote.toolCallId
+        ? runtime.tools.find((tool) => tool.id === quote.toolCallId)
+        : undefined;
+      const index = quoteMessageIndex(messages, quote);
+      if (index < 0 && !liveTool) {
         props.setNotice('引用的原文已不在当前会话分支');
         return;
       }
       setFindOpen(false);
       setQuoteTarget(quote);
+      if (liveTool) {
+        toggleTool(liveTool.id, true);
+        if (index < 0) {
+          setMessageLimit((limit) => Math.max(limit, messages.length));
+          requestAnimationFrame(() =>
+            thread.current
+              ?.querySelector(`[data-quote-tool-id="${CSS.escape(liveTool.id)}"]`)
+              ?.scrollIntoView({ block: 'center' }),
+          );
+          return;
+        }
+      }
       if (quote.section === 'skill') toggleTool(`skill:${quote.messageTimestamp}`, true);
       if (quote.role === 'user') toggleTool(`prompt:${quote.messageTimestamp}`, true);
       if (quote.role === 'toolResult' && messages[index].toolCallId)
@@ -207,20 +220,46 @@ export function Conversation(
     };
     window.addEventListener('pi:quote', locate);
     return () => window.removeEventListener('pi:quote', locate);
+  }, [messages, selected?.id, runtime.tools]);
+  useEffect(() => {
+    const locateResult = (event: Event) => {
+      const goalId = (event as CustomEvent<string>).detail;
+      const index = messages.findIndex(
+        (message) =>
+          message.role === 'toolResult' &&
+          message.toolName === 'desktop_goal_complete' &&
+          (message.details as { id?: string } | undefined)?.id === goalId,
+      );
+      if (index < 0) {
+        props.setNotice('当前分支中找不到这条 Goal 结果');
+        return;
+      }
+      setFindOpen(false);
+      if (messages[index].toolCallId) toggleTool(messages[index].toolCallId!, true);
+      jump(index);
+      setTurnJump({ index });
+    };
+    window.addEventListener('pi:goal-result', locateResult);
+    return () => window.removeEventListener('pi:goal-result', locateResult);
   }, [messages, selected?.id]);
   useEffect(() => {
     if (!quoteTarget) return;
     let timer: ReturnType<typeof setTimeout> | undefined;
     const frame = requestAnimationFrame(() => {
-      const index = messages.findIndex(
-        (m) => m.timestamp === quoteTarget.messageTimestamp && m.role === quoteTarget.role,
-      );
+      const index = quoteMessageIndex(messages, quoteTarget);
       const thinking =
         quoteTarget.section === 'thinking'
           ? thinkingGroups.find((group) => group.parts.some((part) => part.index === index))
           : undefined;
+      const liveTool = quoteTarget.toolCallId
+        ? runtime.tools.find((tool) => tool.id === quoteTarget.toolCallId)
+        : undefined;
       const wrapper = thread.current?.querySelector(
-        thinking ? `[data-quote-thinking-owner="${thinking.owner}"]` : `[data-message-index="${index}"]`,
+        liveTool && index < 0
+          ? `[data-quote-tool-id="${CSS.escape(liveTool.id)}"]`
+          : thinking
+            ? `[data-quote-thinking-owner="${thinking.owner}"]`
+            : `[data-message-index="${index}"]`,
       );
       const selector = {
         text: '.message-content',
@@ -482,7 +521,17 @@ export function Conversation(
     );
   };
   const renderTool = (tool: ToolActivity) => (
-    <div key={tool.id} className={activeMatch?.toolId === tool.id ? 'search-active' : undefined}>
+    <div
+      key={tool.id}
+      data-quote-tool-id={tool.id}
+      data-quote-timestamp={tool.startedAt}
+      data-quote-turn={
+        turns.findLast((turn) => (messages[turn.index].timestamp ?? 0) <= tool.startedAt)?.turn ??
+        turns.at(-1)?.turn ??
+        0
+      }
+      className={activeMatch?.toolId === tool.id ? 'search-active' : undefined}
+    >
       <ToolCard
         tool={tool}
         expanded={expanded.includes(tool.id)}
@@ -807,6 +856,7 @@ export function Conversation(
           jump={jumpToTurn}
           focusConversation={() => thread.current?.focus({ preventScroll: true })}
           copyReply={(index) => messageContext.copy(messageText(messages[index]))}
+          notice={props.setNotice}
         />
       )}
       {(newContent || endIndex < messages.length) && (

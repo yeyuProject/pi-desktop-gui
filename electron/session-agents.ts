@@ -168,6 +168,7 @@ export class SessionAgents extends EventEmitter {
       const affected = candidates.filter((item) => item.matches).map((item) => item.agent);
       for (const agent of affected) {
         agent.assertCommandsStopped();
+        if (agent.sideChatRunning) throw new Error('侧边对话正在回答，请先停止侧边回答后管理资源包');
         if (agent.hasPendingWork)
           throw new Error(
             '相关会话仍在使用这个资源包，请停止相关任务后安装、更新或移除；配置文件仍可编辑保存',

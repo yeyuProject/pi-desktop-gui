@@ -1,4 +1,5 @@
 import type { SessionEntry } from '@earendil-works/pi-coding-agent';
+import type { GoalSnapshot } from '../shared/goal';
 
 export const DESKTOP_GOAL_ENTRY_TYPE = 'desktop-goal';
 export const MAX_GOAL_CONTINUATIONS = 25;
@@ -18,6 +19,22 @@ export interface DesktopGoalState {
   reason?: string;
   summary?: string;
   evidence?: string;
+}
+
+export function goalSnapshot(goal: DesktopGoalState | undefined): GoalSnapshot | null {
+  if (!goal) return null;
+  const { version: _version, noToolRuns: _noToolRuns, ...view } = goal;
+  return { ...view, maxContinuations: MAX_GOAL_CONTINUATIONS };
+}
+
+/** A damaged Goal must be visible as a warning without hiding the conversation history. */
+export function readGoalView(entries: readonly SessionEntry[]): { goal?: GoalSnapshot; warning?: string } {
+  try {
+    const goal = goalSnapshot(readGoalState(entries));
+    return goal ? { goal } : {};
+  } catch (error) {
+    return { warning: error instanceof Error ? error.message : String(error) };
+  }
 }
 
 export type GoalCommand =

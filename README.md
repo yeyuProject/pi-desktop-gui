@@ -50,7 +50,7 @@ Sessions and workspaces stay on your machine. Model requests go to whichever pro
 - **Quick chat or full project** — Start a standalone chat without a repository, or open a project to get the file tree, Git changes and snapshots.
 - **Concurrent conversations** — Each connected chat has its own Pi process. Switch chats while tasks continue. Model and reasoning changes apply to the next new user task; tool continuations and mid-run additions retain the current settings. A double <kbd>Esc</kbd> stops only the current chat.
 - **Steer while it runs** — Add instructions mid-run (steer) or queue follow-ups within each conversation.
-- **Built-in Goals** — Click **Goal** beside the composer to enter an objective and optional token budget, then pause, resume or inspect it from the same button. Goals keep working across replies and require completion evidence, with bounded automatic continuation. State stays in the Pi session; reconnecting restores it paused. No extra plugin or model is needed. `/goal` commands remain available. See [Goal controls and limits](docs/goal.md).
+- **Built-in Goals** — Enter an objective in one dialog; an optional usage limit is under Advanced. A compact bar shows progress, pause/resume and expandable evidence. Completed Goals collapse to a dot after eight seconds; limits can be adjusted before resuming. Goals keep working across replies, require completion evidence and limit automatic continuations. Saved active Goals return paused, and completed Goals return as a dot. `/goal` commands remain available. See [Goal controls and limits](docs/goal.md).
 - **Clear retry progress** — See retry backoff and response wait time, cancel an active retry request, and distinguish recovered attempts from failures in the run log. Consecutive empty error replies show the latest failure once, with earlier attempts expandable.
 - **Keyboard-first** — Global search across sessions, in-session find, and shortcuts for every panel.
 - **Consistent appearance** — Light, dark and system themes, plus sepia, soft green and navy backgrounds, cover the desktop title bar and confirmations while retaining native window controls. Pi configuration stays editable during a run; saving waits until it is safe and reports separately when a saved change could not yet be applied.
@@ -127,7 +127,9 @@ New session logs use Pi's native directory (`~/.pi/agent/sessions/<encoded-cwd>/
 
 Skill bodies and long questions start collapsed and expand automatically for search matches. Copy the last reply of a turn from its footer, from the hovered turn-outline row, or by pressing `C` on a focused row.
 
-Select conversation text to quote it in the draft, with a link back to its source. Side Chat answers separate questions while the main task runs; it has no tools, keeps its own local history, and never appends to the main Pi conversation.
+Select conversation text, live tool output or shell output to quote it in the draft, with a link back to its source. Long quotes fold after four displayed lines. Search expands skill bodies and long questions temporarily; closing search restores your saved view.
+
+Side Chat answers separate questions while the main task runs; it has no tools, keeps its own local history, and never appends to the main Pi conversation. Main excerpts, side history and the new question share half the model window, with CJK-aware estimates and an omission preview. Deleting a chat stops its side answer first; exiting or updating asks before stopping a side-only answer. Continuing in a new chat preserves the project and quoted draft chips.
 
 ### Keyboard shortcuts
 

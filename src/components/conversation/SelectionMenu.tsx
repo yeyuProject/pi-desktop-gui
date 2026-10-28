@@ -23,6 +23,7 @@ export function SelectionMenu({
     cross: boolean;
     x: number;
     y: number;
+    below: boolean;
   }>();
   const latest = useRef({ messages, turns, addQuote, notice, selection });
   latest.current = { messages, turns, addQuote, notice, selection };
@@ -38,9 +39,11 @@ export function SelectionMenu({
           : range.startContainer.parentElement;
       if (!start || start.closest('button,summary,.arguments,.search-snippet')) return;
       const root = start.closest<HTMLElement>(
-        '.message-content,.thinking pre,.tool-body .ansi-output,.tool-body .diff-view',
+        '.message-content,.thinking pre,.tool-body .ansi-output,.tool-body .diff-view,.bash-message .ansi-output',
       );
-      const wrapper = root?.closest<HTMLElement>('[data-quote-thinking-owner],[data-message-index]');
+      const wrapper = root?.closest<HTMLElement>(
+        '[data-quote-tool-id],[data-quote-thinking-owner],[data-message-index]',
+      );
       if (!root || !wrapper || !thread.current?.contains(wrapper)) return;
       let index = Number(wrapper.dataset.quoteThinkingOwner ?? wrapper.dataset.messageIndex);
       let cross = !wrapper.contains(range.endContainer);
@@ -76,11 +79,14 @@ export function SelectionMenu({
       }
       const message = latest.current.messages[index];
       const turn = latest.current.turns.findLast((turn) => turn.index <= index);
+      const tool = wrapper.dataset.quoteToolId !== undefined;
+      const shell = message?.role === 'bashExecution';
       if (
-        !message ||
-        message.timestamp === undefined ||
-        !turn ||
-        !['user', 'assistant', 'toolResult'].includes(message.role)
+        !tool &&
+        (!message ||
+          message.timestamp === undefined ||
+          !turn ||
+          !['user', 'assistant', 'toolResult', 'bashExecution'].includes(message.role))
       )
         return;
       const text = range.toString();
@@ -92,7 +98,7 @@ export function SelectionMenu({
         ? 'code'
         : start.closest('.thinking')
           ? 'thinking'
-          : message.role === 'toolResult'
+          : tool || shell || message.role === 'toolResult'
             ? 'tool'
             : start.closest('.skill-content')
               ? 'skill'
@@ -101,15 +107,20 @@ export function SelectionMenu({
         quote: {
           id: crypto.randomUUID(),
           text,
-          role: message.role as DraftQuote['role'],
-          turn: turn.turn,
-          messageTimestamp: message.timestamp,
+          role: tool || shell ? 'toolResult' : (message.role as DraftQuote['role']),
+          turn: tool ? Number(wrapper.dataset.quoteTurn) : turn!.turn,
+          messageTimestamp: tool ? Number(wrapper.dataset.quoteTimestamp) : message.timestamp!,
+          ...(tool ? { toolCallId: wrapper.dataset.quoteToolId } : {}),
           section,
         },
         range,
         cross,
         x: Math.max(8, Math.min(window.innerWidth - 240, bounds.left)),
-        y: Math.max(viewport.top + 40, bounds.top) - 6,
+        y:
+          bounds.top - viewport.top < (menu.current?.offsetHeight ?? 36) + 6
+            ? Math.min(bounds.bottom + 6, viewport.bottom - 40)
+            : bounds.top - 6,
+        below: bounds.top - viewport.top < (menu.current?.offsetHeight ?? 36) + 6,
       };
     };
     const update = () => setSelection(read());
@@ -169,7 +180,7 @@ export function SelectionMenu({
       role="toolbar"
       aria-label="对话选区操作"
       ref={menu}
-      style={{ left: selection.x, top: selection.y }}
+      style={{ left: selection.x, top: selection.y, transform: selection.below ? 'none' : undefined }}
       onPointerDown={(event) => event.preventDefault()}
     >
       <button

@@ -558,7 +558,7 @@ function closeBoundary(
   );
   assert.ok(ts.isCallExpression(call));
   return compile(
-    `let quitting = false, closing = false, appQuitRequested = true, windowTimer;
+    `let quitting = false, closing = false, appQuitRequested = true, windowTimer, sideFlight;
      ${namedFunction('confirmUnsavedQuit')}
      return ${call.arguments[1].getText(source)};`,
     {
@@ -1080,6 +1080,55 @@ console.log('1.1.0');
   assert.equal((agent as any).probe, undefined);
 });
 
+test('side-only update asks before aborting, then saves the answer before disconnecting', async () => {
+  const calls: string[] = [];
+  let finish!: () => void;
+  const sideFlight = {
+    sessionId: 'side',
+    id: 'answer',
+    done: new Promise<void>((resolve) => {
+      finish = resolve;
+    }),
+    cancelled: false,
+  };
+  const boundary = one(
+    (node) => ts.isPropertyAssignment(node) && node.name.getText(source) === 'beforeInstall',
+  );
+  assert.ok(ts.isPropertyAssignment(boundary));
+  const run = compile(`let quitting = false, windowTimer; return ${boundary.initializer.getText(source)};`, {
+    closing: false,
+    sessionEnding: false,
+    sideFlight,
+    store: {
+      storage: { writable: true },
+      flush: async () => {
+        calls.push('saved');
+      },
+    },
+    service: {
+      get: () => ({
+        stopSideChat: async () => {
+          assert.equal(sideFlight.cancelled, true);
+          calls.push('abort');
+          finish();
+        },
+      }),
+      disconnect: async () => {
+        calls.push('disconnect');
+      },
+    },
+    showAppDialog: async (options: { message: string }) => {
+      assert.equal(options.message, '侧边对话正在回答，将被停止');
+      calls.push('prompt');
+      return { response: 1 };
+    },
+    workspaceCleanup: undefined,
+    writeWindowState: async () => {},
+  }) as () => Promise<void>;
+  await run();
+  assert.deepEqual(calls, ['prompt', 'abort', 'disconnect', 'saved']);
+});
+
 test('actual update persistence boundary waits for a promoted no-agent draft and startup cleanup', async (t) => {
   const f = await fixture(t);
   const blank = await f.newSession();
@@ -1092,7 +1141,7 @@ test('actual update persistence boundary waits for a promoted no-agent draft and
   );
   assert.ok(ts.isPropertyAssignment(boundary));
   const beforeInstall = compile(
-    `let quitting = false, windowTimer;
+    `let quitting = false, windowTimer, sideFlight;
      return ${boundary.initializer.getText(source)};`,
     {
       store: f.store,

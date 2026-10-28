@@ -30,12 +30,14 @@ import { createWorkspaceHandlers, type WorkspaceHandlerName } from './ipc/worksp
 import { WorkspaceWatcher } from './workspace-watch';
 import { isEmptySession, hasSessionData, fillSessionUsage } from './session-maintenance';
 import { aggregateUsage } from '../shared/usage';
+import { validateGoalAction } from '../shared/goal';
 import { composeDraftText } from '../shared/draft';
 import { isDraftQuote } from '../shared/message-content';
-import { formatMessageQuotes } from '../shared/message-content';
+import { splitMessageQuotes } from '../shared/message-content';
 import { SideChats } from './side-chats';
 import {
   sideChatContext,
+  sideChatPrompt,
   type SideChat,
   type SideChatRequest,
   type SideChatInput,
@@ -579,13 +581,13 @@ const handlers: Record<Exclude<keyof ApiMap, WorkspaceHandlerName>, (...args: an
         request,
         agent.runtime.model!.contextWindow,
         busy(agent.runtime.status),
+        [
+          ...chat.messages.map(({ role, content }) => ({ role, content })),
+          { role: 'user', content: sideChatPrompt(request) },
+        ],
       );
-      const prompt = [formatMessageQuotes(request.quotes), request.prompt].filter(Boolean).join('\n\n');
-      const inputs: SideChatInput[] = [
-        ...context.messages,
-        ...chat.messages.map(({ role, content }) => ({ role, content })),
-        { role: 'user', content: prompt },
-      ];
+      const prompt = sideChatPrompt(request);
+      const inputs: SideChatInput[] = context.messages;
       chat.messages.push({ id: request.id + '-user', role: 'user', content: prompt, timestamp: Date.now() });
       const answer = { id: request.id, role: 'assistant' as const, content: '', timestamp: Date.now() };
       chat.messages.push(answer);
@@ -650,13 +652,15 @@ const handlers: Record<Exclude<keyof ApiMap, WorkspaceHandlerName>, (...args: an
     text(id, 100);
     text(answerId, 100);
     store.assertWritable();
-    store.session(id);
+    const original = store.session(id);
     const chat = await sideChats.read(id);
     const index = chat.messages.findIndex((m) => m.id === answerId && m.role === 'assistant');
     if (index < 1) throw new Error('这条侧边回答已被清空，请重新选择');
-    const session = store.createSession();
+    const session = store.createSession(original.projectId);
     session.title = '从侧边对话继续';
-    session.draft = `原问题：\n${chat.messages[index - 1].content}\n\n侧边回答：\n${chat.messages[index].content}\n\n继续提问：`;
+    const question = splitMessageQuotes(chat.messages[index - 1].content);
+    session.draftQuotes = question.quotes;
+    session.draft = `原问题：\n${question.text}\n\n侧边回答：\n${chat.messages[index].content}\n\n继续提问：`;
     store.selectSession(session.id);
     await save();
     return session;
@@ -683,7 +687,10 @@ const handlers: Record<Exclude<keyof ApiMap, WorkspaceHandlerName>, (...args: an
     try {
       for (const session of store.state.sessions) await assertTerminalClosed(session.id);
       store.stopRecovery();
+      const flight = sideFlight;
+      if (flight) flight.cancelled = true;
       await service.dispose();
+      await flight?.done;
       await workspaceCleanup;
       await configurationWrites;
       await store.flush().catch(() => {}); // Explicit erasure also works after an unrecoverable save failure.
@@ -859,7 +866,12 @@ const handlers: Record<Exclude<keyof ApiMap, WorkspaceHandlerName>, (...args: an
     await assertTerminalClosed(id);
     const s = store.session(id);
     if (service.active(id)) throw new Error('请先停止这个会话的任务');
-    if (sideFlight?.sessionId === id) await sideFlight.done;
+    if (sideFlight?.sessionId === id) {
+      const flight = sideFlight;
+      flight.cancelled = true;
+      await service.get(id).stopSideChat();
+      await flight.done;
+    }
     const result = await showAppDialog({
       type: 'warning',
       message: `删除会话“${s.title}”？`,
@@ -1201,6 +1213,23 @@ const handlers: Record<Exclude<keyof ApiMap, WorkspaceHandlerName>, (...args: an
   openGoal: async (id) => {
     text(id, 100);
     await service.get(id).openGoal(id);
+  },
+  goalAction: async (id, action) => {
+    text(id, 100);
+    validateGoalAction(action);
+    const agent = service.get(id);
+    if (action.action === 'clear' && agent.runtime.goal?.status !== 'completed') {
+      const result = await showAppDialog({
+        type: 'question',
+        message: '清除 Goal？',
+        detail: '清除后不再自动继续，已完成的修改保留',
+        buttons: ['取消', '清除'],
+        defaultId: 0,
+        cancelId: 0,
+      });
+      if (result.response !== 1) return;
+    }
+    await agent.goalAction(id, action);
   },
   pickImages: async () => {
     const picked = await dialog.showOpenDialog(window!, {
@@ -1710,13 +1739,14 @@ async function createWindow() {
     void (async () => {
       try {
         service.suspendReload(true);
-        if (service.requiresStopConfirmation) {
+        if (service.requiresStopConfirmation || sideFlight) {
           const result = await showAppDialog(
             {
               type: 'question',
-              message: 'Pi 仍在执行任务',
-              detail:
-                '停止并退出会将未发送的队列内容恢复到草稿，已写入文件将保留。通过 nohup、后台运行等方式脱离 Pi 的服务可能继续运行，请到终端停止这些服务并释放端口。',
+              message: service.requiresStopConfirmation ? 'Pi 仍在执行任务' : '侧边对话正在回答，将被停止',
+              detail: service.requiresStopConfirmation
+                ? '停止并退出会将未发送的队列内容恢复到草稿，已写入文件将保留。通过 nohup、后台运行等方式脱离 Pi 的服务可能继续运行，请到终端停止这些服务并释放端口。'
+                : '停止后保留已收到的侧边回答，随后退出应用。',
               buttons: ['留在窗口', '停止并退出'],
               defaultId: 0,
               cancelId: 0,
@@ -1725,7 +1755,9 @@ async function createWindow() {
           );
           if (result.response !== 1) return;
           try {
+            if (sideFlight) sideFlight.cancelled = true;
             await service.stop();
+            await sideFlight?.done;
           } catch {
             await showAppDialog(
               {
@@ -1884,6 +1916,23 @@ else {
         beforeInstall: async () => {
           if (closing || sessionEnding) throw new Error('应用正在退出，请下次启动后重试更新');
           if (!store.storage.writable && !store.storage.newerFormat) store.assertWritable();
+          if (sideFlight) {
+            const result = await showAppDialog({
+              type: 'question',
+              message: '侧边对话正在回答，将被停止',
+              detail: '停止后保留已收到的侧边回答，随后重启更新。',
+              buttons: ['取消', '停止并更新'],
+              defaultId: 0,
+              cancelId: 0,
+            });
+            if (result.response !== 1) throw new Error('已取消重启更新');
+            const flight = sideFlight;
+            if (flight) {
+              flight.cancelled = true;
+              await service.get(flight.sessionId).stopSideChat();
+              await flight.done;
+            }
+          }
           await service.disconnect();
           await workspaceCleanup;
           if (store.storage.writable) await store.flush();
@@ -2040,6 +2089,7 @@ else {
               'recover',
               'send',
               'openGoal',
+              'goalAction',
               'selectSession',
               'sessionTree',
               'branchSession',

@@ -139,10 +139,11 @@ export function WorkbenchDialogs(
         <ExtensionPrompt
           key={prompts[0].id}
           request={prompts[0]}
+          runtime={runtime}
           remaining={prompts.length - 1}
-          respond={(v) =>
-            selected && void attempt(() => api.invoke('respond', selected.id, prompts[0].id, v))
-          }
+          respond={async (v) => {
+            if (selected) await api.invoke('respond', selected.id, prompts[0].id, v);
+          }}
         />
       )}
     </>

@@ -1,4 +1,4 @@
-import { memo, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
+import { memo, useEffect, useLayoutEffect, useMemo, useRef, useState, type CSSProperties } from 'react';
 import type { TurnItem } from '../../lib/conversation-layout';
 import { topLayer } from '../../hooks/useLayer';
 import { Copy } from 'lucide-react';
@@ -12,6 +12,7 @@ export const TurnOutline = memo(function TurnOutline({
   jump,
   focusConversation,
   copyReply,
+  notice,
 }: {
   turns: TurnItem[];
   active: number;
@@ -19,6 +20,7 @@ export const TurnOutline = memo(function TurnOutline({
   jump: (index: number) => void;
   focusConversation: () => void;
   copyReply: (index: number) => void;
+  notice: (text: string) => void;
 }) {
   const list = useRef<HTMLDivElement>(null);
   const openTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
@@ -111,6 +113,7 @@ export const TurnOutline = memo(function TurnOutline({
     <nav
       className={`turn-outline${expanded ? ' expanded' : ''}`}
       aria-label="对话轮次"
+      style={{ '--turn-number-width': `${String(turns.at(-1)?.turn ?? 1).length + 1}ch` } as CSSProperties}
       onPointerEnter={() => {
         clearTimeout(closeTimer.current);
         if (!expanded && !suppressHover.current) {
@@ -145,6 +148,7 @@ export const TurnOutline = memo(function TurnOutline({
           event.preventDefault();
           const reply = filtered[current]?.replyIndex;
           if (reply !== undefined) copyReply(reply);
+          else notice('本轮没有可复制的回复');
           return;
         }
         const target =

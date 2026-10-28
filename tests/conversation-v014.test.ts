@@ -26,6 +26,7 @@ import {
   mergeDraftQuotes,
   parseUserMessage,
   splitMessageQuotes,
+  quoteMessageIndex,
   truncateQuote,
   type DraftQuote,
 } from '../shared/message-content';
@@ -66,6 +67,26 @@ test('conversation quotes round-trip their exact source, text order and native s
   const long = truncateQuote({ ...first, text: '🐉'.repeat(8001) });
   assert.equal(Array.from(long.text).length, 8000);
   assert.equal(long.truncated, true);
+});
+
+test('a quote from running tool output keeps its source after the result gets a different timestamp', () => {
+  const quote: DraftQuote = {
+    id: 'live',
+    role: 'toolResult',
+    turn: 2,
+    section: 'tool',
+    messageTimestamp: 100,
+    toolCallId: 'call-1',
+    text: 'running output',
+  };
+  const restored = splitMessageQuotes(formatMessageQuotes([quote])).quotes[0];
+  assert.deepEqual(restored, quote);
+  const messages: Message[] = [
+    { role: 'toolResult', toolCallId: 'other', timestamp: 100, content: 'unrelated' },
+    { role: 'toolResult', toolCallId: 'call-1', timestamp: 200, content: 'running output and final output' },
+  ];
+  assert.equal(quoteMessageIndex(messages, restored), 1);
+  assert.equal(mergeDraftQuotes([quote], [{ ...quote, id: 'different', toolCallId: 'call-2' }]).length, 2);
 });
 
 test('turn titles remove native file attachments and show the user message from a native skill invocation', () => {

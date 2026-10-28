@@ -1,4 +1,5 @@
 import { randomUUID } from 'node:crypto';
+import { GOAL_DIALOG_TITLE, validateGoalAction, type GoalAction } from '../shared/goal';
 import type { ExtensionAPI, ExtensionContext, SessionBoundaryDraft } from '@earendil-works/pi-coding-agent';
 import {
   DESKTOP_GOAL_ENTRY_TYPE,
@@ -6,7 +7,9 @@ import {
   nextGoalBoundary,
   parseGoalCommand,
   readGoalState,
+  goalSnapshot,
   type DesktopGoalState,
+  type GoalCommand,
 } from './goal-state';
 
 const COMPLETE_TOOL = 'desktop_goal_complete';
@@ -59,7 +62,7 @@ function details(goal: DesktopGoalState): string[] {
 }
 
 /** Registered inside the desktop bridge and executed entirely by Pi's native extension runtime. */
-export function registerDesktopGoal(pi: ExtensionAPI): void {
+export function registerDesktopGoal(pi: ExtensionAPI) {
   let goal: DesktopGoalState | undefined;
   let stateError: string | undefined;
   let usedTools = false;
@@ -69,8 +72,13 @@ export function registerDesktopGoal(pi: ExtensionAPI): void {
   let stateRevision = 0;
 
   const render = (ctx: ExtensionContext) => {
-    ctx.ui.setStatus(DESKTOP_GOAL_ENTRY_TYPE, goal ? `Goal：${statusNames[goal.status]}` : undefined);
-    ctx.ui.setWidget(DESKTOP_GOAL_ENTRY_TYPE, goal ? details(goal) : undefined);
+    ctx.ui.notify(
+      '__PI_DESKTOP__' +
+        JSON.stringify({
+          type: 'desktop_goal',
+          goal: goalSnapshot(goal),
+        }),
+    );
   };
   const save = (next: DesktopGoalState | undefined, ctx: ExtensionContext) => {
     // Persist before publishing or aborting: subsequent events must see the stopped state.
@@ -273,6 +281,80 @@ export function registerDesktopGoal(pi: ExtensionAPI): void {
       },
     });
 
+  const execute = async (
+    command: GoalCommand | Extract<GoalAction, { action: 'budget' }>,
+    ctx: ExtensionContext,
+  ) => {
+    if (command.action === 'clear') {
+      const wasActive = goal?.status === 'active';
+      save(undefined, ctx);
+      if (wasActive) ctx.abort();
+      ctx.ui.notify('Goal 已清除。', 'info');
+    } else if (command.action === 'menu' || command.action === 'status') {
+      ctx.ui.notify(
+        goal
+          ? details(goal).join('\n')
+          : '当前没有 Goal。用 /goal [--tokens N] <目标> 开始；默认最多自动续跑 25 次。',
+        'info',
+      );
+    } else if (command.action === 'pause') {
+      if (!goal || goal.status !== 'active') throw new Error('当前没有执行中的 Goal。');
+      pause('用户暂停了 Goal；使用 /goal resume 明确继续。', ctx);
+      ctx.abort();
+    } else if (command.action === 'resume' || command.action === 'budget') {
+      if (!goal || goal.status === 'completed') throw new Error('当前没有可恢复的 Goal。');
+      if (goal.status === 'active') throw new Error('Goal 正在执行，无需重复恢复。');
+      if (!ctx.isIdle()) throw new Error('请先等待当前任务结束或停止，再恢复 Goal。');
+      requireTools();
+      const budget = command.action === 'budget' ? command.tokenBudget : goal.tokenBudget;
+      if (budget !== undefined && goal.tokensUsed >= budget)
+        throw new Error('Goal 已达到用量上限，请调整到高于已用量的上限，或选择“不限”后继续。');
+      await requireModel(ctx);
+      const {
+        reason: _reason,
+        summary: _summary,
+        evidence: _evidence,
+        tokenBudget: _budget,
+        ...previous
+      } = goal;
+      save(
+        {
+          ...previous,
+          ...(budget === undefined ? {} : { tokenBudget: budget }),
+          status: 'active',
+          continuations: 0,
+          noToolRuns: 0,
+          updatedAt: Date.now(),
+        },
+        ctx,
+      );
+      pi.sendUserMessage(`继续完成 Goal：\n${goal!.objective}`);
+    } else if (command.action === 'start') {
+      if (goal && goal.status !== 'completed')
+        throw new Error('已有未完成的 Goal。请先 /goal clear 清除，再设置新目标。');
+      if (!ctx.isIdle()) throw new Error('请先等待当前任务结束或停止，再开始 Goal。');
+      requireTools();
+      await requireModel(ctx);
+      const now = Date.now();
+      save(
+        {
+          version: 1,
+          id: randomUUID(),
+          objective: command.objective.trim(),
+          status: 'active',
+          ...(command.tokenBudget === undefined ? {} : { tokenBudget: command.tokenBudget }),
+          tokensUsed: 0,
+          continuations: 0,
+          noToolRuns: 0,
+          createdAt: now,
+          updatedAt: now,
+        },
+        ctx,
+      );
+      pi.sendUserMessage(`请完成 Goal：\n${goal!.objective}`);
+    }
+  };
+
   pi.registerCommand('goal', {
     description: '持续执行目标：/goal [--tokens N] <目标>；status、pause、resume、clear',
     handler: async (input, ctx) => {
@@ -319,77 +401,29 @@ export function registerDesktopGoal(pi: ExtensionAPI): void {
               };
           }
           if (create) {
-            const objective = await ctx.ui.editor('新建 Goal', '');
-            if (objective === undefined) return;
+            const response = await ctx.ui.input(GOAL_DIALOG_TITLE, '');
+            if (response === undefined) return;
             assertCurrentGoal();
-            if (!objective.trim()) throw new Error('请输入需要完成的目标。');
-            const budget = await ctx.ui.input('Token 预算（可选）', '留空不设预算，例如 100k');
-            if (budget === undefined) return;
-            assertCurrentGoal();
-            if (budget.trim()) {
-              if (!/^\d+[km]?$/i.test(budget.trim()))
-                throw new Error('Token 预算请输入正整数，可使用 k 或 m，例如 100k；留空则不设预算。');
-              command = parseGoalCommand(`--tokens ${budget.trim()} ${objective.trim()}`);
-            } else command = { action: 'start', objective: objective.trim() };
+            const action: unknown = JSON.parse(response);
+            validateGoalAction(action);
+            if (action.action !== 'start') throw new Error('请输入需要完成的目标。');
+            command = action;
           }
         }
-        if (command.action === 'clear') {
-          const wasActive = goal?.status === 'active';
-          save(undefined, ctx);
-          if (wasActive) ctx.abort();
-          ctx.ui.notify('Goal 已清除。', 'info');
-        } else if (command.action === 'menu' || command.action === 'status') {
-          ctx.ui.notify(
-            goal
-              ? details(goal).join('\n')
-              : '当前没有 Goal。用 /goal [--tokens N] <目标> 开始；默认最多自动续跑 25 次。',
-            'info',
-          );
-        } else if (command.action === 'pause') {
-          if (!goal || goal.status !== 'active') throw new Error('当前没有执行中的 Goal。');
-          pause('用户暂停了 Goal；使用 /goal resume 明确继续。', ctx);
-          ctx.abort();
-        } else if (command.action === 'resume') {
-          if (!goal || goal.status === 'completed') throw new Error('当前没有可恢复的 Goal。');
-          if (goal.status === 'active') throw new Error('Goal 正在执行，无需重复恢复。');
-          if (!ctx.isIdle()) throw new Error('请先等待当前任务结束或停止，再恢复 Goal。');
-          requireTools();
-          if (goal.tokenBudget !== undefined && goal.tokensUsed >= goal.tokenBudget)
-            throw new Error('Goal 已达到 token 预算，不能继续。请先 /goal clear，再用新的预算建立目标。');
-          await requireModel(ctx);
-          const { reason: _reason, summary: _summary, evidence: _evidence, ...previous } = goal;
-          save(
-            { ...previous, status: 'active', continuations: 0, noToolRuns: 0, updatedAt: Date.now() },
-            ctx,
-          );
-          pi.sendUserMessage(`继续完成 Goal：\n${goal!.objective}`);
-        } else if (command.action === 'start') {
-          if (goal && goal.status !== 'completed')
-            throw new Error('已有未完成的 Goal。请先 /goal clear 清除，再设置新目标。');
-          if (!ctx.isIdle()) throw new Error('请先等待当前任务结束或停止，再开始 Goal。');
-          requireTools();
-          await requireModel(ctx);
-          const now = Date.now();
-          save(
-            {
-              version: 1,
-              id: randomUUID(),
-              objective: command.objective,
-              status: 'active',
-              ...(command.tokenBudget === undefined ? {} : { tokenBudget: command.tokenBudget }),
-              tokensUsed: 0,
-              continuations: 0,
-              noToolRuns: 0,
-              createdAt: now,
-              updatedAt: now,
-            },
-            ctx,
-          );
-          pi.sendUserMessage(`请完成 Goal：\n${goal!.objective}`);
-        }
+        await execute(command, ctx);
       } catch (error) {
         ctx.ui.notify(error instanceof Error ? error.message : String(error), 'error');
       }
     },
   });
+  return {
+    action: async (value: unknown, ctx: ExtensionContext) => {
+      validateGoalAction(value);
+      if (value.action !== 'start' && goal?.id !== value.goalId)
+        throw new Error('Goal 已变化，请重新打开 Goal。');
+      if (stateError && value.action !== 'clear') throw new Error(stateError);
+      await execute(value, ctx);
+      return { applied: true };
+    },
+  };
 }

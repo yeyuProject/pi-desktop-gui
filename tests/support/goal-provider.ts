@@ -1,7 +1,7 @@
 import http from 'node:http';
 import { randomUUID } from 'node:crypto';
 
-type GoalScenario = 'continue' | 'mixed' | 'pause' | 'hold' | 'complete' | 'budget';
+type GoalScenario = 'continue' | 'mixed' | 'pause' | 'hold' | 'complete' | 'budget' | 'budget-ui' | 'blocked';
 
 interface ProviderMessage {
   role: string;
@@ -35,9 +35,10 @@ export async function createGoalProvider() {
         `data: ${JSON.stringify({ id: 'goal-test', object: 'chat.completion.chunk', model: body.model, choices: [{ index: 0, delta, finish_reason: finishReason }] })}\n\n`,
       );
     const done = (finishReason = 'stop') => {
+      const inputTokens = entry.scenario === 'budget-ui' ? 500000 : 100;
       chunk({}, finishReason);
       res.write(
-        `data: ${JSON.stringify({ id: 'goal-test', object: 'chat.completion.chunk', choices: [], usage: { prompt_tokens: 100, completion_tokens: 20, total_tokens: 120 } })}\n\n`,
+        `data: ${JSON.stringify({ id: 'goal-test', object: 'chat.completion.chunk', choices: [], usage: { prompt_tokens: inputTokens, completion_tokens: 20, total_tokens: inputTokens + 20 } })}\n\n`,
       );
       res.end('data: [DONE]\n\n');
     };
@@ -47,6 +48,7 @@ export async function createGoalProvider() {
     }
     if (
       entry.scenario === 'budget' ||
+      entry.scenario === 'budget-ui' ||
       ((entry.scenario === 'continue' || entry.scenario === 'pause') && entry.count === 1)
     ) {
       chunk({ role: 'assistant', content: 'GOAL_PARTIAL: verification is still outstanding.' });
@@ -83,12 +85,17 @@ export async function createGoalProvider() {
         id: 'goal_' + randomUUID().slice(0, 8),
         type: 'function',
         function: {
-          name: 'desktop_goal_complete',
+          name: entry.scenario === 'blocked' ? 'desktop_goal_blocked' : 'desktop_goal_complete',
           arguments: JSON.stringify({
             goal_id: goalId,
             summary: 'The deterministic Goal integration task is complete.',
-            evidence:
-              'The local provider observed the active goal contract and completed its scripted verification.',
+            evidence: [
+              '**Verification evidence**',
+              ...Array.from(
+                { length: 35 },
+                (_, index) => `- Check ${index + 1} passed at the local provider boundary.`,
+              ),
+            ].join('\n'),
           }),
         },
       },

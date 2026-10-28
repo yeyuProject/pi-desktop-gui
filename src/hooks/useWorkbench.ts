@@ -613,10 +613,15 @@ export function useWorkbench() {
   }, [liveTools, messages]);
   const canRerun =
     !actionsLocked && (ownRuntime ? runtime.approvalMode : selected?.approvalMode) !== 'readonly';
-  const quoteSourceKey = messages
-    .filter((m) => m.timestamp !== undefined)
-    .map((m) => `${m.role}:${m.timestamp}`)
-    .join('|');
+  const quoteSourceKey = [
+    ...messages.flatMap((m) => [
+      ...(m.timestamp === undefined
+        ? []
+        : [`${m.role === 'bashExecution' ? 'toolResult' : m.role}:${m.timestamp}`]),
+      ...(m.role === 'toolResult' && m.toolCallId ? [`tool:${m.toolCallId}`] : []),
+    ]),
+    ...liveTools.map((tool) => `tool:${tool.id}`),
+  ].join('|');
   const quoteSources = useMemo(() => new Set(quoteSourceKey.split('|')), [quoteSourceKey]);
   const messageContext: MessageContext = useMemo(
     () => ({

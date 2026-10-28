@@ -567,6 +567,44 @@ test('workspace protection follows real overlapping directories and leaves unrel
   }
 });
 
+test('a side-only request blocks package maintenance but can be stopped by idle release', async (t) => {
+  const { agents, a } = await fixture(t);
+  const agent = agents.get(a.id);
+  await agent.connect(a.id);
+  let stopped = false;
+  let finish!: (value: { text: string; aborted: boolean; usage: { tokens: number; cost: number } }) => void;
+  const done = new Promise<{ text: string; aborted: boolean; usage: { tokens: number; cost: number } }>(
+    (resolve) => {
+      finish = resolve;
+    },
+  );
+  const rpc = (agent as any).rpc as PiRpc;
+  t.mock.method(rpc, 'bridge', async (method: string) => {
+    if (method === 'side_chat') return done;
+    if (method === 'side_chat_abort') {
+      stopped = true;
+      finish({ text: 'partial', aborted: true, usage: { tokens: 0, cost: 0 } });
+      return { stopped: true };
+    }
+  });
+  const answer = agent.sideChat(
+    a.id,
+    { id: 'answer', messages: [{ role: 'user', content: 'side question' }] },
+    () => {},
+  );
+  assert.equal(agent.sideChatRunning, true);
+  assert.equal(agent.requiresStopConfirmation, false);
+  assert.equal(agent.hasPendingWork, false);
+  await assert.rejects(
+    agents.updatePackages(a.id, false, async () => {}),
+    /停止侧边回答/,
+  );
+  assert.equal(await agent.releaseIdleProcess(), true);
+  assert.equal(stopped, true);
+  assert.equal((await answer).aborted, true);
+  assert.equal(agent.sideChatRunning, false);
+});
+
 test('terminal handoff reserves only its session before disconnecting the old process', async (t) => {
   let nativeOwner = '';
   const { agents, a, b } = await fixture(t, async (id) => id === nativeOwner);

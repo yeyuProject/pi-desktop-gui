@@ -1,3 +1,5 @@
+import type { Message } from './types';
+
 export interface ProjectFileBlock {
   path: string;
   lines?: string;
@@ -17,6 +19,8 @@ export interface DraftQuote {
   messageTimestamp: number;
   section: 'text' | 'thinking' | 'code' | 'tool' | 'skill';
   truncated?: boolean;
+  /** A running tool has no result timestamp yet; its call ID stays the same after completion. */
+  toolCallId?: string;
 }
 
 export function truncateQuote(quote: DraftQuote): DraftQuote {
@@ -41,7 +45,17 @@ export function isDraftQuote(value: unknown): value is DraftQuote {
     Number.isFinite(q.messageTimestamp) &&
     q.messageTimestamp >= 0 &&
     ['text', 'thinking', 'code', 'tool', 'skill'].includes(q.section) &&
-    (q.truncated === undefined || typeof q.truncated === 'boolean')
+    (q.truncated === undefined || typeof q.truncated === 'boolean') &&
+    (q.toolCallId === undefined || (typeof q.toolCallId === 'string' && Boolean(q.toolCallId.trim())))
+  );
+}
+
+export function quoteMessageIndex(messages: readonly Message[], quote: DraftQuote) {
+  return messages.findIndex((message) =>
+    quote.toolCallId
+      ? message.role === 'toolResult' && message.toolCallId === quote.toolCallId
+      : message.timestamp === quote.messageTimestamp &&
+        (message.role === quote.role || (quote.section === 'tool' && message.role === 'bashExecution')),
   );
 }
 
@@ -109,6 +123,7 @@ export function mergeDraftQuotes(before: DraftQuote[], added: DraftQuote[]): Dra
         (item) =>
           item.role === quote.role &&
           item.messageTimestamp === quote.messageTimestamp &&
+          item.toolCallId === quote.toolCallId &&
           item.section === quote.section &&
           item.text === quote.text,
       )

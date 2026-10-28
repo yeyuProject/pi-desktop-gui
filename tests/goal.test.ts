@@ -1,5 +1,12 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import fs from 'node:fs/promises';
+import os from 'node:os';
+import path from 'node:path';
+import { Store, readSessionFile } from '../electron/store';
+import { AgentService } from '../electron/agent';
+import { Workspace } from '../electron/workspace';
+import { readLargeTranscript } from '../electron/large-transcript';
 import type {
   AgentBeforeSettleEvent,
   ExtensionAPI,
@@ -12,6 +19,7 @@ import type {
 } from '@earendil-works/pi-coding-agent';
 import type { AssistantMessage } from '@earendil-works/pi-ai';
 import { registerDesktopGoal } from '../electron/pi-goal';
+import { GOAL_BUDGET_PRESETS, GOAL_DIALOG_TITLE, parseGoalBudget, type GoalSnapshot } from '../shared/goal';
 import {
   DESKTOP_GOAL_ENTRY_TYPE,
   MAX_GOAL_CONTINUATIONS,
@@ -46,6 +54,7 @@ function harness(initial: SessionEntry[] = []) {
   const tools = new Map<string, ToolDefinition>();
   const messages: string[] = [];
   const notices: { message: string; level: string }[] = [];
+  const updates: (GoalSnapshot | null)[] = [];
   const aborts: (DesktopGoalState | undefined)[] = [];
   let activeTools: string[] | undefined;
   let command: (args: string, ctx: ExtensionContext) => Promise<void>;
@@ -68,9 +77,17 @@ function harness(initial: SessionEntry[] = []) {
     abort: () => aborts.push(readGoalState(entries)),
     sessionManager: { getBranch: () => structuredClone(entries) },
     ui: {
-      setStatus() {},
-      setWidget() {},
-      notify: (message: string, level: string) => notices.push({ message, level }),
+      setStatus() {
+        throw new Error('Goal must use structured state, never status text.');
+      },
+      setWidget() {
+        throw new Error('Goal must use structured state, never a widget.');
+      },
+      notify: (message: string, level: string) => {
+        if (message.startsWith('__PI_DESKTOP__'))
+          updates.push(JSON.parse(message.slice('__PI_DESKTOP__'.length)).goal);
+        else notices.push({ message, level });
+      },
       select: async () => undefined,
       editor: async () => undefined,
       input: async () => undefined,
@@ -87,7 +104,7 @@ function harness(initial: SessionEntry[] = []) {
     getActiveTools: () => activeTools ?? [...tools.keys()],
     sendUserMessage: (message: string) => messages.push(message),
   } as unknown as ExtensionAPI;
-  registerDesktopGoal(pi);
+  const controller = registerDesktopGoal(pi);
   const emit = async (event: ExtensionEvent) => hooks.get(event.type)?.(event, ctx);
   const toolCtx: ExtensionToolContext = {
     ...ctx,
@@ -120,6 +137,8 @@ function harness(initial: SessionEntry[] = []) {
     ctx,
     messages,
     notices,
+    updates,
+    action: (value: unknown) => controller.action(value, ctx),
     aborts,
     tools,
     emit,
@@ -150,6 +169,129 @@ function harness(initial: SessionEntry[] = []) {
   };
 }
 
+test('Goal budget presets default to unlimited and reject invalid custom limits', () => {
+  assert.deepEqual(GOAL_BUDGET_PRESETS.map(parseGoalBudget), [undefined, 500000, 2000000, 5000000]);
+  assert.equal(parseGoalBudget(' 800k '), 800000);
+  for (const value of ['0', '-1', '1.2k', 'lots', '9007199254740992'])
+    assert.throws(() => parseGoalBudget(value), /上限/);
+});
+
+test('cold history restores the current branch Goal without connecting or reading a later abandoned branch', async (t) => {
+  const directory = await fs.mkdtemp(path.join(os.tmpdir(), 'pi-goal-history-'));
+  const store = new Store(directory);
+  await store.load();
+  const session = store.createSession();
+  session.file = path.join(directory, 'goal.jsonl');
+  const h = harness();
+  await h.command('原分支目标');
+  await h.tool('desktop_goal_complete', {
+    goal_id: h.state()!.id,
+    summary: '原分支完成',
+    evidence: '检查通过',
+  });
+  const original = h.state()!;
+  const records = [
+    { type: 'session', id: session.id, cwd: directory },
+    ...h.entries,
+    {
+      type: 'custom',
+      customType: DESKTOP_GOAL_ENTRY_TYPE,
+      id: 'abandoned',
+      parentId: null,
+      data: { ...original, id: 'other', status: 'active' },
+    },
+    {
+      type: 'message',
+      id: 'tail',
+      parentId: h.entries.at(-1)!.id,
+      message: { role: 'user', content: '原分支后续问题', timestamp: 100 },
+    },
+  ];
+  await fs.writeFile(session.file, records.map((record) => JSON.stringify(record)).join('\n') + '\n');
+  const agent = new AgentService(store, new Workspace(directory));
+  t.after(async () => {
+    await agent.dispose();
+    await fs.rm(directory, { recursive: true, force: true });
+  });
+  const messages = await agent.history(session.id);
+  assert.equal(messages.at(-1)!.content, '原分支后续问题');
+  assert.equal(agent.runtime.connected, false);
+  assert.equal(agent.runtime.sessionId, session.id);
+  assert.equal(agent.runtime.goal!.id, original.id);
+  assert.equal(agent.runtime.goal!.status, 'completed');
+  assert.equal((await readSessionFile(session.file)).goal!.summary, '原分支完成');
+  records.push({
+    type: 'custom',
+    id: 'clear',
+    parentId: 'tail',
+    customType: DESKTOP_GOAL_ENTRY_TYPE,
+    data: null,
+  } as never);
+  await fs.writeFile(session.file, records.map((record) => JSON.stringify(record)).join('\n') + '\n');
+  await agent.history(session.id);
+  assert.equal(agent.runtime.goal, null);
+});
+
+test('a bounded large history still restores the Goal before its message preview cutoff', async (t) => {
+  const directory = await fs.mkdtemp(path.join(os.tmpdir(), 'pi-goal-large-'));
+  t.after(() => fs.rm(directory, { recursive: true, force: true }));
+  const h = harness();
+  await h.command('较大会话的目标');
+  await h.tool('desktop_goal_complete', { goal_id: h.state()!.id, summary: '完成', evidence: '检查通过' });
+  const file = path.join(directory, 'large.jsonl');
+  const records = [{ type: 'session', id: 'large', cwd: directory }, ...h.entries];
+  await fs.writeFile(file, records.map((row) => JSON.stringify(row)).join('\n') + '\n');
+  for (let i = 0; i < 2; i++)
+    await fs.appendFile(
+      file,
+      JSON.stringify({
+        type: 'message',
+        id: 'large-' + i,
+        parentId: i ? 'large-0' : h.entries.at(-1)!.id,
+        message: { role: 'user', content: 'x'.repeat(9 * 1024 * 1024) },
+      }) + '\n',
+    );
+  const transcript = await readLargeTranscript(file);
+  assert.equal(transcript.messages.length, 1);
+  assert.match(transcript.warning, /最多 16 MiB/);
+  assert.equal(transcript.goal!.id, h.state()!.id);
+  assert.equal(transcript.goal!.status, 'completed');
+});
+
+test('structured Goal events cover every status, usage, continuation, budget adjustment and clear', async () => {
+  const h = harness();
+  await h.emit({ type: 'session_start', reason: 'resume' });
+  assert.equal(h.updates.at(-1), null);
+  await h.command('--tokens 500k 修复登录');
+  const id = h.state()!.id;
+  assert.equal(h.updates.at(-1)!.status, 'active');
+  assert.equal(h.updates.at(-1)!.tokenBudget, 500000);
+  assert.equal(h.updates.at(-1)!.maxContinuations, 25);
+  await h.usage(500000);
+  assert.equal(h.updates.at(-1)!.status, 'paused');
+  assert.equal(h.updates.at(-1)!.tokensUsed, 500000);
+  await assert.rejects(h.action({ action: 'budget', goalId: id, tokenBudget: 400000 }), /上限/);
+  await h.action({ action: 'budget', goalId: id, tokenBudget: 2000000 });
+  assert.equal(h.updates.at(-1)!.status, 'active');
+  assert.equal(h.updates.at(-1)!.tokenBudget, 2000000);
+  await h.emit({ type: 'agent_start' });
+  await h.usedTool();
+  await h.boundary();
+  assert.equal(h.updates.at(-1)!.continuations, 1);
+  await h.tool('desktop_goal_blocked', { goal_id: id, summary: '需要凭据', evidence: '请求被拒绝' });
+  assert.equal(h.updates.at(-1)!.status, 'blocked');
+  assert.equal(h.updates.at(-1)!.reason, '需要凭据');
+  await h.command('resume');
+  await h.tool('desktop_goal_complete', { goal_id: id, summary: '已修好', evidence: '**测试通过**' });
+  assert.equal(h.updates.at(-1)!.status, 'completed');
+  assert.equal(h.updates.at(-1)!.evidence, '**测试通过**');
+  await h.command('status');
+  assert.match(h.notices.at(-1)!.message, /测试通过/);
+  await h.command('clear');
+  assert.equal(h.updates.at(-1), null);
+  await assert.rejects(h.action({ action: 'clear', goalId: id }), /已变化/);
+});
+
 test('goal command parses only a leading token budget and preserves command text in objectives', () => {
   assert.deepEqual(parseGoalCommand('--tokens 20k 修复测试'), {
     action: 'start',
@@ -175,43 +317,25 @@ test('goal command parses only a leading token budget and preserves command text
     assert.throws(() => parseGoalCommand(text), /预算|用法/);
 });
 
-test('new goal UI cancellation at either dialog leaves no state and makes no model request', async () => {
+test('cancelling the single Goal dialog leaves no state and makes no model request', async () => {
   const cancelledGoal = harness();
   cancelledGoal.ctx.modelRegistry.hasConfiguredAuth = () => {
     throw new Error('Cancelled dialog must not resolve model authentication.');
   };
-  cancelledGoal.ctx.ui.editor = async (title) => {
-    assert.equal(title, '新建 Goal');
+  cancelledGoal.ctx.ui.input = async (title) => {
+    assert.equal(title, GOAL_DIALOG_TITLE);
     return undefined;
-  };
-  cancelledGoal.ctx.ui.input = async () => {
-    throw new Error('Budget dialog must not open after cancellation.');
   };
   await cancelledGoal.command('');
   assert.equal(cancelledGoal.entries.length, 0);
   assert.equal(cancelledGoal.messages.length, 0);
   assert.equal(cancelledGoal.notices.length, 0);
-
-  const cancelledBudget = harness();
-  cancelledBudget.ctx.ui.editor = async () => '修复测试';
-  cancelledBudget.ctx.ui.input = async (title, placeholder) => {
-    assert.equal(title, 'Token 预算（可选）');
-    assert.equal(placeholder, '留空不设预算，例如 100k');
-    return undefined;
-  };
-  cancelledBudget.ctx.modelRegistry.hasConfiguredAuth = () => {
-    throw new Error('Cancelled budget must not resolve model authentication.');
-  };
-  await cancelledBudget.command('');
-  assert.equal(cancelledBudget.entries.length, 0);
-  assert.equal(cancelledBudget.messages.length, 0);
-  assert.equal(cancelledBudget.notices.length, 0);
 });
 
 test('new goal UI uses the normal start path with a budget or a blank budget', async () => {
   const budgeted = harness();
-  budgeted.ctx.ui.editor = async () => '  完成目标里的 --tokens 参数文档  ';
-  budgeted.ctx.ui.input = async () => '100k';
+  budgeted.ctx.ui.input = async () =>
+    JSON.stringify({ action: 'start', objective: '  完成目标里的 --tokens 参数文档  ', tokenBudget: 100000 });
   await budgeted.command('');
   assert.equal(budgeted.state()!.objective, '完成目标里的 --tokens 参数文档');
   assert.equal(budgeted.state()!.tokenBudget, 100000);
@@ -219,8 +343,7 @@ test('new goal UI uses the normal start path with a budget or a blank budget', a
   assert.equal(budgeted.messages.length, 1);
 
   const unbudgeted = harness();
-  unbudgeted.ctx.ui.editor = async () => '修复测试';
-  unbudgeted.ctx.ui.input = async () => '';
+  unbudgeted.ctx.ui.input = async () => JSON.stringify({ action: 'start', objective: '修复测试' });
   await unbudgeted.command('');
   assert.equal(unbudgeted.state()!.tokenBudget, undefined);
   assert.equal(unbudgeted.state()!.continuations, 0);
@@ -266,14 +389,13 @@ test('completed goal menu can create a new goal but cancellation preserves the c
     assert.ok(choices.includes('新建目标'));
     return '新建目标';
   };
-  h.ctx.ui.editor = async () => undefined;
+  h.ctx.ui.input = async () => undefined;
   const before = h.entries.length;
   await h.command('');
   assert.equal(h.entries.length, before);
   assert.equal(h.state()!.status, 'completed');
   assert.equal(h.state()!.id, id);
-  h.ctx.ui.editor = async () => '新目标';
-  h.ctx.ui.input = async () => '';
+  h.ctx.ui.input = async () => JSON.stringify({ action: 'start', objective: '新目标' });
   await h.command('');
   assert.notEqual(h.state()!.id, id);
   assert.equal(h.state()!.objective, '新目标');
@@ -391,7 +513,7 @@ test('budget counts main assistant usage once, excludes tool usage, and persists
   await h.command('resume');
   assert.equal(h.messages.length, 1);
   assert.equal(h.state()!.status, 'paused');
-  assert.match(h.notices.at(-1)!.message, /达到 token 预算/);
+  assert.match(h.notices.at(-1)!.message, /达到用量上限/);
 });
 
 test('paused goal counts its in-flight final usage without reactivation or charging cleared history', async () => {

@@ -6,7 +6,14 @@ import path from 'node:path';
 import type { ExtensionContext } from '@earendil-works/pi-coding-agent';
 import { streamSideChat } from '../electron/pi-side-chat';
 import { SideChats } from '../electron/side-chats';
-import { sideChatContext, validateSideChatInput, type SideChat } from '../shared/side-chat';
+import {
+  sideChatContext,
+  estimateSideChatTokens,
+  validateSideChatInput,
+  type SideChat,
+} from '../shared/side-chat';
+import { PiRpc } from '../electron/rpc';
+import { DESKTOP_BRIDGE_COMMAND } from '../shared/pi-bridge';
 import { removeSessionScratch } from '../electron/local-data';
 import { Store } from '../electron/store';
 import { composeQuotedInput, type DraftQuote } from '../shared/message-content';
@@ -70,13 +77,13 @@ test('side contexts respect reply cutoffs, exclude thinking/raw tools and trim w
   );
   assert.ok(thoughtOnly.messages.some((m) => m.content === 'current request'));
   assert.doesNotMatch(JSON.stringify(thoughtOnly.messages), /SECRET_ONLY/);
-  assert.equal(sideChatContext(messages, { scope: 'all' }, 120, true).omittedTurns, 1);
+  assert.equal(sideChatContext(messages, { scope: 'all' }, 100, true).omittedTurns, 1);
   assert.equal(sideChatContext(messages, { scope: 'all' }, 1, true).messages.length, 0);
   assert.throws(
     () => sideChatContext(messages, { scope: 'reply', replyTimestamp: 999 }, 32768, false),
     /当前分支/,
   );
-  assert.throws(() => sideChatContext(messages, { scope: 'all' }, undefined, false), /上下文窗口/);
+  assert.ok(sideChatContext(messages, { scope: 'all' }, undefined, false).messages.length > 0);
 });
 test('bridge side input rejects invalid IDs, tool roles and oversized payloads', () => {
   assert.throws(
@@ -95,6 +102,73 @@ test('bridge side input rejects invalid IDs, tool roles and oversized payloads',
       validateSideChatInput({ id: 'ok', messages: [{ role: 'user', content: 'x'.repeat(4 * 1024 * 1024) }] }),
     /过长/,
   );
+});
+
+test('CJK, side history and the new question share one half-window budget', () => {
+  assert.equal(estimateSideChatTokens('汉字あカ한abcd'), 6);
+  const main: Message[] = Array.from({ length: 4 }, (_, i) => ({
+    role: i % 2 ? 'assistant' : 'user',
+    content: '中'.repeat(150),
+    timestamp: i,
+    stopReason: 'stop',
+  }));
+  assert.equal(sideChatContext(main, { scope: 'all' }, 1000, false).omittedTurns, 1);
+  const context = sideChatContext(main, { scope: 'all' }, 1000, false, [
+    { role: 'user', content: '旧'.repeat(100) },
+    { role: 'assistant', content: '答'.repeat(100) },
+    { role: 'user', content: '问'.repeat(100) },
+  ]);
+  assert.equal(context.omittedTurns, 2);
+  assert.equal(context.messages.length, 3);
+  assert.ok(
+    context.messages.reduce((sum, message) => sum + estimateSideChatTokens(message.content) + 8, 0) <= 500,
+  );
+  const trimmed = sideChatContext([], { scope: 'quotes' }, 300, false, context.messages);
+  assert.deepEqual(trimmed.messages, [context.messages.at(-1)]);
+  assert.throws(
+    () => sideChatContext([], { scope: 'quotes' }, 100, false, [{ role: 'user', content: '问'.repeat(100) }]),
+    /缩短内容/,
+  );
+  assert.ok(sideChatContext(main, { scope: 'all' }, undefined, false).messages.length);
+});
+
+test('a timed-out side bridge aborts the matching Pi request before returning the error', async () => {
+  const rpc = new PiRpc();
+  const calls: { method: string; params: unknown }[] = [];
+  rpc.request = async (type: string, values: Record<string, unknown> = {}) => {
+    if (type === 'get_commands') return { commands: [{ name: DESKTOP_BRIDGE_COMMAND }] } as never;
+    const request = JSON.parse(Buffer.from(String(values.message).split(' ')[1], 'base64').toString());
+    calls.push(request);
+    if (request.method === 'side_chat')
+      throw new Error('timeout', { cause: new Error('Pi request timed out: prompt') });
+    rpc.emit('event', { type: 'desktop_result', id: request.id, data: { stopped: true } });
+    return {} as never;
+  };
+  await assert.rejects(rpc.bridge('side_chat', { id: 'question' }), /timeout/);
+  assert.deepEqual(
+    calls.map(({ method, params }) => ({ method, params })),
+    [
+      { method: 'side_chat', params: { id: 'question' } },
+      { method: 'side_chat_abort', params: { id: 'question' } },
+    ],
+  );
+});
+
+test('v0.14.52 side history arrays remain readable and acquire omission metadata on save', async (t) => {
+  const directory = await fs.mkdtemp(path.join(os.tmpdir(), 'pi-side-upgrade-'));
+  t.after(() => fs.rm(directory, { recursive: true, force: true }));
+  await fs.mkdir(path.join(directory, 'side-chats'));
+  await fs.writeFile(
+    path.join(directory, 'side-chats', 'old.json'),
+    JSON.stringify([{ role: 'user', id: 'q', content: '原问题', timestamp: 1 }]),
+  );
+  const store = new SideChats(directory);
+  const chat = await store.read('old');
+  assert.equal(chat.messages[0].content, '原问题');
+  assert.equal(chat.omittedTurns, 0);
+  chat.omittedTurns = 7;
+  await store.save(chat);
+  assert.equal((await new SideChats(directory).read('old')).omittedTurns, 7);
 });
 test('side streaming uses model registry auth and no tools or session-writing APIs', async () => {
   const deltas: string[] = [];
@@ -160,7 +234,7 @@ test('side history retains fifty question/answer pairs, saves atomically and fol
   const store = new SideChats(directory);
   const chat: SideChat = {
     sessionId: 'session',
-    omittedTurns: 0,
+    omittedTurns: 12,
     messages: Array.from({ length: 120 }, (_, i) => ({
       id: String(i),
       role: i % 2 ? 'assistant' : 'user',
@@ -172,6 +246,7 @@ test('side history retains fifty question/answer pairs, saves atomically and fol
   const saved = await new SideChats(directory).read(chat.sessionId);
   assert.equal(saved.messages.length, 100);
   assert.equal(saved.messages[0].id, '20');
+  assert.equal(saved.omittedTurns, 12);
   await assert.rejects(store.read('../escape'), /标识/);
   await removeSessionScratch(directory, chat.sessionId);
   assert.equal((await store.read(chat.sessionId)).messages.length, 0);

@@ -234,6 +234,9 @@ export default function App() {
             />
             <Composer
               {...pick(model, [
+                'messages',
+                'expanded',
+                'toggleTool',
                 'storage',
                 'environment',
                 'runtime',

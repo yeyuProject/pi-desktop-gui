@@ -127,6 +127,24 @@ export async function verifyQuoteSideChatUI({ app, page, fixture, provider, outp
   const sideRequest = provider.requests.at(-1);
   assert.equal(provider.requests.length, requestsBefore + 1);
   assert.equal(sideRequest.tools?.length ?? 0, 0);
+  const requestText = (message) =>
+    typeof message.content === 'string'
+      ? message.content
+      : (message.content ?? []).map((block) => block.text ?? '').join('');
+  assert.ok(
+    sideRequest.messages.some((message) => message.role === 'assistant' && requestText(message) === 'OK'),
+    'reply scope must send the selected main reply in the actual provider request',
+  );
+  assert.ok(
+    sideRequest.messages.some(
+      (message) => message.role === 'user' && requestText(message).includes('引用测试的第一问'),
+    ),
+  );
+  assert.ok(
+    !sideRequest.messages.some(
+      (message) => message.role === 'user' && requestText(message).includes('引用测试的第二问'),
+    ),
+  );
   const after = await snapshot();
   assert.equal(after.runtime.messages.length, mainCount);
   assert.equal(after.runtime.stats?.tokens, mainTokens);
@@ -184,6 +202,10 @@ export async function verifyQuoteSideChatUI({ app, page, fixture, provider, outp
   assert.equal(provider.requests.length, count, 'continuing in a new chat must only prepare a draft');
   const continued = (await snapshot()).state.selectedSessionId;
   assert.notEqual(continued, session.id);
+  assert.equal(
+    (await snapshot()).state.sessions.find((item) => item.id === continued).projectId,
+    source.projectId,
+  );
   await page.getByRole('button', { name: '侧边对话', exact: true }).click();
   await expect(panel.getByRole('textbox', { name: '侧边问题' })).toBeDisabled();
   await expect(panel).toContainText('请先连接主会话');
@@ -195,6 +217,30 @@ export async function verifyQuoteSideChatUI({ app, page, fixture, provider, outp
   await expect(panel.locator('.side-message.assistant').last()).toContainText('OK');
   await panel.getByRole('button', { name: '引用到主输入框', exact: true }).waitFor();
   assert.equal((await snapshot()).runtime.messages.length, 0);
+  await panel.getByRole('textbox', { name: '侧边问题' }).fill('E2E_SIDE_HOLD 仅侧边回答时退出');
+  await panel.getByRole('button', { name: '发送侧边问题', exact: true }).click();
+  await expect(panel.locator('.side-message.assistant').last()).toContainText('开始流式回复');
+  await page.evaluate(() => {
+    void window.desktop.invoke('quit');
+  });
+  const quit = page.getByRole('dialog', { name: '侧边对话正在回答，将被停止', exact: true });
+  await expect(quit).toBeVisible();
+  await quit.getByRole('button', { name: '留在窗口', exact: true }).click();
+  await expect(panel.getByRole('button', { name: '停止侧边回答', exact: true })).toBeVisible();
+  await page.evaluate((id) => {
+    void window.desktop.invoke('deleteSession', id);
+  }, continued);
+  const remove = page.getByRole('dialog', { name: /删除会话/ });
+  await expect(remove).toBeVisible({ timeout: 5000 });
+  const aborted = JSON.parse(
+    await fs.readFile(path.join(fixture.dataDir, 'side-chats', continued + '.json'), 'utf8'),
+  );
+  assert.equal(
+    aborted.messages.at(-1).aborted,
+    true,
+    'side abort must finish before the delete confirmation opens',
+  );
+  await remove.getByRole('button', { name: '取消', exact: true }).click();
   await panel.getByRole('button', { name: '关闭侧边对话' }).click();
   await page.evaluate((id) => window.desktop.invoke('sideChatClear', id), session.id);
   await assert.rejects(fs.stat(path.join(fixture.dataDir, 'side-chats', session.id + '.json')), {

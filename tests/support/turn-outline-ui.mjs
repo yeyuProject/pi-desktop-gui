@@ -348,7 +348,7 @@ export async function verifyTurnOutlineUI({ app, page, output }) {
         .evaluate((element) => {
           const probe = document.createElement('i');
           probe.style.backgroundColor = 'var(--warning)';
-          element.append(probe);
+          document.documentElement.append(probe);
           const values = {
             actual: getComputedStyle(element).backgroundColor,
             expected: getComputedStyle(probe).backgroundColor,
@@ -394,6 +394,29 @@ export async function verifyTurnOutlineUI({ app, page, output }) {
     });
   });
   await expect(row(13)).toHaveAttribute('aria-current', 'step');
+  await app.evaluate(({ BrowserWindow }) => {
+    const messages = globalThis.outlineUiRuntime.messages;
+    for (let turn = 14; turn <= 123; turn++)
+      messages.push({ role: 'user', content: `第 ${turn} 轮未回复`, timestamp: 1700000000000 + turn * 100 });
+    BrowserWindow.getAllWindows()[0].webContents.send('desktop:event', {
+      type: 'runtime',
+      runtime: globalThis.outlineUiRuntime,
+    });
+  });
+  await outline.hover();
+  await outline.locator('.turn-outline-list').evaluate((element) => {
+    element.scrollTop = element.scrollHeight;
+  });
+  await expect(row(123)).toBeVisible();
+  const number = await row(123)
+    .locator('.turn-number')
+    .evaluate((element) => ({
+      text: element.textContent,
+      width: element.clientWidth,
+      scroll: element.scrollWidth,
+    }));
+  assert.equal(number.text, '#123');
+  assert.ok(number.width >= number.scroll, 'three-digit turn numbers must not clip');
   await outside();
   await input.focus();
   console.log(
@@ -603,6 +626,8 @@ export async function verifyMessageContentUI({ app, page, output }) {
     )
     .toBe(true);
   await page.getByRole('button', { name: '关闭会话查找' }).click();
+  await expect(skill).toHaveAttribute('aria-expanded', 'false');
+  await expect.poll(() => savedExpansion('skill:1800000000100')).toBe(false);
   await jump(5);
   const expand = user(5).getByRole('button', { name: '展开全文（共 200 行）' });
   await expect(expand).toBeVisible();
@@ -647,10 +672,18 @@ export async function verifyMessageContentUI({ app, page, output }) {
     )
     .toBe(true);
   await page.getByRole('button', { name: '关闭会话查找' }).click();
+  await expect.poll(() => savedExpansion('prompt:1800000000500')).toBe(false);
   await page.reload();
   await page.getByRole('textbox', { name: '任务输入' }).waitFor();
   await jump(5);
-  await expect(user(5).getByRole('button', { name: '收起', exact: true })).toBeVisible();
+  await expect(user(5).getByRole('button', { name: /^展开全文/ })).toBeVisible();
+  await user(5)
+    .getByRole('button', { name: /^展开全文/ })
+    .click();
+  await jump(1);
+  await expect(skill).toHaveAttribute('aria-expanded', 'false');
+  await skill.click();
+  await expect.poll(() => savedExpansion('skill:1800000000100')).toBe(true);
   const { state } = await page.evaluate(() => window.desktop.invoke('bootstrap'));
   const currentSession = state.selectedSessionId;
   const otherSession = state.sessions.find((session) => session.id !== currentSession);
@@ -692,6 +725,9 @@ export async function verifyMessageContentUI({ app, page, output }) {
   const missing = outline.getByRole('button', { name: '复制第 4 轮回复', exact: true });
   await expect(missing).toBeDisabled();
   await expect(missing).toHaveAttribute('title', '本轮没有可复制的回复');
+  await row(4).focus();
+  await page.keyboard.press('c');
+  await expect(page.getByText('本轮没有可复制的回复', { exact: true })).toBeVisible();
   await jump(5);
   const final = thread.locator(`[data-message-index="${finalIndices.get(5)}"]`);
   await expect(final.getByRole('button', { name: '复制回复', exact: true })).toBeVisible();
@@ -824,6 +860,102 @@ export async function verifyMessageContentUI({ app, page, output }) {
   await choose(tool.locator('.diff-row.added code'));
   await selectionMenu.getByRole('button', { name: '引用', exact: true }).click();
   await expect.poll(async () => (await quotes()).at(-1).text).toBe('new line');
+  // A shell message and live activity do not have a saved toolResult wrapper yet.
+  await app.evaluate(({ BrowserWindow }) => {
+    globalThis.outlineUiRuntime.messages.push({
+      role: 'bashExecution',
+      command: 'echo F1_SHELL_OUTPUT',
+      output: 'F1_SHELL_OUTPUT',
+      exitCode: 0,
+      content: '',
+      timestamp: 1800000003000,
+    });
+    globalThis.outlineUiRuntime.tools = [
+      {
+        id: 'f1-live',
+        name: 'bash',
+        args: { command: 'echo F1_LIVE_OUTPUT' },
+        output: 'F1_LIVE_OUTPUT',
+        status: 'running',
+        startedAt: 1800000003001,
+      },
+    ];
+    BrowserWindow.getAllWindows()[0].webContents.send('desktop:event', {
+      type: 'runtime',
+      runtime: globalThis.outlineUiRuntime,
+    });
+  });
+  await jump(20);
+  await choose(thread.locator('.bash-message .ansi-output'));
+  await selectionMenu.getByRole('button', { name: '引用', exact: true }).click();
+  assert.equal((await quotes()).at(-1).section, 'tool');
+  assert.equal((await quotes()).at(-1).text, 'F1_SHELL_OUTPUT');
+  const live = thread.locator('[data-quote-tool-id="f1-live"]');
+  await choose(live.locator('.ansi-output'));
+  await selectionMenu.getByRole('button', { name: '引用', exact: true }).click();
+  assert.equal((await quotes()).at(-1).section, 'tool');
+  assert.equal((await quotes()).at(-1).text, 'F1_LIVE_OUTPUT');
+  assert.equal((await quotes()).at(-1).toolCallId, 'f1-live');
+  // Put a one-line selection just below the thread's top edge.
+  await jump(1);
+  await code.evaluate((element) => {
+    const thread = element.closest('.thread');
+    thread.scrollTop += element.getBoundingClientRect().top - thread.getBoundingClientRect().top - 14;
+  });
+  await choose(code);
+  const placement = await selectionMenu.evaluate((element) => ({
+    top: element.getBoundingClientRect().top,
+    selectionBottom: window.getSelection().getRangeAt(0).getBoundingClientRect().bottom,
+  }));
+  assert.ok(placement.top >= placement.selectionBottom, 'a selection near the top needs its menu below it');
+  await page.keyboard.press('Escape');
+  const longQuote = {
+    id: 'f1-long-paragraph',
+    role: 'assistant',
+    turn: 1,
+    messageTimestamp: 1800000000101,
+    section: 'text',
+    text: '这是一段没有换行但会在气泡里自动换行的长引用。'.repeat(80),
+  };
+  await app.evaluate(({ BrowserWindow }, quote) => {
+    const { text, ...source } = quote;
+    globalThis.outlineUiRuntime.messages.push({
+      role: 'user',
+      content: `> [引用 第 1 轮 Pi 回复](pi-quote:${encodeURIComponent(JSON.stringify(source))})\n> ${text}\n\n检查长段引用`,
+      timestamp: 1800000003002,
+    });
+    BrowserWindow.getAllWindows()[0].webContents.send('desktop:event', {
+      type: 'runtime',
+      runtime: globalThis.outlineUiRuntime,
+    });
+  }, longQuote);
+  await jump(21);
+  const longCard = thread.locator('.message-quote').last();
+  await expect(longCard.getByRole('button', { name: '展开引用', exact: true })).toBeVisible();
+  assert.ok(
+    await longCard
+      .locator('.quote-text')
+      .evaluate(
+        (element) => element.clientHeight <= parseFloat(getComputedStyle(element).lineHeight) * 4 + 1,
+      ),
+  );
+  await app.evaluate(({ BrowserWindow }) => {
+    globalThis.outlineUiRuntime.model = {
+      id: 'preview',
+      provider: 'fixture',
+      name: 'Context preview',
+      contextWindow: 1000,
+    };
+    BrowserWindow.getAllWindows()[0].webContents.send('desktop:event', {
+      type: 'runtime',
+      runtime: globalThis.outlineUiRuntime,
+    });
+  });
+  await page.evaluate(() => window.dispatchEvent(new CustomEvent('pi:side', { detail: { show: true } })));
+  const previewPanel = page.getByRole('complementary', { name: '侧边对话' });
+  await previewPanel.getByRole('combobox', { name: '侧边上下文范围' }).selectOption('all');
+  await expect(previewPanel.getByRole('status')).toContainText(/已省略前 \d+ 轮/);
+  await previewPanel.getByRole('button', { name: '关闭侧边对话' }).click();
   console.log(
     'PASS UI7 folding, saved views, section search and turn copying; C1 code/tool/thinking selection, source jumps, cross-message clipping and side entry',
   );
