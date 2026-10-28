@@ -31,7 +31,7 @@ import { WorkspaceWatcher } from './workspace-watch';
 import { isEmptySession, hasSessionData, fillSessionUsage } from './session-maintenance';
 import { aggregateUsage } from '../shared/usage';
 import { composeDraftText } from '../shared/draft';
-import { composeQuotedInput, isDraftQuote } from '../shared/message-content';
+import { isDraftQuote } from '../shared/message-content';
 import { formatMessageQuotes } from '../shared/message-content';
 import { SideChats } from './side-chats';
 import {
@@ -1050,7 +1050,6 @@ const handlers: Record<Exclude<keyof ApiMap, WorkspaceHandlerName>, (...args: an
     if (images !== undefined) validateImages(images);
     if (quotes !== undefined && (!Array.isArray(quotes) || !quotes.every(isDraftQuote)))
       throw new Error('引用内容无效，请移除后重新引用');
-    if (quotes !== undefined) text(composeQuotedInput(composeDraftText(draft, snippets ?? []), quotes));
     const s = store.session(id);
     if (draft || attachments.length || images?.length || snippets?.length || quotes?.length)
       store.promoteSession(id);
