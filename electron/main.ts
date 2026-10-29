@@ -17,7 +17,7 @@ import {
   type Rectangle,
 } from 'electron';
 import { AppDialogRequests, type DialogOptions } from './app-dialogs';
-import { nativeThemeSource, THEMES, windowTheme } from '../shared/window-theme';
+import { nativeThemeSource, THEMES, UI_STYLES, styleTheme, windowTheme } from '../shared/window-theme';
 import fs from 'node:fs/promises';
 import path from 'node:path';
 import { randomUUID } from 'node:crypto';
@@ -210,6 +210,7 @@ function updateWindowTheme() {
   const { background, ...overlay } = windowTheme(
     nativeTheme.shouldUseDarkColors,
     store?.state.settings.theme,
+    store?.state.settings.uiStyle,
   );
   window.setBackgroundColor(background);
   if (!isMac) window.setTitleBarOverlay(overlay);
@@ -1182,6 +1183,12 @@ const handlers: Record<Exclude<keyof ApiMap, WorkspaceHandlerName>, (...args: an
       if (!(THEMES as readonly unknown[]).includes(value.theme)) throw new Error('主题无效');
       next.theme = value.theme;
     }
+    if (value.uiStyle !== undefined) {
+      if (!(UI_STYLES as readonly unknown[]).includes(value.uiStyle))
+        throw new Error('请选择 Pi 经典或 Codex 界面风格。');
+      next.uiStyle = value.uiStyle;
+    }
+    next.theme = styleTheme(next.theme, next.uiStyle);
     for (const [key, min, max] of [
       ['fontScale', 1, 2],
       ['sidebarWidth', 180, 360],
@@ -1661,6 +1668,7 @@ async function createWindow() {
   const { background, ...titleBarOverlay } = windowTheme(
     nativeTheme.shouldUseDarkColors,
     store?.state.settings.theme,
+    store?.state.settings.uiStyle,
   );
   window = new BrowserWindow({
     width: saved.bounds?.width ?? 1440,

@@ -47,7 +47,9 @@ test('every native appearance launch leaves color scheme to Electron, including 
 
 test('native appearance still checks actual media against nativeTheme without per-page color emulation', () => {
   assert.equal((script.match(/electron\.launch\(/g) ?? []).length, 1);
-  assert.doesNotMatch(script, /\.emulateMedia\(|setEmulatedMedia/);
+  // Suppressing entrance animations is safe; emulating the color scheme would hide native regressions.
+  const motionOnly = /\.emulateMedia\(\{\s*reducedMotion: 'reduce'\s*\}\)/g;
+  assert.doesNotMatch(script.replace(motionOnly, ''), /\.emulateMedia\(|setEmulatedMedia/);
   assert.match(
     script,
     /\(dark\) => matchMedia\('\(prefers-color-scheme: dark\)'\)\.matches === dark,\s*native\.dark/,

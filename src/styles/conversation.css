@@ -487,8 +487,8 @@
   max-width: 180px;
 }
 .send-button {
-  background: var(--accent);
-  color: var(--on-accent);
+  background: var(--primary);
+  color: var(--on-primary);
   border: 0;
   width: 32px;
   height: 32px;
@@ -497,7 +497,7 @@
   flex-shrink: 0;
 }
 .send-button:hover {
-  background: var(--accent);
+  background: var(--primary);
   filter: brightness(1.1);
 }
 .stop-button {

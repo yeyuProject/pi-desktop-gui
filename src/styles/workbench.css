@@ -24,7 +24,7 @@ button:hover:not(:disabled) {
   border-color: var(--line-strong);
 }
 .primary:hover:not(:disabled) {
-  border-color: var(--accent);
+  border-color: var(--primary);
 }
 input:hover:not(:disabled),
 select:hover:not(:disabled) {
@@ -348,8 +348,8 @@ div:has(> .tool-card) + .tool-card::before {
   z-index: 1;
 }
 .tool-card.done summary::before {
-  background: var(--accent);
-  border-color: var(--accent);
+  background: var(--success);
+  border-color: var(--success);
 }
 .tool-card.running summary::before {
   background: var(--signal);

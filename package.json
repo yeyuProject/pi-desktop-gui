@@ -1,6 +1,6 @@
 {
   "name": "pi-desktop-gui",
-  "version": "0.14.55",
+  "version": "0.14.56",
   "private": true,
   "description": "A local desktop workspace for the Pi coding agent",
   "author": "yeyuProject",
@@ -31,6 +31,7 @@
     "demo-gif": "node scripts/readme-demo.mjs",
     "format": "prettier --write electron shared src tests scripts tools/lint vite.config.ts eslint.config.mjs",
     "test:theme-ui": "node --import tsx scripts/test-theme-ui.mjs && node --import tsx scripts/test-mac-update.ts",
+    "test:codex-style-ui": "node scripts/test-codex-style-ui.mjs",
     "test:pi-settings-ui": "node --import tsx scripts/test-pi-settings-ui.mjs",
     "test:retry": "node --import tsx scripts/test-retry.ts",
     "test:retry-ui": "node --import tsx scripts/test-retry-ui.mjs",

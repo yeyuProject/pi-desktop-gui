@@ -40,6 +40,8 @@ const palette = {
   sepia: { background: '#f7f1e3', color: '#efe6d2', symbolColor: '#3a3125', height: 36 },
   green: { background: '#dcebdc', color: '#cfe2d0', symbolColor: '#1c2b20', height: 36 },
   navy: { background: '#0f1828', color: '#0c1422', symbolColor: '#e2e9f3', height: 36 },
+  'codex-light': { background: '#ffffff', color: '#f9f9f9', symbolColor: '#0d0d0d', height: 36 },
+  'codex-dark': { background: '#181818', color: '#131313', symbolColor: '#dddddd', height: 36 },
 };
 const rgb = (hex) => `rgb(${[1, 3, 5].map((i) => parseInt(hex.slice(i, i + 2), 16)).join(', ')})`;
 const errors = [];
@@ -114,6 +116,7 @@ async function launch() {
     timeout: 30000,
   });
   page = await app.firstWindow();
+  await page.emulateMedia({ reducedMotion: 'reduce' });
   page.setDefaultTimeout(15000);
   page.on('pageerror', (error) => errors.push(error.message));
   await page.getByRole('textbox', { name: '任务输入', exact: true }).waitFor();
@@ -199,8 +202,9 @@ async function launch() {
   await connectModel();
 }
 
-async function checkTheme(source, { changed = false } = {}) {
+async function checkTheme(source, { changed = false, style = 'classic' } = {}) {
   await page.waitForFunction((value) => document.documentElement.dataset.theme === value, source);
+  await page.waitForFunction((value) => document.documentElement.dataset.style === value, style);
   const native = await app.evaluate(({ BrowserWindow, nativeTheme }) => ({
     source: nativeTheme.themeSource,
     dark: nativeTheme.shouldUseDarkColors,
@@ -210,7 +214,8 @@ async function checkTheme(source, { changed = false } = {}) {
   const nativeSource = { sepia: 'light', green: 'light', navy: 'dark' }[source] ?? source;
   assert.equal(native.source, nativeSource, 'Saved appearance must control Electron nativeTheme');
   if (source !== 'system') assert.equal(native.dark, nativeSource === 'dark');
-  const expected = palette[source === 'system' ? (native.dark ? 'dark' : 'light') : source];
+  const effective = source === 'system' ? (native.dark ? 'dark' : 'light') : source;
+  const expected = palette[(style === 'codex' ? 'codex-' : '') + effective];
   // Electron's native background has ARGB alpha order; CSS hex tokens below use RGBA.
   assert.equal(hexColor(native.background, 'electron'), hexColor(expected.background));
   await page.waitForFunction(
@@ -236,7 +241,10 @@ async function checkTheme(source, { changed = false } = {}) {
   assert.equal(hexColor(renderer.rail), hexColor(expected.color));
   assert.equal(hexColor(renderer.ink), hexColor(expected.symbolColor));
   assert.equal(hexColor(renderer.background), hexColor(expected.background));
-  assert.equal(hexColor(renderer.accent), hexColor(native.dark ? '#74c7a3' : '#1f6b52'));
+  assert.equal(
+    hexColor(renderer.accent),
+    hexColor(style === 'codex' ? (native.dark ? '#339cff' : '#005fcc') : native.dark ? '#74c7a3' : '#1f6b52'),
+  );
   if (source === 'navy') assert.equal(hexColor(renderer.syntaxKeyword), hexColor('#c99cdf'));
   if (process.platform !== 'darwin') {
     assert.equal(renderer.titlebar.background, rgb(expected.color));
@@ -249,9 +257,10 @@ async function checkTheme(source, { changed = false } = {}) {
       });
   } else assert.equal(renderer.titlebar, null, 'macOS retains native traffic lights and application menu');
   assert.equal((await bootstrap()).state.settings.theme, source);
+  assert.equal((await bootstrap()).state.settings.uiStyle, style);
 }
 
-async function chooseTheme(source) {
+async function openAppearance() {
   await page.locator('.sidebar').getByRole('button', { name: '设置', exact: true }).click();
   const settings = page.getByRole('dialog', { name: '设置', exact: true });
   await settings.waitFor();
@@ -259,13 +268,18 @@ async function chooseTheme(source) {
     .locator('.settings-layout > nav')
     .getByRole('button', { name: '外观与编辑器', exact: true })
     .click();
+  return settings;
+}
+async function chooseTheme(source, style = 'classic') {
+  const settings = await openAppearance();
   const callsBefore = await app.evaluate(() => globalThis.themeUi.calls.length);
+  await settings.getByRole('button', { name: style === 'codex' ? 'Codex' : 'Pi 经典', exact: true }).click();
   await settings
     .locator('.theme-options')
     .getByRole('button', {
       name: {
-        light: '浅色',
-        dark: '深色',
+        light: style === 'codex' ? '白天' : '浅色',
+        dark: style === 'codex' ? '夜晚' : '深色',
         system: '跟随系统',
         sepia: '护眼米黄',
         green: '豆沙绿',
@@ -291,7 +305,7 @@ async function chooseTheme(source) {
   assert.equal((await bootstrap()).state.settings.theme, source);
   await settings.locator(':scope > footer').getByRole('button', { name: '关闭', exact: true }).click();
   await settings.waitFor({ state: 'hidden' });
-  await checkTheme(source, { changed: true });
+  await checkTheme(source, { changed: true, style });
 }
 
 async function checkTitlebarGeometry() {
@@ -457,6 +471,53 @@ try {
   pass(
     'light/dark native popup APIs execute; renderer screenshots deliberately make no claim about OS popup pixels',
   );
+
+  // Exercise the production save handler, including partial updates from old callers.
+  assert.equal((await bootstrap()).state.settings.uiStyle, 'classic');
+  for (const invalid of ['other', '', null, 7]) {
+    await assert.rejects(
+      page.evaluate((uiStyle) => window.desktop.invoke('saveSettings', { uiStyle }), invalid),
+      /界面风格/,
+    );
+    assert.equal((await bootstrap()).state.settings.uiStyle, 'classic');
+  }
+  for (const [theme, expected] of [
+    ['sepia', 'light'],
+    ['green', 'light'],
+    ['navy', 'dark'],
+  ]) {
+    await page.evaluate((theme) => window.desktop.invoke('saveSettings', { theme, uiStyle: 'codex' }), theme);
+    await checkTheme(expected, { changed: true, style: 'codex' });
+    await page.evaluate(() => window.desktop.invoke('saveSettings', { fontScale: 1 }));
+    assert.equal((await bootstrap()).state.settings.uiStyle, 'codex');
+    await chooseTheme(theme);
+    const settings = await openAppearance();
+    await settings.getByRole('button', { name: 'Codex', exact: true }).click();
+    await page.waitForFunction(
+      (theme) =>
+        document.documentElement.dataset.theme === theme &&
+        document.documentElement.dataset.style === 'codex',
+      expected,
+    );
+    assert.equal(await settings.locator('.theme-options').getByRole('button').count(), 5);
+    assert.equal((await bootstrap()).state.settings.uiStyle, 'classic', 'Preview must not persist');
+    await settings.getByRole('button', { name: 'Pi 经典', exact: true }).click();
+    assert.equal(await page.evaluate(() => document.documentElement.dataset.theme), expected);
+    await settings.getByRole('button', { name: 'Codex', exact: true }).click();
+    await settings.locator(':scope > footer').getByRole('button', { name: '关闭', exact: true }).click();
+    await page
+      .getByRole('dialog', { name: '放弃尚未保存的修改？', exact: true })
+      .getByRole('button', { name: '放弃修改', exact: true })
+      .click();
+    await settings.waitFor({ state: 'hidden' });
+    await checkTheme(theme);
+  }
+  for (const theme of ['light', 'dark', 'system']) {
+    await chooseTheme(theme, 'codex');
+    await screenshot('codex-' + theme);
+  }
+  await chooseTheme('light');
+  pass('Codex saves validate and normalize; style preview, cancel and all three saved modes work');
 
   const beforeShortcut = (await bootstrap()).state.sessions.length;
   await page.getByRole('textbox', { name: '任务输入', exact: true }).focus();
@@ -774,16 +835,16 @@ try {
     pass('macOS close/activate preserves hide/reopen behavior');
   }
 
-  await chooseTheme('dark');
+  await chooseTheme('dark', 'codex');
   await page.reload();
   await page.getByRole('textbox', { name: '任务输入', exact: true }).waitFor();
-  await checkTheme('dark');
+  await checkTheme('dark', { style: 'codex' });
   await app.close();
   app = undefined;
   await launch();
-  await checkTheme('dark');
+  await checkTheme('dark', { style: 'codex' });
   await checkTitlebarGeometry();
-  pass('saved dark appearance survives renderer reload and a real application restart');
+  pass('saved Codex dark appearance survives renderer reload and a real application restart');
 
   const sessionId = (await bootstrap()).state.selectedSessionId;
   await page.evaluate((id) => window.desktop.invoke('send', id, 'hold', [], 'steer'), sessionId);

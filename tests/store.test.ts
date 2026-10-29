@@ -74,6 +74,28 @@ test('background themes are kept and unknown themes are repaired to follow the s
   }
 });
 
+test('UI style defaults, validation and Codex background normalization survive reload', async (t) => {
+  const f = await fixture(t);
+  assert.equal(f.store.state.settings.uiStyle, 'classic');
+  for (const [uiStyle, theme, expectedStyle, expectedTheme, repaired] of [
+    [undefined, 'sepia', 'classic', 'sepia', undefined],
+    ['invalid', 'dark', 'classic', 'dark', 1],
+    [null, 'light', 'classic', 'light', 1],
+    ['codex', 'sepia', 'codex', 'light', 1],
+    ['codex', 'green', 'codex', 'light', 1],
+    ['codex', 'navy', 'codex', 'dark', 1],
+    ['codex', 'system', 'codex', 'system', undefined],
+  ] as const) {
+    const data = { ...f.store.state, settings: { ...f.store.state.settings, uiStyle, theme } };
+    await fs.writeFile(f.file('state.json'), JSON.stringify(data));
+    const restored = new Store(f.dir);
+    await restored.load();
+    assert.equal(restored.state.settings.uiStyle, expectedStyle);
+    assert.equal(restored.state.settings.theme, expectedTheme);
+    assert.equal(restored.storage.recovery?.repairedSettings, repaired);
+  }
+});
+
 test('invalid rows are discarded individually while healthy drafts and settings remain', async (t) => {
   const f = await fixture(t);
   const invalid = { ...f.session, id: undefined };

@@ -2,6 +2,122 @@
 
 首版功能 页面与交互设计
 
+## v0.14.56：Codex 界面风格（已实现）
+
+### UI8 Codex 风格：白天 / 夜晚
+
+新增一套参照 OpenAI Codex 桌面版的界面风格，分白天和夜晚两种。Codex 官方只公开了默认的背景、前景和强调色，其余数值来自社区对安装包的提取和对窗口的取色，下文“依据”列逐项注明。核对日期 2026-10-29，来源：Codex 设置文档（learn.chatgpt.com/docs/reference/settings）、Suk1u/codex-clone 的 `app/css/tokens.css`、openchamber PR #4670、Hermes `codex-theme` 插件。
+
+**背景与问题。**
+
+1. **主题只能换颜色。** `src/styles/themes.css:1` 写明背景主题“只改表面和文字”。圆角、阴影、消息排版都写死在各组件的 CSS 里，再加一个色板也做不出 Codex 的样子。Codex 的特征在形态上：表面扁平无阴影，用细线分隔；蓝色只用于交互；用户消息是右对齐的灰色气泡，助手回复直接排在画布上；输入框是大圆角。
+2. **`--accent` 同时表示“交互”和“成功/新增”。** 差异新增行、已完成状态、工具完成、Goal 完成、已连接、轮次新增行数都直接用 `--accent`。位置：`base.css:508-510`、`conversation-v014.css:483`、`diff-view.css:2,23-24`、`goal.css:30-31,127`、`inspector.css:265-267`、`models.css:365-368`、`workbench.css:350-352`。强调色一旦换成蓝色，新增行也会变蓝。
+3. **主要操作都用强调色填充。** 涉及主要按钮 `.primary`（`base.css:457-465`）、发送按钮（`conversation.css:489-502`）、品牌标（`shell.css:25-29`）和会话选中态（`shell.css:127-129`，以及 `workbench.css:100-109` 的左侧色条）。Codex 的这些位置都是中性色：发送按钮用墨色填充，选中行用灰底。
+4. **现有缺陷：跟随系统时深色语法色不生效。** `conversation-v014.css:14` 的深色语法色和 ANSI 色只匹配 `dark` 与 `navy`，没有 `prefers-color-scheme: dark` 下的 `system`（`--warning` 在 `themes.css` 中有这一分支）。所以“跟随系统”遇到系统深色时，代码块仍用浅色语法色，关键字对比度仅 2.70:1。Codex 的“跟随系统”沿用同一机制，必须一并修复。
+5. **官方浅色强调色对比度不足。** `#0285FF` 作为文字放在白底上只有 3.62:1，低于本项目 4.5:1 的要求（UI6 验收 7）。
+
+**目标。** 设置中可以选择 Codex 风格，提供白天、夜晚、跟随系统三种模式，标题栏和原生窗口背景一并切换。经典风格的观感不变。功能、DOM 结构、可访问名称和快捷键均不变。
+
+**不做。**
+
+- Codex 设置里的自定义强调色/背景/前景、对比度滑块、半透明侧栏、主题导入导出和字体选择。
+- 照搬 Codex 的布局和信息架构。侧栏结构、检查器、标题栏、模型与审批菜单的位置都不变，只改视觉。
+- Codex 风格下的护眼米黄、豆沙绿、深蓝背景。
+- 使用 OpenAI 的标志或其他品牌资产，“π”品牌标保留。
+- 启动首帧（加载页）先按“跟随系统”绘制再切换。现有背景主题也有这个问题，本节不处理。
+- 经典浅色代码注释色 `#7c848b` 对比度偏低（约 3.5:1）。这是经典风格的已有问题，另行处理。
+- 资源页里的 Pi 主题（`ResourcesTab` 的 `themes`）。它是 Pi 终端主题，与本节无关。
+
+**交互。**
+
+- 设置 → 外观与编辑器，在“主题”之前新增“界面风格”：`Pi 经典` / `Codex`。
+- 选 `Codex` 后，主题选项只显示 `白天`、`夜晚`、`跟随系统`。从米黄或豆沙绿切换过来时选中白天，从深蓝切换过来时选中夜晚。切回经典时保留当前的浅色/深色/跟随系统，不恢复之前的背景主题。
+- 预览沿用现有机制，设置窗口打开期间即时生效（`useWorkbench.ts:242`），取消后还原，保存后持久化，重启后保持。
+
+**技术方案。**
+
+- **设置与原生窗口**
+  - `shared/window-theme.ts`：新增 `UI_STYLES = ['classic', 'codex']` 和 Codex 白天/夜晚色板，`windowTheme(dark, theme, style)` 按风格返回色板。Codex 白天为 `{ background: '#ffffff', color: '#f9f9f9', symbolColor: '#0d0d0d' }`，夜晚为 `{ background: '#181818', color: '#131313', symbolColor: '#dddddd' }`。`nativeThemeSource` 不变，因为 Codex 只用 light、dark、system 三种取值。
+  - `shared/types.ts:74`：`Settings` 增加 `uiStyle: UiStyle`；`electron/store-state.ts` 的默认值为 `'classic'`。旧状态文件没有这个字段时取默认值。
+  - `electron/store-state.ts:170` 按枚举校验 `uiStyle`。如果读到 `codex` 搭配背景主题（例如手改了文件），就近改为 light 或 dark，并计入 `repairedSettings`。
+  - `electron/main.ts:1181`（`saveSettings`）校验 `uiStyle`，并对 Codex 搭配背景主题做同样的就近修正。`main.ts:212` 和 `main.ts:1663` 两处 `windowTheme` 调用传入风格。
+  - `src/hooks/useWorkbench.ts:244` 设置 `document.documentElement.dataset.style`；`src/main.tsx:8` 先设为 `classic`。
+  - `src/components/SettingsModal.tsx:375` 的外观页增加风格选择，主题选项按风格过滤，Codex 下的标签为白天/夜晚/跟随系统。
+- **语义令牌（经典风格的取值不变）**
+  - `base.css` 的 `:root` 新增 `--success: var(--accent)`、`--primary: var(--accent)`、`--on-primary: var(--on-accent)`。经典风格解析后的颜色与现在相同。
+  - 背景第 2 条列出的“成功/新增”位置改用 `--success`；`.primary`、`.send-button`、`.brand-mark` 改用 `--primary` / `--on-primary`。轮次目录“含修改”的刻度（`conversation-v014.css:506`）和未读点（`shell.css:159`）表示提示信息，继续用 `--accent`。
+- **修复跟随系统时的深色语法色**：在 `conversation-v014.css:14` 后增加 `@media (prefers-color-scheme: dark) { :root[data-theme='system'] { … } }`，取值与 `dark` 相同。
+- **Codex 样式**：新建 `src/styles/codex.css`，在 `src/styles.css` 中最后引入。令牌写在 `:root[data-style='codex'][data-theme='light'|'dark']` 下，跟随系统写在 `@media (prefers-color-scheme: dark)` 里的 `:root[data-style='codex'][data-theme='system']` 下，做法与 `base.css:312` 相同。组件覆盖统一以 `[data-style='codex']` 为前缀，选择器权重高于原规则，不依赖引入顺序。不修改任何 TSX 结构。
+
+**Codex 令牌。** 下表所有文字色在 `--bg`、`--surface`、`--rail`、`--hover`、`--selected`、`--bubble`、`--code`、`--accent-soft` 上的对比度均不低于 4.5:1（括号内为最低值）。
+
+| 令牌 | 用途 | 白天 | 夜晚 | 依据 |
+| --- | --- | --- | --- | --- |
+| `--bg` | 对话区画布 | `#ffffff` | `#181818` | 官方默认背景 |
+| `--surface` | 输入框、卡片、菜单 | `#ffffff` | `#212121` | Hermes card |
+| `--rail` | 侧栏、标题栏 | `#f9f9f9` | `#131313` | Hermes / codex-clone sidebar |
+| `--hover` | 悬停 | `#f0f0f0` | `#262626` | |
+| `--selected`（仅 Codex） | 选中行 | `#e8e8e8` | `#2d2d2d` | 接近 OpenChamber 取色 `#303133` |
+| `--bubble`（仅 Codex） | 用户消息气泡 | `#f3f3f3` | `#2a2a2a` | Hermes；夜晚略提亮以与画布区分 |
+| `--code` | 代码块 | `#f6f6f6` | `#1f1f1f` | codex-clone code-bg |
+| `--line` / `--line-strong` | 细线 | `#e7e7e7` / `#d4d4d4` | `#2a2a2a` / `#3a3a3a` | Hermes border |
+| `--ink` | 正文 | `#0d0d0d`（15.86） | `#dddddd`（10.14） | 白天为官方前景；夜晚为 OpenChamber 取色，官方 `#FFFFFF` 太刺眼 |
+| `--muted` | 次要文字 | `#5d5d5d`（5.37） | `#9a9a9a`（4.89） | 夜晚取色 `#8f8f8f` 在选中行上只有 4.26，已提亮 |
+| `--accent` | 链接、焦点、选中强调 | `#005fcc`（4.88） | `#339cff`（4.81） | 夜晚为官方值；白天由官方 `#0285FF` 加深 |
+| `--accent-soft` | 强调底色 | `#e6effa` | `#1c2d3d` | 强调色按 10% / 16% 混合 |
+| `--on-accent` | 强调色上的文字 | `#ffffff`（5.98） | `#0d0d0d`（6.79） | 白字在 `#339cff` 上只有 2.86 |
+| `--primary` / `--on-primary` | 发送、主要按钮、品牌标 | `#0d0d0d` / `#ffffff` | `#f2f2f2` / `#0d0d0d` | codex-clone send-bg |
+| `--success` | 新增、完成、已连接 | `#16702f`（5.05） | `#57ab5a`（4.84） | 白天由 codex-clone `#1a7f37` 加深 |
+| `--red` | 错误、删除 | `#b42318`（5.37） | `#f2777a`（5.05） | 夜晚为 codex-clone |
+| `--signal` / `--signal-soft` / `--warning` | 运行中、警告 | 同经典浅色 | 同经典深色 | |
+| `--shadow-soft` | 页内表面 | `none` | `none` | 扁平无阴影 |
+| `--shadow` | 浮层、菜单、对话框 | `0 10px 30px #00000014, 0 1px 3px #0000000f` | `0 10px 30px #00000066, 0 1px 3px #00000040` | 浮层与画布同色，需要阴影区分 |
+| `--radius-panel` | 面板 | `12px` | `12px` | Hermes |
+| `--content-width` | 阅读列 | `768px` | `768px` | codex-clone |
+| 语法色 | 代码块 | 经典浅色值，注释改为 `#5f6872`（5.24），数字改为 `#a26228`（4.50） | 关键字 `#f8a6c8`、字符串 `#83d197`、数字 `#f1a275`、函数 `#63a8f8`、注释 `#a0a0a0` | OpenChamber 取色（注释压暗）；2026-10-29 确认仅加深 Codex 白天数字色，原值 `#a36228` 实测为 4.48 |
+| ANSI 色 | 终端输出 | 同经典浅色 | 同经典深色 | |
+
+字体：界面用 `-apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC', 'Microsoft YaHei', sans-serif`，等宽字体用 `ui-monospace, 'SFMono-Regular', 'Cascadia Mono', Menlo, Consolas, 'Microsoft YaHei', monospace`。拉丁字符优先使用系统界面字体，与 Codex 一致；保留中文回退字体。
+
+**组件覆盖（仅 Codex）。**
+
+- **会话行**：选中时用 `--selected` 底色、`--ink` 文字，去掉左侧色条（`workbench.css:100`），保留现有的 500 字重。
+- **输入框**：圆角 20px，`--surface` 底，`--line` 边框，无阴影。聚焦时边框变为 `--line-strong`，不显示强调色光晕（覆盖 `models.css:6-11`）。运行中的琥珀色边框（`models.css:12-19`）保留。键盘焦点的 `:focus-visible` 轮廓仍用 `--accent`。
+- **用户消息**：`.message.user .message-content` 用 `--bubble` 底，圆角 12px，`width: fit-content; max-width: min(80%, 620px); margin-left: auto`。标题行右对齐。长提问折叠、附件、技能块、引用和图片都在气泡内显示，不得横向溢出。
+- **助手消息**：隐藏 `.avatar`。“你”/“Pi”的名字只做视觉隐藏（裁剪方式，不用 `display: none`），读屏仍能区分角色。时间、回复统计和操作按钮保持现状。G3 的 `◎ Goal` 标记仍在用户消息上方显示。
+- **正文**：`.message-content` 行高 1.7。Codex 原值 22/14≈1.57，中文需要更大的行距。
+- **代码块**：圆角 12px（`conversation.css:202`）。
+- **遮罩**：`.modal-backdrop`（`dialogs.css:9`、`models.css:377`）改为中性的 `#00000040`，去掉偏绿的色调。
+- 其余组件（Goal 状态卡、审批卡、检查器、差异视图、侧边对话、模型选择器、命令面板）只随令牌变化，不单独改样式。实现时按下文“截图清单”逐一检查，出现问题再做局部覆盖。
+
+**验收标准。**
+
+1. 外观设置中可以选 `Pi 经典` / `Codex`。选 Codex 后主题只显示白天、夜晚、跟随系统。米黄、豆沙绿会切到白天，深蓝会切到夜晚。预览即时生效，取消还原，保存后重启仍保持。
+2. Codex 白天/夜晚下，`--bg`、`--rail`、`--ink` 与 `windowTheme` 返回的原生背景色及 Windows/Linux 标题栏覆盖色相同。“跟随系统”跟随原生外观。
+3. 在 Electron 中实测：上表所有文字色在列出的各背景上 ≥ 4.5:1；`--on-accent` 与 `--accent`、`--on-primary` 与 `--primary` 之间 ≥ 4.5:1；语法色在 `--code` 上 ≥ 4.5:1；焦点轮廓与 `--bg` 之间 ≥ 3:1。
+4. Codex 下：选中会话没有彩色竖条，底色为中性灰；发送按钮和主要按钮为墨色填充；差异新增、完成状态、工具完成显示为绿色，不是蓝色；输入框圆角 20px、无阴影，聚焦时没有蓝色光晕；用户消息右对齐，宽度随内容、不超过 80%；助手消息没有头像；读屏仍能读到“你”/“Pi”。
+5. 经典风格不变。实现前后各采集一次浅色、深色下关键元素的计算样式（`color`、`background-color`、`border-color`、`box-shadow`、`border-radius`），覆盖会话行、发送按钮、主要按钮、差异行、状态点、工具卡、Goal 卡和用户消息，两次结果完全一致。
+6. 系统为深色、主题为“跟随系统”时，经典和 Codex 的代码块都使用深色语法色，关键字在 `--code` 上 ≥ 4.5:1。
+7. Codex 白天/夜晚下：长提问折叠与展开、带附件和引用的提问、超宽代码块、轮次目录、Goal 状态卡、审批卡、差异视图都不会让 `.message-list` 出现横向滚动，用户气泡的 `scrollWidth` 不超过 `clientWidth`。
+
+**测试。**
+
+- `tests/app-dialogs.test.ts:84`：色板与 CSS 令牌一致性检查加入 Codex 白天/夜晚两个段落。
+- `tests/desktop-chrome.test.ts:229`：`updateWindowTheme` 覆盖 Codex 风格。
+- store 状态测试覆盖：缺少 `uiStyle` 时取默认值；无效值被修复；Codex 搭配背景主题时就近修正并计入修复数。`saveSettings` 同样覆盖这三种情况。
+- CSS 结构单元测试：`[data-theme='dark']` 下定义的每个令牌，在 `prefers-color-scheme: dark` 的 `system` 分支中都有同名定义，经典和 Codex 都要检查，防止背景第 4 条再次出现。
+- `scripts/test-theme-ui.mjs`：通过设置界面切换 Codex 白天/夜晚/跟随系统，断言 `data-style`、令牌、标题栏颜色、取消还原和重启保持。
+- `scripts/test-review-ui.mjs:58` 和 `tests/support/turn-outline-ui.mjs:270` 的主题循环加入 Codex 白天/夜晚。
+- 新增 `scripts/test-codex-style-ui.mjs`：完成验收 3、4、5、7 的实测，并截图。截图清单为工作区、设置、命令面板、审批卡、Goal 状态卡、差异视图、侧边对话、模型选择器，白天和夜晚各一张，存放在 `test-results/codex-{day,night}-*.png`。
+- 同步双语 README 的外观说明，新增 `docs/assets/screenshots/workspace-codex-{light,dark}.png`。
+
+**实现与验收（2026-10-29）。**
+
+- 已实现风格选择、主题转换、预览与放弃修改、保存及重启保持，以及原生窗口色板。经典与 Codex 的“跟随系统”都补齐了深色语法色和 ANSI 色。工具卡的新增行数也使用 `--success`。
+- Windows Electron 已通过原生主题测试和 `npm run test:codex-style-ui`；16 张截图在 `test-results/codex-{day,night}-*.png`，对比度与宽度记录在 `test-results/codex-style-ui.json`。白天、夜晚各测 63 组对比度，最低分别为 4.50:1、4.81:1。
+- 经典浅色、深色的九组计算样式与实现前的 `ff15ae8` 构建完全一致，记录保存在 `tests/fixtures/classic-style.json`。对话引用、侧边对话、轮次目录、长提问、附件、图片、技能和代码块的回归已通过。
+- 全量测试 740 项通过、8 项按当前平台跳过；构建、lint、格式检查通过。新增的 Codex 界面验收已加入 Linux CI；本机未执行 Linux/macOS 界面测试。
+
 ## v0.14.55：Goal 输入框交互（已实现）
 
 ### G3 在输入框中新建与修改 Goal

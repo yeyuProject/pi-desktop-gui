@@ -263,8 +263,8 @@
   min-width: max-content;
 }
 .diff-lines > .added {
-  color: var(--accent);
-  background: color-mix(in srgb, var(--accent) 9%, transparent);
+  color: var(--success);
+  background: color-mix(in srgb, var(--success) 9%, transparent);
 }
 .diff-lines > .removed {
   color: var(--red);

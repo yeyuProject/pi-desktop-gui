@@ -24,6 +24,9 @@
   --accent: #1f6b52;
   --accent-soft: #e2efe9;
   --on-accent: #ffffff;
+  --success: var(--accent);
+  --primary: var(--accent);
+  --on-primary: var(--on-accent);
   --signal: #b4730f;
   --signal-soft: #fbf1df;
   --red: #b42318;
@@ -455,13 +458,13 @@ pre {
   background: transparent;
 }
 .primary {
-  background: var(--accent);
-  border-color: var(--accent);
-  color: var(--on-accent);
+  background: var(--primary);
+  border-color: var(--primary);
+  color: var(--on-primary);
 }
 .primary:hover {
   filter: brightness(1.07);
-  background: var(--accent);
+  background: var(--primary);
 }
 .icon-button {
   padding: 7px;
@@ -507,7 +510,7 @@ pre {
 }
 .connection-dot.ready,
 .status.completed .status-dot {
-  background: var(--accent);
+  background: var(--success);
 }
 .inline-error {
   color: var(--red);

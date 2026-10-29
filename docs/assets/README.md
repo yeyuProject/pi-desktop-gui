@@ -7,6 +7,8 @@ README 使用两类素材：`screenshots/` 中的真实界面截图，以及 202
 | [screenshots/demo.gif](screenshots/demo.gif) | README 首屏演示：@ 引用文件 → 发送 → 工具调用与 Diff → 撤销本轮 | 1280 × 800，15 fps，约 27 秒 |
 | [screenshots/workspace-light.png](screenshots/workspace-light.png) | 对话、工具调用与内联 Diff（静态） | 1440 × 900 @2x |
 | [screenshots/workspace-dark.png](screenshots/workspace-dark.png) | 深色主题 | 1440 × 900 @2x |
+| [screenshots/workspace-codex-light.png](screenshots/workspace-codex-light.png) | Codex 白天风格 | 1440 × 900 @2x |
+| [screenshots/workspace-codex-dark.png](screenshots/workspace-codex-dark.png) | Codex 夜晚风格 | 1440 × 900 @2x |
 | [screenshots/approval.png](screenshots/approval.png) | 确认模式下的命令审批卡片 | 1440 × 900 @2x |
 | [hero-banner.png](hero-banner.png) | 早期首屏品牌海报，README 已改用真实截图，保留为历史素材 | 约 16:9 横版 |
 | [architecture-bridge.png](architecture-bridge.png) | 本机 GUI 与 Pi CLI 通信关系 | 约 16:9 横版 |

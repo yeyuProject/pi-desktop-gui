@@ -25,6 +25,21 @@
   --ansi-magenta: #c99cdf;
   --ansi-cyan: #84c9d1;
 }
+@media (prefers-color-scheme: dark) {
+  :root[data-theme='system'] {
+    --syntax-keyword: #c99cdf;
+    --syntax-string: #91c6a2;
+    --syntax-comment: #929ca5;
+    --syntax-number: #e4b47c;
+    --syntax-function: #85badd;
+    --ansi-red: #ef8a86;
+    --ansi-green: #91c6a2;
+    --ansi-yellow: #e8bf77;
+    --ansi-blue: #85badd;
+    --ansi-magenta: #c99cdf;
+    --ansi-cyan: #84c9d1;
+  }
+}
 .syntax-keyword {
   color: var(--syntax-keyword);
 }
@@ -481,7 +496,7 @@ mark,
   font-variant-numeric: tabular-nums;
 }
 .turn-added {
-  color: var(--accent);
+  color: var(--success);
 }
 .turn-removed,
 .turn-failed-label {

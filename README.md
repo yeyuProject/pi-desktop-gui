@@ -53,7 +53,7 @@ Sessions and workspaces stay on your machine. Model requests go to whichever pro
 - **Built-in Goals** — Start a Goal directly from the composer, keeping files, images, pasted snippets and conversation quotes. Inline budget controls and a separate objective editor preserve your unsent drafts across sessions and restarts. Keep working without a continuation-count limit. A compact bar shows a plan or active elapsed time, with pause, resume and objective editing. Completion requires a requirement-by-requirement audit; optional usage limits allow a bounded wrap-up. Goal usage excludes cache hits, and provider quota failures have their own state. Completed Goals collapse after eight seconds; saved active Goals reopen paused. `/goal edit` and other commands remain available. See [Goal controls and limits](docs/goal.md).
 - **Clear retry progress** — See retry backoff and response wait time, cancel an active retry request, and distinguish recovered attempts from failures in the run log. Consecutive empty error replies show the latest failure once, with earlier attempts expandable.
 - **Keyboard-first** — Global search across sessions, in-session find, and shortcuts for every panel.
-- **Consistent appearance** — Light, dark and system themes, plus sepia, soft green and navy backgrounds, cover the desktop title bar and confirmations while retaining native window controls. Pi configuration stays editable during a run; saving waits until it is safe and reports separately when a saved change could not yet be applied.
+- **Choose your appearance** — Settings → Appearance & Editor offers **Pi Classic** and **Codex** styles. Codex has Day, Night and Follow System modes, with neutral surfaces, blue links and right-aligned question bubbles. Pi Classic keeps its six existing themes. Changes preview immediately, can be discarded, and persist after saving; saved appearance also colors the native title bar and window background. Pi configuration stays editable during a run, with separate feedback for saved changes that could not yet be applied.
 
 <table>
   <tr>
@@ -67,6 +67,17 @@ Sessions and workspaces stay on your machine. Model requests go to whichever pro
 </table>
 
 See the [release notes](docs/releases/) for what changed in each version.
+
+<table>
+  <tr>
+    <td width="50%"><img src="docs/assets/screenshots/workspace-codex-light.png" width="100%" alt="Codex Day style with neutral surfaces and a right-aligned user message" /></td>
+    <td width="50%"><img src="docs/assets/screenshots/workspace-codex-dark.png" width="100%" alt="Codex Night style with dark gray surfaces and blue links" /></td>
+  </tr>
+  <tr>
+    <td align="center"><sub>Codex · Day</sub></td>
+    <td align="center"><sub>Codex · Night</sub></td>
+  </tr>
+</table>
 
 ## Installation
 

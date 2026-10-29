@@ -152,7 +152,7 @@ export async function verifyTurnOutlineUI({ app, page, output }) {
   await expect(row(7).locator('.turn-added')).toHaveCount(0);
   await expect(row(5).locator('.turn-failed-label')).toHaveText('失败');
   for (const [selector, variable] of [
-    ['.turn-added', '--accent'],
+    ['.turn-added', '--success'],
     ['.turn-removed', '--red'],
     ['.turn-failed-label', '--red'],
   ]) {
@@ -267,13 +267,22 @@ export async function verifyTurnOutlineUI({ app, page, output }) {
 
   const contrast = {},
     screenshots = [];
-  for (const theme of ['light', 'dark', 'sepia', 'green', 'navy']) {
-    await page.evaluate((theme) => window.desktop.invoke('saveSettings', { theme }), theme);
+  for (const [uiStyle, theme] of [
+    ...['light', 'dark', 'sepia', 'green', 'navy'].map((theme) => ['classic', theme]),
+    ['codex', 'light'],
+    ['codex', 'dark'],
+  ]) {
+    const key = uiStyle === 'classic' ? theme : `${uiStyle}-${theme}`;
+    await page.evaluate((appearance) => window.desktop.invoke('saveSettings', appearance), {
+      theme,
+      uiStyle,
+    });
     await expect.poll(() => page.evaluate(() => document.documentElement.dataset.theme)).toBe(theme);
+    await expect.poll(() => page.evaluate(() => document.documentElement.dataset.style)).toBe(uiStyle);
     await row(2).locator('.turn-tick').hover();
     await expect(outline).toHaveClass(/expanded/);
     await page.waitForTimeout(150);
-    contrast[theme] = await outline.evaluate((nav) => {
+    contrast[key] = await outline.evaluate((nav) => {
       const canvas = document.createElement('canvas');
       canvas.width = canvas.height = 1;
       const context = canvas.getContext('2d', { willReadFrequently: true });
@@ -322,16 +331,16 @@ export async function verifyTurnOutlineUI({ app, page, output }) {
       return samples;
     });
     assert.ok(
-      contrast[theme].length > 20,
+      contrast[key].length > 20,
       'contrast measurement must include titles, counters, badges and filter text',
     );
-    for (const sample of contrast[theme])
-      assert.ok(sample.ratio >= 4.5, `${theme}: ${sample.text} contrast ${sample.ratio}`);
-    const screenshot = `turn-outline-${theme}.png`;
+    for (const sample of contrast[key])
+      assert.ok(sample.ratio >= 4.5, `${key}: ${sample.text} contrast ${sample.ratio}`);
+    const screenshot = `turn-outline-${key}.png`;
     await page.screenshot({ path: path.join(output, screenshot), animations: 'disabled' });
     screenshots.push(screenshot);
   }
-  await page.evaluate(() => window.desktop.invoke('saveSettings', { theme: 'light' }));
+  await page.evaluate(() => window.desktop.invoke('saveSettings', { theme: 'light', uiStyle: 'classic' }));
   await expect.poll(() => page.evaluate(() => document.documentElement.dataset.theme)).toBe('light');
   for (const status of ['running', 'completed']) {
     await app.evaluate(({ BrowserWindow }, status) => {
@@ -420,7 +429,7 @@ export async function verifyTurnOutlineUI({ app, page, output }) {
   await outside();
   await input.focus();
   console.log(
-    'PASS UI6 fixed ticks, hover delays, cleaned titles, filtered keyboard navigation and five-theme text contrast',
+    'PASS UI6 fixed ticks, hover delays, cleaned titles, filtered keyboard navigation and classic/Codex text contrast',
   );
   return { contrast, screenshots };
 }
