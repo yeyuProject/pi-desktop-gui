@@ -2,6 +2,92 @@
 
 首版功能 页面与交互设计
 
+## 任务计划进度（待实现）
+
+### P1 普通任务的计划步骤与运行中进度
+
+**背景与问题。**
+
+1. **普通任务运行时看不到进度。** 底部状态区（`src/components/conversation/ComposerStatus.tsx` 的 `ComposerFooter`）运行中只显示“执行中”徽标和计时（`1:23`）。多步任务跑十几分钟，用户只能翻对话流，猜 Pi 做到了哪一步、还剩多少。
+2. **计划能力只给了 Goal。** G2 已经实现了计划工具 `desktop_goal_plan`（`electron/pi-goal.ts:380`），状态条显示“步骤 2 / 5 · 当前步骤”（`src/components/conversation/GoalCard.tsx:123-128`）。但这个工具要求传 `goal_id` 和 `revision`，计划存在 Goal 状态里，没有 Goal 时不能用。
+3. **Pi 没有内置计划工具。** Pi 1.4.0 的 README 明确说不提供 plan mode，只在 `examples/extensions/todo.ts` 给了示例。所以只能由桌面适配扩展注册工具，并通过工具的 `promptGuidelines` 告诉模型何时使用。这是 Pi 公开的扩展接口（`ToolDefinition.promptGuidelines`：“工具启用时追加到默认系统提示词的 Guidelines 一节”）。
+4. **计划依赖模型配合。** 程序无法强制模型列计划。简单问答、单步修改不应该有计划；模型也可能列了计划却不更新状态。界面必须对“没有计划”和“计划过时”都有合理表现，不能显示误导性的进度。
+
+**目标。** 多步的普通任务运行时，输入框上方显示当前计划进度：“步骤 2 / 5 · 当前步骤文本”，可以展开看完整清单。没有计划时，状态区保持现状。Goal 的计划显示不变。
+
+**不做。**
+
+- 不实时显示“正在读取 a.ts / 正在运行 npm test”这类当前动作。这已经由对话流里的运行中工具卡片表达。
+- 不提供用户手动编辑、勾选或重排计划，计划只由模型维护。
+- 不强制模型列计划，不因为没有计划而续跑或提醒。
+- 不改 Goal 的计划工具、Goal 状态条和 G2 的续跑规则。
+- 不在侧栏会话行显示进度。
+
+**交互。**
+
+- **位置**：输入框上方，与 Goal 状态条同一位置（`Composer.tsx:352`），样式复用 `goal-card` 的单行状态条结构，新组件名为 `PlanCard`。Goal 状态条可见时不显示 `PlanCard`（Goal 有自己的计划，避免两条进度并存）。
+- **收起状态**（默认）：一行，`◌ 步骤 2 / 5 · 修复登录校验`，右侧为展开按钮。
+  - 当前步骤取第一个 `in_progress`；没有时取第一个 `pending`；全部完成时显示“步骤 5 / 5 · 全部完成”。这里的计算与 `GoalCard.tsx:123-128` 相同，应抽成共享函数，Goal 和 P1 共用。
+  - 运行中显示旋转图标，空闲时显示静态圆点。
+  - 步骤文本单行省略，`title` 为全文。
+- **展开状态**：在状态条下方显示编号清单，每项前有状态标记（已完成 ✓、进行中 ●、待开始 ○），读屏文字为“已完成 / 进行中 / 待开始”，与 `GoalCard.tsx:230-240` 一致。详情区最高 40vh，可滚动。展开状态按会话保存在视图状态中。
+- **生命周期**：
+  - 模型第一次调用计划工具时出现。
+  - 本轮运行结束（`agent_settled`）后，如果全部完成，8 秒后自动收起为圆点，与 G1 已完成 Goal 的行为相同；未全部完成则保持显示，并标注“本轮已结束 · 剩余 2 步”。
+  - 用户发送下一条新任务（不是运行中的补充消息）时清除旧计划；模型可以在新任务中重新列计划。
+  - 切换会话、切换分支、重启后，从当前分支的会话条目恢复计划。
+  - `×` 按钮关闭当前计划的显示，不影响模型的工具状态。关闭后模型再次更新计划时重新出现。
+- **过时提示**：计划中有 `in_progress` 步骤，但本轮运行已经结束时，该步骤标记为“未完成”，不再显示旋转图标。
+
+**技术方案。**
+
+- **计划工具**（`electron/pi-plan.ts`，由 `pi-bridge.ts` 注册，写法参照 `pi-goal.ts`）：
+  - 工具名 `desktop_plan`，label 为“更新任务计划”，`exposure: 'model-only'`，`executionMode: 'sequential'`。
+  - 参数：`{ steps: { text: string; status: 'pending' | 'in_progress' | 'completed' }[] }`，最多 12 项，同时最多一项 `in_progress`，文本长度 1–4000。校验复用 `shared/goal.ts` 的 `validateGoalPlan`，并把它改名为 `validatePlanSteps` 移到 `shared/plan.ts`，Goal 继续调用。
+  - 每次调用都整体替换计划，不做增量合并，与 `desktop_goal_plan` 一致。
+  - `promptSnippet`：“Track progress of multi-step work with a short plan.”
+  - `promptGuidelines`（英文，与现有工具描述一致）：
+    - Use desktop_plan only when the task clearly needs three or more distinct steps. Skip it for questions, explanations and single edits.
+    - Create the plan before starting work, keep exactly one step in_progress, and mark steps completed as soon as they are done.
+    - Updating the plan is not progress by itself; do not call it repeatedly without doing work in between.
+  - **Goal 活跃时**，`desktop_plan` 返回错误“当前有进行中的 Goal，请使用 desktop_goal_plan”，避免出现两份计划。实现方式：`pi-plan.ts` 通过 `pi-goal.ts` 导出的只读查询判断当前是否有 `active` Goal。
+  - 保存：`pi.appendEntry('desktop-plan', { turnId, steps } | null)`。`turnId` 为本条用户任务的标识（取触发本次运行的用户消息时间戳），用于“新任务清除旧计划”的判断。读取时取当前分支上最后一条 `desktop-plan` 条目，`session_start`、`session_tree` 时恢复，写法同 `pi-goal.ts:130-158`。
+  - 新任务清除：`before_agent_start` 中，`event.messageType === 'user'` 且已有计划时，追加 `null` 条目。该事件只在新运行开始时触发，运行中的补充消息会并入当前运行，不会触发，因此不需要额外排除 steering（Pi 1.4.0 `BeforeAgentStartEvent` 类型定义）。Goal 续跑（`pi-goal.ts:488,537` 的 `sendUserMessage`）同样是 `messageType: 'user'`，会清除计划；由于 Goal 活跃时本工具不可用，不会丢失有效计划，但要有测试覆盖。
+  - 推送到桌面端：新增 `desktop_plan` 结构化事件（仿照 `desktop_goal`，经 `__PI_DESKTOP__` 前缀从扩展发出），载荷为 `{ steps, turnId } | null`。
+- **审批**：`desktop_plan` 只写会话状态、不碰工作区文件，加入 `shared/approval.ts:42-48` 的直接放行列表。
+- **内置工具设置**：`pi-bridge.ts:249` 的内置工具开关只管理 Pi 内置工具，`desktop_plan` 不受影响，始终启用。设置 → 工具里不单独提供开关（不做项）。
+- **主进程与类型**：
+  - `shared/types.ts` 的 `Runtime` 增加 `plan?: { steps: PlanStep[]; turnId: number } | null`。这是标量字段，按“执行约定”放在增量推送的标量部分，不需要修改 `flush()` 的数组逻辑。
+  - `electron/agent.ts` 的 `onEvent` 增加 `case 'desktop_plan'`，写入 `r.plan` 并 `publish(true)`。
+  - 不连接 Pi 读取历史时也要恢复计划，与 Goal 相同：条目读取函数放在 `electron/plan-state.ts`（对应 `goal-state.ts:26` 的 `readGoalState`），`electron/large-transcript.ts:42` 一并识别 `desktop-plan` 条目。
+- **对话流**：`desktop_plan` 的工具调用与结果不渲染为工具卡片，与 Goal 结果工具的处理方式一致（`Conversation.tsx:230` 一带），否则每次更新计划都会在对话里多一张卡片。会话内查找不搜索这些条目。
+- **界面**：
+  - 新增 `src/components/conversation/PlanCard.tsx`，样式复用 `goal-card` / `goal-plan` 的类名与令牌，不新增颜色。经典、Codex、Claude 三套风格都只随令牌变化。
+  - 新增 `src/lib/plan-progress.ts`：`planProgress(steps): { index: number; total: number; text: string; done: boolean }`，`GoalCard.tsx:123-128` 改为调用它。
+
+**验收标准。**
+
+1. 使用模型桩：模型调用 `desktop_plan` 提交 4 个步骤（第 1 步 `in_progress`）后，输入框上方出现“步骤 1 / 4 · 第一步文本”；再次调用把第 1 步改为 `completed`、第 2 步改为 `in_progress`，状态条在下一次推送内更新为“步骤 2 / 4”。
+2. 展开后显示 4 项清单，状态标记与读屏文字正确；`Esc` 或再次点击收起；展开状态在切换会话后保持。
+3. 本轮运行结束且计划全部完成时，8 秒后收起为圆点；未全部完成时显示“本轮已结束 · 剩余 N 步”，进行中的步骤不再显示旋转图标。
+4. 用户发送下一条新任务后，旧计划消失；运行中发送补充消息不清除计划。
+5. 重启应用、切换会话再切回、切换到更早的分支，计划按当前分支正确恢复；切到没有计划的分支时不显示 `PlanCard`。
+6. 存在进行中的 Goal 时，调用 `desktop_plan` 返回错误，界面只显示 Goal 状态条；Goal 状态条的“步骤 i / n”显示与 P1 实现前一致。
+7. `desktop_plan` 调用不在对话流中产生工具卡片，在 `ask` 审批模式下不弹出审批。
+8. 没有调用 `desktop_plan` 的任务，底部状态区与 P1 实现前完全一致。
+9. 12 个步骤、每步 4000 字时，状态条单行省略，详情区不超过 40vh，`.message-list` 不出现横向滚动；三套风格的浅色、深色下，步骤文字与状态标记对比度 ≥ 4.5:1。
+
+**测试。**
+
+- `tests/plan.test.ts`：步骤校验（数量、`in_progress` 唯一、文本长度、空文本）；`planProgress` 的各种组合（无进行中取首个待开始、全部完成、空数组）；分支恢复取最后一条条目；新任务清除与 steering 不清除；Goal 活跃时拒绝。
+- `tests/goal.test.ts`：Goal 的步骤显示改用 `planProgress` 后，现有断言保持通过。
+- `tests/approval.test.ts`：`desktop_plan` 在 `ask` 模式下直接放行。
+- `tests/runtime-patch.test.ts`：`plan` 字段的增量推送与全量同步。
+- `tests/support/goal-provider.ts` 同类的模型桩增加调用 `desktop_plan` 的脚本；`scripts/test-features.ts` 或新增 `scripts/test-plan.ts`（加入 `npm run test:features`）用真实 Pi 验证工具注册、`promptGuidelines` 出现在系统提示词中、条目持久化与重启恢复。
+- 界面测试加入 `scripts/test-chat-ui.mjs`：验收 1–5、7、9，截取三套风格的浅色/深色截图。
+
+**风险。** 计划是否出现取决于模型是否遵守 `promptGuidelines`。不同模型的遵守程度不同，弱模型可能从不列计划，也可能对简单任务也列计划。P1 只保证“有计划时显示正确”，不保证“多步任务一定有计划”。上线后如果发现常用模型很少使用，再评估是否在续跑或提示词上加强，不在本节处理。
+
 ## v0.14.57：Claude 界面风格（已实现）
 
 ### UI9 Claude 风格：浅色 / 深色
