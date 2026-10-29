@@ -153,13 +153,23 @@
 
 **实现顺序。** 先完成“风格表代替字面量”的重构，并单独提交：只有经典和 Codex 两种风格，所有现有测试必须通过，`tests/fixtures/classic-style.json` 不变。之后再加入 Claude。
 
+**实现注意。** 以下来自对 UI8 实现（`a5b666a`）的核对，规格正文没有展开，但容易出错：
+
+1. **`--primary` 不能当文字色检查。** `scripts/test-codex-style-ui.mjs:88` 把 `primary` 作为前景色，在全部 8 种背景上断言 ≥ 4.5:1。Codex 的墨色主色可以通过，Claude 的珊瑚色不能：浅色 `#b95737` 最低 3.75:1（`--selected`），深色 `#d97757` 最低 3.64:1（`--accent-soft`）。现有样式只把 `--primary` 用作填充色（`.primary`、`.send-button`、`.brand-mark` 的背景，`workbench.css:27` 的悬停边框），不用作文字色，所以应把 `primary` 从文字色循环中移除，只保留 `on-primary`/`primary` 这一对，再加一条非文字对比度断言：`--primary` 与 `--bg`、`--surface` ≥ 3:1。实现时不得把 `--primary` 用作文字色。
+2. **经典基线不需要重新录制。** `test-codex-style-ui.mjs` 的 `--record-classic` 只应在“未修改的渲染器”上运行。重构和加入 Claude 后，都只做比对，不要重录 `tests/fixtures/classic-style.json`。
+3. **Codex 没有计算样式基线。** 验收 5 对 Codex 的要求，做法是在重构开始前用当前代码录一份 `tests/fixtures/codex-style.json`（选择器与经典基线相同，`theme` 取 `light`、`dark`，`uiStyle: 'codex'`），之后只做比对。不要用截图像素差，截图受字体渲染影响，跨平台不稳定。
+4. **需要同步修改的硬编码位置**（除背景第 1 条外）：`scripts/test-theme-ui.mjs:43-44,218,246,276,281-282,489-517,838-845` 的 Codex 色板、强调色、按钮名和主题标签；`scripts/readme-screenshots.mjs:20-21,46` 与 `tests/readme-mock-state.test.mjs:32-33` 的截图清单；`tests/store.test.ts:84-87` 的修正用例；`tests/app-dialogs.test.ts:124-142`；`tests/desktop-chrome.test.ts:265-267`；`src/main.tsx:9` 的首帧 `data-style` 保持 `classic`。
+5. **测试脚本中的强调色断言**（`test-theme-ui.mjs:246`）应从 CSS 令牌或一张共享色板读取，不要再加一层三元表达式。
+6. **字号比例。** 助手正文的 15px 必须写成 `calc(15px * var(--font-scale))`，`test-theme-ui.mjs` 中已有的字号比例检查要覆盖 Claude。
+7. **发版材料。** 按 UI8 的惯例：新增 `docs/releases/v<版本>.md`（中英双语）、`docs/assets/README.md` 截图表补两行、双语 README 外观小节补两张截图；`package.json` 与 `package-lock.json` 同步版本号。
+
 **验收标准。**
 
 1. 外观设置中可以选择 `Pi 经典` / `Codex` / `Claude`。选 Claude 后主题只显示浅色、深色、跟随系统；米黄、豆沙绿切到浅色，深蓝切到深色；在 Codex 与 Claude 之间切换时保留当前主题。预览即时生效，取消还原，保存后重启仍保持。
 2. Claude 浅色/深色下，`--bg`、`--rail`、`--ink` 与 `windowTheme` 返回的原生背景色及 Windows/Linux 标题栏覆盖色相同；“跟随系统”跟随原生外观。
-3. 在 Electron 中实测：上表所有文字色在列出的各背景上 ≥ 4.5:1；`--on-accent` 与 `--accent`、`--on-primary` 与 `--primary` 之间 ≥ 4.5:1；语法色在 `--code` 上 ≥ 4.5:1；焦点轮廓与 `--bg` 之间 ≥ 3:1。
+3. 在 Electron 中实测：上表所有文字色在列出的各背景上 ≥ 4.5:1；`--on-accent` 与 `--accent`、`--on-primary` 与 `--primary` 之间 ≥ 4.5:1；`--primary` 作为填充色与 `--bg`、`--surface` 之间 ≥ 3:1；语法色在 `--code` 上 ≥ 4.5:1；焦点轮廓与 `--bg` 之间 ≥ 3:1。
 4. Claude 下：发送按钮和品牌标为珊瑚色，链接为蓝色；选中会话没有彩色竖条；差异新增、完成状态为绿色；用户消息右对齐；助手回复正文的计算字体以衬线字体开头，回复内的代码块和行内代码为等宽字体；读屏仍能读到“你”/“Pi”。
-5. 经典和 Codex 风格不变：`tests/fixtures/classic-style.json` 与 Codex 截图对比（像素差 < 0.1%）在本节前后一致。
+5. 经典和 Codex 风格不变：`tests/fixtures/classic-style.json` 与新录的 `tests/fixtures/codex-style.json`（见“实现注意”第 3 条）在本节前后完全一致。
 6. 源码中除 `shared/window-theme.ts` 的 `UI_STYLES`、`STYLE_META` 和 CSS 选择器外，不再出现 `'codex'`、`'claude'` 字面量的分支判断。
 7. 溢出要求同 UI8 验收 7。
 
