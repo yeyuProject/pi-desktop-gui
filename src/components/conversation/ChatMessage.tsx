@@ -91,6 +91,7 @@ export const ChatMessage = memo(
     hideThinking = false,
     copyReply = false,
     index = 0,
+    goalStart = false,
   }: {
     m: Message;
     last: boolean;
@@ -99,6 +100,7 @@ export const ChatMessage = memo(
     hideThinking?: boolean;
     copyReply?: boolean;
     index?: number;
+    goalStart?: boolean;
   }) {
     if (m.role === 'toolResult') {
       const observed = ctx.toolFor(m);
@@ -170,6 +172,7 @@ export const ChatMessage = memo(
             </span>
           )}
           <strong>{m.role === 'user' ? '你' : 'Pi'}</strong>
+          {goalStart && <span className="goal-message-badge">◎ Goal</span>}
           {m.timestamp && <time>{time(m.timestamp)}</time>}
           {m.role === 'assistant' && <ReplyMeta message={m} />}
           <span className="message-actions">
@@ -294,6 +297,7 @@ export const ChatMessage = memo(
     a.hideThinking === b.hideThinking &&
     a.copyReply === b.copyReply &&
     a.index === b.index &&
+    a.goalStart === b.goalStart &&
     a.last === b.last &&
     a.match === b.match &&
     a.ctx.running === b.ctx.running &&

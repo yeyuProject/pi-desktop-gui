@@ -12,6 +12,7 @@ export function hasSessionData(session: Session): boolean {
     session.approvalMode !== undefined ||
     session.pinned ||
     session.draft ||
+    session.draftGoal ||
     session.attachments.length ||
     session.images?.length ||
     session.draftSnippets?.length ||

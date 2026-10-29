@@ -1,3 +1,5 @@
+import { parseGoalCommand, type GoalStartInput } from '../../shared/goal-input';
+import { validateGoalObjective } from '../../shared/goal';
 import { useRuntime } from './useRuntime';
 import { useHistory } from './useHistory';
 import { useStableCallbacks } from './useStableCallbacks';
@@ -165,6 +167,9 @@ export function useWorkbench() {
     flushDraft,
     isReadingAttachments,
     getDraftRevision,
+    draftGoal,
+    openGoalComposer,
+    editGoal,
   } = draftState;
   const sideChat = useSideChat(selected, runtime, storage, draftState.addQuote);
   const workspace = useWorkspace({
@@ -305,6 +310,23 @@ export function useWorkbench() {
       renderedSelectionRequest !== selectionRequest.current
     )
       return;
+    const rawCommand = draftGoal?.kind !== 'edit' && /^\s*\/goal(?:\s|$)/.test(draft);
+    // Opening the composer is local, including when Pi is unavailable.
+    if (rawCommand && /^\s*\/goal\s*$/.test(draft)) {
+      persistDraft('');
+      openGoalComposer();
+      return;
+    }
+    if (rawCommand && /^\s*\/goal\s+edit\s*$/.test(draft)) {
+      const goal = runtime.sessionId === target ? runtime.goal : undefined;
+      if (!goal) {
+        setError('当前没有可编辑的 Goal。');
+        return;
+      }
+      persistDraft('');
+      editGoal(goal);
+      return;
+    }
     if (!environment?.supported) {
       setError(environment?.errors.join('\n') || '正在检测 Pi 运行环境，请稍候');
       return;
@@ -313,7 +335,7 @@ export function useWorkbench() {
       setError(storage.problem ?? '本地数据不可写，请检查目录权限后重新启动');
       return;
     }
-    const sent = composeDraft();
+    const sent = draftGoal?.kind === 'edit' ? draftGoal.objective : composeDraft();
     if (!selected || (!sent.trim() && !images.length) || pending) return;
     setError('');
     setPending(true);
@@ -330,6 +352,59 @@ export function useWorkbench() {
         renderedSelectionRequest !== selectionRequest.current
       )
         return;
+      if (draftGoal?.kind === 'edit') {
+        validateGoalObjective(draftGoal.objective);
+        await api.invoke('goalAction', target, {
+          action: 'edit',
+          goalId: draftGoal.goalId,
+          revision: draftGoal.revision,
+          objective: draftGoal.objective,
+        });
+        return;
+      }
+      const command = rawCommand ? parseGoalCommand(draft.trim().replace(/^\/goal\s*/, '')) : undefined;
+      if (command?.action === 'start' || (!command && draftGoal?.kind === 'start')) {
+        const objective = command?.action === 'start' ? command.objective : draft;
+        validateGoalObjective(objective);
+        const start: GoalStartInput = {
+          objective,
+          tokenBudget:
+            command?.action === 'start'
+              ? (command.tokenBudget ?? (draftGoal?.kind === 'start' ? draftGoal.tokenBudget : undefined))
+              : draftGoal?.kind === 'start'
+                ? draftGoal.tokenBudget
+                : undefined,
+          draftText: sent,
+          draftGoal,
+        };
+        await api.invoke('send', target, composeDraft(objective), attachments, sendMode, images, start);
+        return;
+      }
+      if (command) {
+        if (
+          attachments.length ||
+          images.length ||
+          draftState.snippets.length ||
+          draftState.draftQuotes.length
+        )
+          throw new Error('Goal 控制命令不能附带材料，请先保留或移除附件后再执行。');
+        // Clear/edit go through the same desktop confirmation and revision checks as buttons.
+        const goal = runtime.sessionId === target ? runtime.goal : undefined;
+        if (command.action === 'clear' || command.action === 'edit') {
+          if (!goal) throw new Error('当前没有 Goal。');
+          if (command.action === 'edit') {
+            validateGoalObjective(command.objective);
+            await api.invoke('goalAction', target, {
+              action: 'edit',
+              goalId: goal.id,
+              revision: goal.revision,
+              objective: command.objective,
+            });
+          } else await api.invoke('goalAction', target, { action: 'clear', goalId: goal.id });
+          await api.invoke('consumeDraft', target, sent, attachments, images);
+        } else await api.invoke('send', target, sent, attachments, sendMode, images);
+        return;
+      }
       if (await handleBuiltin(sent)) {
         await api.invoke('consumeDraft', selected.id, sent, attachments, images);
         setHideCommands(true);

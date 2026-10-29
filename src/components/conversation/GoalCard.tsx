@@ -2,9 +2,9 @@ import { useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { Check, ChevronDown, ChevronRight, LoaderCircle, Pause, X, CircleAlert } from 'lucide-react';
 import type { GoalAction, GoalSnapshot } from '../../../shared/goal';
 import { compactGoalTokens } from '../../../shared/goal';
-import type { Runtime, Message } from '../../../shared/types';
+import type { Message } from '../../../shared/types';
 import { RichText } from './Markdown';
-import { GoalDialog } from '../GoalDialog';
+import { GoalBudgetPicker } from '../GoalBudgetPicker';
 import { topLayer } from '../../hooks/useLayer';
 import '../../styles/goal.css';
 
@@ -14,6 +14,7 @@ export function useGoalCard(
   expanded: string[],
   toggle: (id: string, open: boolean) => void,
   openRequest?: number,
+  composing = false,
 ) {
   const [revealed, setRevealed] = useState<string>(),
     [hovered, setHovered] = useState(false);
@@ -42,7 +43,7 @@ export function useGoalCard(
     return () => clearTimeout(timer);
   }, [visible, goal?.status, open, hovered]);
   useEffect(() => {
-    if (!open || !visible) return;
+    if (!open || !visible || composing) return;
     const escape = (event: KeyboardEvent) => {
       if (event.key !== 'Escape' || event.isComposing || event.defaultPrevented || topLayer()) return;
       event.preventDefault();
@@ -51,7 +52,7 @@ export function useGoalCard(
     };
     document.addEventListener('keydown', escape, true);
     return () => document.removeEventListener('keydown', escape, true);
-  }, [open, visible, goal?.id, toggle]);
+  }, [open, visible, goal?.id, toggle, composing]);
   const lastRequest = useRef({ key, openRequest });
   useLayoutEffect(() => {
     if (lastRequest.current.key === key && lastRequest.current.openRequest !== openRequest && openRequest) {
@@ -74,23 +75,23 @@ export function useGoalCard(
 
 export function GoalCard({
   goal,
-  runtime,
   messages,
   view,
   disabled,
   action,
   openProviders,
+  edit,
+  replace,
 }: {
   goal: GoalSnapshot;
-  runtime: Runtime;
   messages: Message[];
   view: ReturnType<typeof useGoalCard>;
   disabled: boolean;
   action: (action: GoalAction) => Promise<void>;
   openProviders: () => void;
+  edit: () => void;
+  replace: () => void;
 }) {
-  const [budgetDialog, setBudgetDialog] = useState(false);
-  const [editing, setEditing] = useState<GoalSnapshot>();
   const [pending, setPending] = useState(false),
     [error, setError] = useState('');
   const [now, setNow] = useState(Date.now());
@@ -179,20 +180,24 @@ export function GoalCard({
               {reason}
             </span>
             {goal.status === 'usage_limited' && <button onClick={openProviders}>打开服务商设置</button>}
-            <button
-              disabled={locked}
-              onClick={() =>
-                goal.status === 'budget_limited'
-                  ? setBudgetDialog(true)
-                  : void run({ action: 'resume', goalId: goal.id })
-              }
-            >
-              {goal.status === 'budget_limited' ? '调整上限并继续' : '继续'}
-            </button>
+            {goal.status === 'budget_limited' ? (
+              <GoalBudgetPicker
+                messages={messages}
+                initialBudget={goal.tokenBudget}
+                used={goal.tokensUsed}
+                resume
+                disabled={locked}
+                submit={(tokenBudget) => action({ action: 'budget', goalId: goal.id, tokenBudget })}
+              />
+            ) : (
+              <button disabled={locked} onClick={() => void run({ action: 'resume', goalId: goal.id })}>
+                继续
+              </button>
+            )}
           </>
         )}
         {goal.status !== 'completed' && (
-          <button disabled={locked} onClick={() => setEditing({ ...goal })}>
+          <button disabled={locked} onClick={edit}>
             编辑目标
           </button>
         )}
@@ -219,6 +224,7 @@ export function GoalCard({
       {view.open && (
         <div className="goal-details">
           <p className="goal-full-objective">{goal.objective}</p>
+          {!!goal.references?.length && <p className="muted">引用文件：{goal.references.join('、')}</p>}
           {!!goal.plan?.length && (
             <ol className="goal-plan" aria-label="Goal 计划">
               {goal.plan.map((step, index) => (
@@ -247,8 +253,11 @@ export function GoalCard({
             Goal 用量 {compactGoalTokens(goal.tokensUsed)} tokens（不含缓存命中） · 用时 {elapsed}
           </p>
           {goal.legacyUsage && <p className="muted">含旧版统计口径，用量可能偏大；旧版执行用时不可用。</p>}
-          <button disabled={locked} onClick={() => setEditing({ ...goal })}>
+          <button disabled={locked} onClick={edit}>
             编辑目标
+          </button>
+          <button disabled={locked} onClick={replace}>
+            替换目标
           </button>
           {goal.summary && (
             <button
@@ -258,31 +267,6 @@ export function GoalCard({
             </button>
           )}
         </div>
-      )}
-      {budgetDialog && (
-        <GoalDialog
-          runtime={{ ...runtime, messages }}
-          budgetOnly
-          initialBudget={goal.tokenBudget}
-          used={goal.tokensUsed}
-          close={() => setBudgetDialog(false)}
-          submit={async (_objective, tokenBudget) => {
-            await action({ action: 'budget', goalId: goal.id, tokenBudget });
-            setBudgetDialog(false);
-          }}
-        />
-      )}
-      {editing && (
-        <GoalDialog
-          runtime={{ ...runtime, messages }}
-          editing
-          initialObjective={editing.objective}
-          close={() => setEditing(undefined)}
-          submit={async (objective) => {
-            await action({ action: 'edit', goalId: editing.id, revision: editing.revision, objective });
-            setEditing(undefined);
-          }}
-        />
       )}
     </section>
   );

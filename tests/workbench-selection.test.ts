@@ -1,3 +1,5 @@
+import * as goalInput from '../shared/goal-input';
+import * as goal from '../shared/goal';
 import test, { type TestContext } from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
@@ -193,6 +195,8 @@ function harness(
     './useLayer': { useLayer: noOp },
     '../lib/commands': { builtinCommands: [] },
     '../../shared/types': types,
+    '../../shared/goal-input': goalInput,
+    '../../shared/goal': goal,
     '../lib/format': { readableError },
     '../lib/conversation-layout': { hideRecoveredErrors },
     '../../shared/pi-version': { PI_SOURCE_URL: '' },

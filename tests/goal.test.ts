@@ -26,7 +26,7 @@ import {
   validateGoalPlan,
 } from '../shared/goal';
 import { registerDesktopGoal } from '../electron/pi-goal';
-import { GOAL_BUDGET_PRESETS, GOAL_DIALOG_TITLE, parseGoalBudget, type GoalSnapshot } from '../shared/goal';
+import { GOAL_BUDGET_PRESETS, parseGoalBudget, type GoalSnapshot } from '../shared/goal';
 import {
   DESKTOP_GOAL_ENTRY_TYPE,
   parseGoalCommand,
@@ -156,6 +156,7 @@ function harness(initial: SessionEntry[] = []) {
   };
   return {
     entries,
+    pi,
     ctx,
     messages,
     customMessages,
@@ -316,24 +317,21 @@ test('commands validate budgets and 4000-character objectives, preserving embedd
     '--tokens 2k',
     '--tokens 99999999999999999999 目标',
   ])
-    assert.throws(() => parseGoalCommand(text), /预算|用法/);
+    assert.throws(() => parseGoalCommand(text), /预算|用法|用量上限|请输入/);
   validateGoalObjective('x'.repeat(4000));
   assert.throws(() => parseGoalCommand('x'.repeat(4001)), /引用文件路径/);
   assert.throws(() => validateGoalObjective(' '), /请输入/);
 });
 
-test('new dialog cancellation makes no request; existing /goal opens the card without a menu', async () => {
+test('bare Goal opens the local composer and existing Goal opens the card without a modal', async () => {
   const h = harness();
-  h.ctx.ui.input = async (title) => {
-    assert.equal(title, GOAL_DIALOG_TITLE);
-    return undefined;
+  h.ctx.ui.input = async () => {
+    throw new Error('must not open a modal');
   };
   await h.command('');
   assert.equal(h.entries.length, 0);
   assert.equal(h.messages.length, 0);
-  h.ctx.ui.input = async () =>
-    JSON.stringify({ action: 'start', objective: '测试目标', tokenBudget: 500000 });
-  await h.command('');
+  await h.action({ action: 'start', objective: '测试目标', tokenBudget: 500000 });
   assert.equal(h.state()!.tokenBudget, 500000);
   await h.command('');
   assert.equal(h.opened.length, 1);
@@ -391,16 +389,22 @@ test('budget exhaustion persists a distinct state, injects one hidden steer and 
   await h.usage(120);
   assert.equal(h.state()!.status, 'budget_limited');
   assert.equal(h.aborts.length, 0);
-  assert.equal(h.customMessages.length, 1);
-  assert.equal(h.customMessages[0].display, false);
-  assert.equal(h.customMessages[0].options?.deliverAs, 'steer');
-  assert.match(h.customMessages[0].content, /不要开始新的实质性工作/);
+  assert.equal(h.customMessages.filter((m) => m.customType === 'desktop-goal-budget').length, 1);
+  assert.equal(h.customMessages.find((m) => m.customType === 'desktop-goal-budget')!.display, false);
+  assert.equal(
+    h.customMessages.find((m) => m.customType === 'desktop-goal-budget')!.options?.deliverAs,
+    'steer',
+  );
+  assert.match(
+    h.customMessages.find((m) => m.customType === 'desktop-goal-budget')!.content,
+    /不要开始新的实质性工作/,
+  );
   for (let i = 0; i < 3; i++) {
     await h.emit({ type: 'before_provider_request' } as ExtensionEvent);
     await h.usage(10);
   }
   assert.equal(h.aborts.length, 0);
-  assert.equal(h.customMessages.length, 1);
+  assert.equal(h.customMessages.filter((m) => m.customType === 'desktop-goal-budget').length, 1);
   assert.equal(h.state()!.tokensUsed, 150);
   await h.emit({ type: 'before_provider_request' } as ExtensionEvent);
   assert.equal(h.aborts.length, 1);
@@ -523,10 +527,20 @@ test('editing preserves usage/time, clears stale plans, steers new context and r
   assert.equal(h.state()!.revision, 2);
   assert.equal(h.state()!.tokensUsed, 50);
   assert.ok(h.state()!.timeUsedMs! >= previous.timeUsedMs!);
-  assert.equal(h.customMessages[0].content, '目标已修改');
-  assert.equal(h.customMessages[0].display, true);
-  assert.equal(h.customMessages[1].options?.deliverAs, 'steer');
-  assert.match(h.customMessages[1].content, /&lt;\/objective&gt;/);
+  assert.equal(h.customMessages.find((m) => m.customType === 'desktop-goal-updated')!.content, '目标已修改');
+  assert.equal(h.customMessages.find((m) => m.customType === 'desktop-goal-updated')!.display, true);
+  assert.equal(
+    h.customMessages.find((m) => m.customType === 'desktop-goal-context')!.options?.deliverAs,
+    'steer',
+  );
+  assert.equal(
+    h.customMessages.find((m) => m.customType === 'desktop-goal-context')!.options?.triggerTurn,
+    false,
+  );
+  assert.match(
+    h.customMessages.find((m) => m.customType === 'desktop-goal-context')!.content,
+    /&lt;\/objective&gt;/,
+  );
   await assert.rejects(h.tool('desktop_goal_update', old), /revision 已过期/);
   await assert.rejects(
     h.action({ action: 'edit', goalId: previous.id, revision: 1, objective: '过期表单' }),
@@ -537,6 +551,21 @@ test('editing preserves usage/time, clears stale plans, steers new context and r
   assert.equal(h.state()!.status, 'completed');
 });
 
+test('failed Goal persistence rolls back the in-memory objective and never submits a new user message', async () => {
+  const h = harness();
+  await h.command('原目标');
+  const original = h.state()!;
+  h.ctx.ui.confirm = async () => true;
+  h.pi.appendEntry = () => {
+    throw new Error('disk full');
+  };
+  await assert.rejects(h.action({ action: 'start', objective: '不能保存的新目标' }), /disk full/);
+  const current = await h.rawTool('desktop_goal_get', {});
+  assert.equal((current.details as GoalSnapshot).id, original.id);
+  assert.equal((current.details as GoalSnapshot).objective, original.objective);
+  assert.equal(h.messages.length, 1);
+});
+
 test('replacement cancellation preserves state and stale confirmation cannot replace another objective', async () => {
   const h = harness();
   await h.command('原目标');
@@ -545,11 +574,17 @@ test('replacement cancellation preserves state and stale confirmation cannot rep
   assert.equal(h.state()!.id, id);
   assert.equal(h.messages.length, 1);
   let resolve!: (value: boolean) => void;
+  let shown!: () => void;
+  const confirmation = new Promise<void>((done) => {
+    shown = done;
+  });
   h.ctx.ui.confirm = () =>
     new Promise((done) => {
       resolve = done;
+      shown();
     });
   const pending = h.command('替换目标');
+  await confirmation;
   await h.command('edit 修正原目标');
   resolve(true);
   await pending;

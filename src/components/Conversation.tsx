@@ -569,6 +569,7 @@ export function Conversation(
         {thinkingGroups.filter((group) => group.owner === index).map(renderThinking)}
         <ChatMessage
           hideThinking
+          goalStart={messages[index].goalStart === true}
           m={messages[index]}
           last={messages[index] === lastAssistant}
           ctx={messageContext}

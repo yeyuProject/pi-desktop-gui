@@ -1,3 +1,4 @@
+import { readGoalDraft } from '../shared/goal-input';
 import path from 'node:path';
 import { THEMES } from '../shared/window-theme';
 import { busy, type AppState, type Project, type Session, type Settings } from '../shared/types';
@@ -148,6 +149,7 @@ export function parseState(value: unknown) {
     sessionIds.add(row.id);
     const session = {
       ...row,
+      draftGoal: readGoalDraft(row.draftGoal),
       draft: row.draft ?? '',
       attachments: row.attachments ?? [],
     } as unknown as Session;

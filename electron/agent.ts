@@ -1,4 +1,10 @@
 import {
+  editGoalDraft,
+  sameGoalDraft,
+  validateGoalStartInput,
+  type GoalStartInput,
+} from '../shared/goal-input';
+import {
   composeQuotedInput,
   splitUserContent,
   userMessageInput,
@@ -454,6 +460,15 @@ export class AgentService extends EventEmitter {
   private onEvent(record: any) {
     const r = this.runtime;
     switch (record.type) {
+      case 'desktop_goal_compose': {
+        if (!r.sessionId) return;
+        const session = this.store.session(r.sessionId);
+        if (record.edit && r.goal) session.draftGoal = editGoalDraft(r.goal, session.draftGoal);
+        else if (!record.edit) session.draftGoal = { kind: 'start' };
+        this.store.promoteSession(session.id);
+        this.activity();
+        return;
+      }
       case 'desktop_goal':
         r.goal = record.goal;
         if (record.open) r.goalOpenRequest = (r.goalOpenRequest ?? 0) + 1;
@@ -1413,24 +1428,68 @@ export class AgentService extends EventEmitter {
     session.thinking = this.runtime.thinking;
     this.status('idle');
   }
-  send(id: string, text: string, attachments: string[], mode: SendMode, images: ImageAttachment[] = []) {
+  send(
+    id: string,
+    text: string,
+    attachments: string[],
+    mode: SendMode,
+    images: ImageAttachment[] = [],
+    goalStart?: GoalStartInput,
+  ) {
+    if (goalStart) validateGoalStartInput(goalStart);
     validateImages(images);
     if (!text.trim() && !images.length) return Promise.reject(new Error('请输入任务内容或添加图片'));
     this.protectSession(id);
     const epoch = this.stopEpoch;
-    return this.exclusive(() => this.sendInOperation(id, text, attachments, mode, images, epoch));
+    return this.exclusive(() =>
+      this.sendInOperation(id, text, attachments, mode, images, epoch, true, goalStart),
+    );
   }
-  openGoal(id: string) {
-    this.protectSession(id);
-    const epoch = this.stopEpoch;
-    return this.exclusive(() => this.sendInOperation(id, '/goal', [], 'steer', [], epoch, false));
+  async openGoal(id: string) {
+    this.store.assertWritable();
+    const session = this.store.session(id);
+    const goal = this.runtime.sessionId === id ? this.runtime.goal : undefined;
+    if (goal && goal.status !== 'completed') {
+      this.runtime.goalOpenRequest = (this.runtime.goalOpenRequest ?? 0) + 1;
+      this.publish(true);
+    } else {
+      session.draftGoal = session.draftGoal?.kind === 'start' ? undefined : { kind: 'start' };
+      this.store.promoteSession(id);
+      await this.store.save();
+      this.emit('state', this.store.state);
+    }
   }
   async goalAction(id: string, action: import('../shared/goal').GoalAction) {
     this.protectSession(id);
+    if (action.action === 'start') {
+      const epoch = this.stopEpoch;
+      return this.exclusive(() =>
+        this.sendInOperation(id, action.objective, [], 'steer', [], epoch, false, {
+          objective: action.objective,
+          tokenBudget: action.tokenBudget,
+          draftText: action.objective,
+        }),
+      );
+    }
+    this.store.assertWritable();
     if (!this.rpc || this.rpc.closed || !this.runtime.connected) await this.connect(id);
     if (!this.rpc || this.rpc.closed || !this.runtime.connected || this.runtime.sessionId !== id)
       throw new Error('请先连接主会话，再管理 Goal。');
-    await this.rpc.bridge('goal_action', action);
+    const result = await this.rpc.bridge('goal_action', action);
+    const session = this.store.session(id);
+    const editor = session.draftGoal;
+    if (
+      result?.applied &&
+      action.action === 'edit' &&
+      editor?.kind === 'edit' &&
+      editor.goalId === action.goalId &&
+      editor.revision === action.revision &&
+      editor.objective === action.objective
+    ) {
+      session.draftGoal = editor.restore;
+      await this.store.save();
+      this.emit('state', this.store.state);
+    }
   }
   recover(id: string, continuePrompt?: string) {
     this.protectSession(id);
@@ -1452,6 +1511,7 @@ export class AgentService extends EventEmitter {
     images: ImageAttachment[],
     epoch: number,
     consumeDraft = true,
+    goalStart?: GoalStartInput,
   ) {
     this.store.assertWritable();
     if (epoch !== this.stopEpoch) throw new Error('任务已取消，内容保留在草稿中');
@@ -1470,8 +1530,9 @@ export class AgentService extends EventEmitter {
     await this.ensureConnected(id);
     // A tool continuation or a queued steer/follow-up is still the same user task.
     if (!busy(this.runtime.status)) await this.applyTaskSelection(id);
-    const shellCommand = text.startsWith('!') && text.replace(/^!!?/, '').trim().length > 0;
-    if (!this.runtime.model && !text.startsWith('/') && !shellCommand) throw new Error('请选择一个可用模型');
+    const shellCommand = !goalStart && text.startsWith('!') && text.replace(/^!!?/, '').trim().length > 0;
+    if (!this.runtime.model && (goalStart || !text.startsWith('/')) && !shellCommand)
+      throw new Error('请选择一个可用模型');
     if (images.length && !this.runtime.model?.input?.includes('image'))
       throw new Error('当前模型未声明图片能力，请切换到支持图片的模型');
     const isActive = busy(this.runtime.status);
@@ -1493,7 +1554,7 @@ export class AgentService extends EventEmitter {
         try {
           if (shellCommand)
             await this.workspace.captureCheckpoint(project, id, await this.workspace.nextCheckpointTurn(id));
-          else if (!text.startsWith('/')) await this.checkpointRecorder.prepare(id);
+          else if (goalStart || !text.startsWith('/')) await this.checkpointRecorder.prepare(id);
         } catch (error) {
           this.setError(`无法建立本轮快照，任务未开始：${errorText(error)}`);
           this.status(this.stopRequested ? 'stopped' : 'error');
@@ -1540,7 +1601,7 @@ export class AgentService extends EventEmitter {
         await this.syncApprovalMode();
         await this.applyPendingConfiguration();
       } else {
-        const matches = this.store.matchesDraft(session, text, attachments, images);
+        const matches = this.store.matchesDraft(session, goalStart?.draftText ?? text, attachments, images);
         const draft: QueuedDraft = {
           text: prompt,
           original: matches ? session.draft : text,
@@ -1553,17 +1614,28 @@ export class AgentService extends EventEmitter {
         };
         this.pendingDraft = draft;
         try {
-          result = await this.rpc!.request(
-            'prompt',
-            {
-              message: prompt,
-              ...(isActive ? { streamingBehavior: mode } : {}),
-              ...(images.length
-                ? { images: images.map(({ data, mimeType }) => ({ type: 'image', data, mimeType })) }
-                : {}),
-            },
-            text.startsWith('/') ? 600000 : 30000,
-          );
+          result = goalStart
+            ? await this.rpc!.bridge('goal_action', {
+                action: 'start',
+                objective: goalStart.objective,
+                tokenBudget: goalStart.tokenBudget,
+                references: attachments,
+                firstMessage: {
+                  text: prompt,
+                  images: images.map(({ data, mimeType }) => ({ type: 'image', data, mimeType })),
+                },
+              })
+            : await this.rpc!.request(
+                'prompt',
+                {
+                  message: prompt,
+                  ...(isActive ? { streamingBehavior: mode } : {}),
+                  ...(images.length
+                    ? { images: images.map(({ data, mimeType }) => ({ type: 'image', data, mimeType })) }
+                    : {}),
+                },
+                text.startsWith('/') ? 600000 : 30000,
+              );
           if (result?.disposition === 'queued' && !draft.observed) this.queuedDrafts.push(draft);
           if (result?.disposition !== 'queued')
             this.queuedDrafts = this.queuedDrafts.filter((item) => item !== draft);
@@ -1571,11 +1643,20 @@ export class AgentService extends EventEmitter {
           if (this.pendingDraft === draft) this.pendingDraft = undefined;
         }
       }
+      if (goalStart && result?.applied === false) {
+        if (!isActive && !this.stopRequested) this.status('idle');
+        return;
+      }
       if (result?.disposition === 'handled' && !this.stopRequested) {
         const state = await this.rpc!.request('get_state');
         if (!state.isStreaming && !state.isCompacting && !state.pendingMessageCount) this.status('idle');
       }
-      if (consumeDraft && this.store.matchesDraft(session, text, attachments, images)) {
+      if (
+        consumeDraft &&
+        this.store.matchesDraft(session, goalStart?.draftText ?? text, attachments, images) &&
+        (!goalStart || sameGoalDraft(session.draftGoal, goalStart.draftGoal))
+      ) {
+        if (goalStart) session.draftGoal = undefined;
         session.draft = '';
         session.attachments = [];
         session.images = [];

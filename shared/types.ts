@@ -1,3 +1,4 @@
+import type { GoalDraft, GoalStartInput } from './goal-input';
 import type { AppDialog, AppMenuId } from './app-dialogs';
 import type { ApprovalMode, ApprovalRequest, ApprovalGrant } from './approval';
 import type { AttachmentInfo } from './attachments';
@@ -44,6 +45,7 @@ export interface Session {
   title: string;
   file?: string;
   draft: string;
+  draftGoal?: GoalDraft;
   attachments: string[];
   images?: DraftImage[];
   draftSnippets?: DraftSnippet[];
@@ -474,6 +476,7 @@ export interface ApiMap {
   sideChatStop: { args: [string]; result: void };
   sideChatClear: { args: [string]; result: void };
   sideChatContinue: { args: [string, string]; result: Session };
+  saveDraftGoal: { args: [string, GoalDraft | null]; result: void };
   flushDraft: { args: []; result: void };
   consumeDraft: { args: [string, string, string[], ImageAttachment[]]; result: void };
   saveView: { args: [string, number, string[]]; result: void };
@@ -486,7 +489,7 @@ export interface ApiMap {
   readModels: { args: [string]; result: void };
   recover: { args: [string, string?]; result: void };
   testConnection: { args: [string]; result: { elapsed: number; text: string } };
-  send: { args: [string, string, string[], SendMode, ImageAttachment[]?]; result: void };
+  send: { args: [string, string, string[], SendMode, ImageAttachment[]?, GoalStartInput?]; result: void };
   openGoal: { args: [sessionId: string]; result: void };
   goalAction: { args: [sessionId: string, action: GoalAction]; result: void };
   pickImages: { args: []; result: ImageAttachment[] };

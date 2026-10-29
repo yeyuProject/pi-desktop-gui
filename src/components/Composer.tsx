@@ -1,3 +1,7 @@
+import { goalCommandPreview } from '../../shared/goal-input';
+import { MAX_GOAL_OBJECTIVE_LENGTH } from '../../shared/goal';
+import { GoalBudgetPicker } from './GoalBudgetPicker';
+import { topLayer } from '../hooks/useLayer';
 import {
   ArrowUp,
   Square,
@@ -48,6 +52,11 @@ export type ComposerProps = Pick<
   | 'selectionChanging'
   | 'selectionRevision'
   | 'draft'
+  | 'draftGoal'
+  | 'openGoalComposer'
+  | 'exitGoalMode'
+  | 'editGoal'
+  | 'setGoalBudget'
   | 'attachments'
   | 'sendMode'
   | 'setSendMode'
@@ -116,6 +125,11 @@ export function Composer(props: ComposerProps) {
     selectionChanging,
     selectionRevision,
     draft,
+    draftGoal,
+    openGoalComposer,
+    exitGoalMode,
+    editGoal,
+    setGoalBudget,
     attachments,
     sendMode,
     setSendMode,
@@ -172,25 +186,49 @@ export function Composer(props: ComposerProps) {
   } = props;
   const modelState = sessionModelState(runtime, selected, state.settings);
   const goal = ownRuntime ? runtime.goal : null;
-  const goalView = useGoalCard(goal, selected?.id, props.expanded, props.toggleTool, runtime.goalOpenRequest);
+  const editingGoal = draftGoal?.kind === 'edit';
+  const goalPreview = editingGoal ? undefined : goalCommandPreview(draft);
+  const goalMode = Boolean(draftGoal || goalPreview);
+  const goalObjective = goalPreview?.objective ?? draft;
+  const goalBudget =
+    goalPreview?.tokenBudget ?? (draftGoal?.kind === 'start' ? draftGoal.tokenBudget : undefined);
+  const localGoalCommand = /^\s*\/goal(?:\s+edit)?\s*$/.test(draft) && !editingGoal;
+  const goalError =
+    goalMode && !localGoalCommand
+      ? goalPreview?.error ||
+        (!goalObjective.trim()
+          ? '请填写目标'
+          : goalObjective.length > MAX_GOAL_OBJECTIVE_LENGTH
+            ? '目标超过 4000 字，请把要求写进项目文件并引用它'
+            : '')
+      : '';
+  const goalView = useGoalCard(
+    goal,
+    selected?.id,
+    props.expanded,
+    props.toggleTool,
+    runtime.goalOpenRequest,
+    goalMode,
+  );
   const connecting = ownRunning && !runtime.connected;
-  const [goalRequestSession, setGoalRequestSession] = useState<string>();
-  const goalOpening = Boolean(selected && goalRequestSession === selected.id);
-  const openGoal = async () => {
-    const id = selected?.id;
-    if (!id || goalOpening || selectionChanging || pending || !sessionEnabled || !storage.writable) return;
-    if (goal) {
-      goalView.reveal();
-      return;
-    }
-    setGoalRequestSession(id);
-    try {
-      // The bundled extension opens the Goal form without changing the composer draft.
-      await attempt(() => api.invoke('openGoal', id), id);
-    } finally {
-      setGoalRequestSession((current) => (current === id ? undefined : current));
-    }
+  const openGoal = () => {
+    if (!selected || selectionChanging || pending || !sessionEnabled || !storage.writable) return;
+    if (!goalMode && goal && goal.status !== 'completed') goalView.reveal();
+    else openGoalComposer();
   };
+  useEffect(() => {
+    if (!goalMode) return;
+    const escape = (event: globalThis.KeyboardEvent) => {
+      if (event.key !== 'Escape' || event.isComposing || event.defaultPrevented || topLayer()) return;
+      event.preventDefault();
+      event.stopPropagation();
+      if (commandOptions.length) setHideCommands(true);
+      else if (fileQuery !== null) setFileQuery(null);
+      else exitGoalMode();
+    };
+    document.addEventListener('keydown', escape);
+    return () => document.removeEventListener('keydown', escape);
+  }, [goalMode, commandOptions.length, fileQuery, exitGoalMode]);
   const [modelPickerOwner, setModelPickerOwner] = useState<{ sessionId: string; revision: number }>();
   // Ownership hides a stale picker during render; the effect only discards its state.
   const modelPickerOpen = Boolean(
@@ -258,6 +296,7 @@ export function Composer(props: ComposerProps) {
   };
   const sendComposer = () => {
     if (
+      Boolean(goalError) ||
       props.attachmentsPending ||
       selectionChanging ||
       !sessionEnabled ||
@@ -313,12 +352,13 @@ export function Composer(props: ComposerProps) {
         <GoalCard
           key={`${selected?.id}:${goal.id}`}
           goal={goal}
-          runtime={runtime}
           messages={props.messages}
           view={goalView}
           disabled={pending || selectionChanging || !storage.writable}
           action={(action) => api.invoke('goalAction', selected!.id, action)}
           openProviders={() => setFeatureTab('providers')}
+          edit={() => editGoal(goal)}
+          replace={() => openGoalComposer(true)}
         />
       )}
       <div
@@ -337,13 +377,37 @@ export function Composer(props: ComposerProps) {
           if (selected) void acceptDrop(Array.from(e.dataTransfer.files));
         }}
       >
+        {goalMode && (
+          <div
+            className={'goal-mode-bar' + (goalPreview ? ' preview' : '')}
+            role="group"
+            aria-label="Goal 输入模式"
+          >
+            <Target size={14} />
+            <strong>{editingGoal ? '正在修改目标' : 'Goal'}</strong>
+            <span>{editingGoal ? '原草稿和附件已保留' : '持续执行直到完成'}</span>
+            {!editingGoal && (
+              <GoalBudgetPicker
+                key={selected?.id}
+                messages={props.messages}
+                initialBudget={goalBudget}
+                disabled={pending}
+                submit={setGoalBudget}
+              />
+            )}
+            <button aria-label={editingGoal ? '取消修改目标' : '退出 Goal 模式'} onClick={exitGoalMode}>
+              <X size={14} />
+            </button>
+            {goalError && <small role="status">{goalError}</small>}
+          </div>
+        )}
         <ComposerResize maximum={inputMaxHeight} change={setInputMaxHeight} />
         {dragging && (
           <div className="drop-hint" aria-hidden="true">
             {project ? '松开以添加图片或引用项目文件' : '松开以添加图片'}
           </div>
         )}
-        {!!images.length && (
+        {!editingGoal && !!images.length && (
           <div className="image-attachments">
             {images.map((img, imageIndex) => (
               <div key={img.id}>
@@ -371,7 +435,7 @@ export function Composer(props: ComposerProps) {
             ))}
           </div>
         )}
-        {attachments.length > 0 && (
+        {!editingGoal && attachments.length > 0 && (
           <div className="attachments">
             {attachments.map((a) => (
               <span
@@ -400,7 +464,7 @@ export function Composer(props: ComposerProps) {
             ))}
           </div>
         )}
-        {!!draftQuotes.length && (
+        {!editingGoal && !!draftQuotes.length && (
           <div className="attachments draft-quotes">
             {draftQuotes.map((quote) => (
               <span key={quote.id} title={quote.text.slice(0, 2000)}>
@@ -416,7 +480,7 @@ export function Composer(props: ComposerProps) {
             ))}
           </div>
         )}
-        {!!snippets.length && (
+        {!editingGoal && !!snippets.length && (
           <div className="attachments pasted-snippets">
             {snippets.map((item) => (
               <span
@@ -456,7 +520,13 @@ export function Composer(props: ComposerProps) {
         <textarea
           ref={input}
           aria-label="任务输入"
-          placeholder={project ? '描述你想完成的任务，@ 引用文件…' : '给 Pi 发消息…'}
+          placeholder={
+            goalMode
+              ? '描述要完成的结果和验证方式，例如：修复登录校验，相关测试全部通过'
+              : project
+                ? '描述你想完成的任务，@ 引用文件…'
+                : '给 Pi 发消息…'
+          }
           value={draft}
           disabled={!selected || !storage.writable}
           onChange={(e) => {
@@ -464,6 +534,13 @@ export function Composer(props: ComposerProps) {
             onDraft(e.target.value);
           }}
           onPaste={(e) => {
+            if (editingGoal) {
+              if (e.clipboardData.files.length) {
+                e.preventDefault();
+                setError('请先保存或取消目标修改');
+              }
+              return;
+            }
             const files = Array.from(e.clipboardData.files);
             if (files.length) {
               e.preventDefault();
@@ -477,6 +554,7 @@ export function Composer(props: ComposerProps) {
             }
           }}
           onKeyDown={(e) => {
+            if (topLayer()) return;
             if (fileKey(e)) return;
             if (commandOptions.length) {
               if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
@@ -498,15 +576,23 @@ export function Composer(props: ComposerProps) {
               }
               if (e.key === 'Escape') {
                 e.preventDefault();
+                e.stopPropagation();
                 setHideCommands(true);
                 return;
               }
+            }
+            if (e.key === 'Escape' && goalMode && !e.nativeEvent.isComposing) {
+              e.preventDefault();
+              e.stopPropagation();
+              exitGoalMode();
+              return;
             }
             if (e.key === 'Escape' && fileQuery !== null) {
               e.preventDefault();
               setFileQuery(null);
             }
             if (
+              !goalMode &&
               (e.key === 'ArrowUp' || e.key === 'ArrowDown') &&
               !e.shiftKey &&
               !e.altKey &&
@@ -603,7 +689,11 @@ export function Composer(props: ComposerProps) {
         )}
         <div className="composer-toolbar">
           <div>
-            <IconButton title="添加图片" disabled={!selected} onClick={() => void chooseImages()}>
+            <IconButton
+              title="添加图片"
+              disabled={!selected || editingGoal}
+              onClick={() => void chooseImages()}
+            >
               <ImagePlus size={17} />
             </IconButton>
             {project && (
@@ -614,31 +704,32 @@ export function Composer(props: ComposerProps) {
                   setFileQuery('');
                   input.current?.focus();
                 }}
-                disabled={!project}
+                disabled={!project || editingGoal}
               >
                 <Paperclip size={17} />
               </IconButton>
             )}
             <button
               className="goal-button"
+              aria-pressed={goalMode}
               aria-label="Goal 目标管理"
               title="设置目标，或查看、暂停和恢复当前目标"
-              disabled={
-                !selected ||
-                !sessionEnabled ||
-                !storage.writable ||
-                !environment?.supported ||
-                selectionChanging ||
-                pending ||
-                connecting ||
-                goalOpening
-              }
+              disabled={!selected || !sessionEnabled || !storage.writable || selectionChanging || pending}
               onClick={() => void openGoal()}
             >
-              {goalOpening ? <LoaderCircle size={14} className="spin" /> : <Target size={14} />}
+              <Target size={14} />
               Goal
-              {goal?.status === 'completed' && <i className="goal-completed-dot" aria-label="Goal 已完成" />}
             </button>
+            {goal?.status === 'completed' && (
+              <button
+                className="goal-previous-result"
+                aria-label="查看上个 Goal 结果"
+                title="查看上个 Goal 结果"
+                onClick={goalView.reveal}
+              >
+                <i className="goal-completed-dot" aria-label="Goal 已完成" />
+              </button>
+            )}
             <ApprovalSwitch
               grants={ownRuntime ? runtime.approvalGrants : []}
               revoke={(id) => selected && void attempt(() => api.invoke('revokeApproval', selected.id, id))}
@@ -678,7 +769,7 @@ export function Composer(props: ComposerProps) {
             />
           </div>
           <div>
-            {attachmentBytes > 512 * 1024 && (
+            {!editingGoal && attachmentBytes > 512 * 1024 && (
               <span
                 className={
                   'attachment-capacity ' +
@@ -691,7 +782,7 @@ export function Composer(props: ComposerProps) {
                 {attachmentBytes > 1024 * 1024 && <small>占用最多：{largest.name}；请移除或按行引用</small>}
               </span>
             )}
-            {ownRunning && !connecting ? (
+            {ownRunning && !connecting && !goalMode ? (
               <select
                 aria-label="运行中发送方式"
                 value={sendMode}
@@ -721,23 +812,34 @@ export function Composer(props: ComposerProps) {
               </button>
             )}
             <button
-              className="send-button"
-              aria-label="发送任务"
-              title="发送任务"
+              className={'send-button' + (goalMode && !localGoalCommand ? ' goal-send-button' : '')}
+              aria-label={editingGoal ? '保存修改' : goalMode && !localGoalCommand ? '开始 Goal' : '发送任务'}
+              title={editingGoal ? '保存修改' : goalMode && !localGoalCommand ? '开始 Goal' : '发送任务'}
               disabled={
                 (!draft.trim() && !images.length && !snippets.length && !draftQuotes.length) ||
-                attachmentBytes > 1024 * 1024 ||
+                (!editingGoal && attachmentBytes > 1024 * 1024) ||
+                Boolean(goalError) ||
                 Boolean(parameterError) ||
                 !selected ||
                 pending ||
                 props.attachmentsPending ||
                 !sessionEnabled ||
-                (!environment?.supported && !runtime.connected) ||
+                (!localGoalCommand && !environment?.supported && !runtime.connected) ||
                 runtime.status === 'stopping'
               }
               onClick={sendComposer}
             >
-              {pending ? <LoaderCircle size={18} className="spin" /> : <ArrowUp size={19} />}
+              {pending ? (
+                <LoaderCircle size={18} className="spin" />
+              ) : goalMode && !localGoalCommand ? (
+                editingGoal ? (
+                  '保存修改'
+                ) : (
+                  '开始 Goal'
+                )
+              ) : (
+                <ArrowUp size={19} />
+              )}
             </button>
           </div>
         </div>

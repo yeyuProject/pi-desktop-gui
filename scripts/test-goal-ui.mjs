@@ -30,47 +30,83 @@ try {
     expect
       .poll(async () => (await snapshot()).runtime.status, { timeout: 60000 })
       .toMatch(/^(completed|stopped|idle|error)$/);
+  const mode = page.getByRole('group', { name: 'Goal 输入模式' });
+  const previousResult = page.getByRole('button', { name: '查看上个 Goal 结果', exact: true });
   const createGoal = async (objective, budget) => {
     await goalButton.click();
-    const dialog = page.getByRole('dialog', { name: '新建 Goal', exact: true });
-    assert.equal(await dialog.locator('details').getAttribute('open'), null);
-    await dialog.getByRole('textbox', { name: 'Goal 目标' }).fill(objective);
+    await expect(mode).toBeVisible();
+    await expect(page.getByRole('dialog')).toHaveCount(0);
+    await input.fill(objective);
     if (budget) {
-      await dialog.locator('summary').click();
-      await dialog.getByRole('combobox', { name: 'Goal 用量上限' }).selectOption(budget);
+      await page.getByRole('button', { name: 'Goal 上限', exact: true }).click();
+      const picker = page.getByRole('group', { name: 'Goal 上限选择' });
+      await picker.getByRole('combobox', { name: 'Goal 用量上限' }).selectOption(budget);
+      await picker.getByRole('button', { name: '确定上限' }).click();
     }
-    await dialog.getByRole('button', { name: '开始 Goal', exact: true }).click();
-    await expect(dialog).toHaveCount(0);
+    await page.getByRole('button', { name: '开始 Goal', exact: true }).click();
+    await expect(mode).toHaveCount(0);
   };
   const clear = async () => {
     await card.getByRole('button', { name: '清除 Goal', exact: true }).click();
     await expect(card).toHaveCount(0);
     await expect.poll(async () => (await snapshot()).runtime.goal).toBe(null);
   };
-  await input.fill('/goal');
+  await input.fill('离线目标草稿');
   await goalButton.click();
-  await page
-    .getByRole('dialog', { name: '新建 Goal', exact: true })
-    .getByRole('button', { name: '取消', exact: true })
-    .click();
-  await idle();
+  await expect(mode).toBeVisible();
+  await page.getByRole('button', { name: 'Goal 上限', exact: true }).click();
+  await page.getByRole('combobox', { name: 'Goal 用量上限' }).selectOption('500k');
+  await page.getByRole('button', { name: '确定上限' }).click();
+  await page.getByRole('button', { name: 'Goal 上限', exact: true }).click();
+  await page.keyboard.press('Escape');
+  await expect(page.getByRole('group', { name: 'Goal 上限选择' })).toHaveCount(0);
+  await expect(mode).toBeVisible();
+  const originalSession = (await snapshot()).state.selectedSessionId;
+  await page.evaluate(() => window.desktop.invoke('flushDraft'));
+  await page.evaluate(() => window.desktop.invoke('newSession'));
+  await expect(mode).toHaveCount(0);
+  await page.evaluate((id) => window.desktop.invoke('selectSession', id), originalSession);
+  await expect(input).toHaveValue('离线目标草稿');
+  await expect(mode).toContainText('500k');
+  await page.reload();
+  await expect(mode).toContainText('500k');
+  assert.equal((await snapshot()).runtime.connected, false);
   assert.equal(provider.count, 0);
-  assert.equal(await input.inputValue(), '/goal');
-  const preservedDraft = '这段草稿先保留，不要作为 Goal 发送';
-  await input.fill(preservedDraft);
+  await input.focus();
+  await page.keyboard.press('Escape');
+  await expect(mode).toHaveCount(0);
+  await expect(input).toHaveValue('离线目标草稿');
+  await input.fill('/goal --tokens 2m 预览目标');
+  await expect(mode).toContainText('2m');
+  await page.getByRole('button', { name: 'Goal 上限', exact: true }).click();
+  await page.getByRole('combobox', { name: 'Goal 用量上限' }).selectOption('500k');
+  await page.getByRole('button', { name: '确定上限' }).click();
+  await expect(input).toHaveValue('/goal --tokens 500000 预览目标');
+  await input.focus();
+  await page.keyboard.press('Escape');
+  await expect(input).toHaveValue('预览目标');
+  await expect(mode).toHaveCount(0);
+  await input.fill('/goal');
+  await input.press('Enter');
+  await expect(mode).toBeVisible();
+  await expect(input).toHaveValue('');
+  await page.getByRole('button', { name: '退出 Goal 模式' }).click();
+  assert.equal(provider.count, 0);
+  const preservedDraft = '编辑前草稿与附件必须完整恢复';
   provider.reset('continue');
   await createGoal('核对登录校验的修改和测试结果，并提交完成证据');
   await expect(card).toHaveClass(/completed/, { timeout: 60000 });
   await idle();
   assert.equal(provider.count, 2);
+  await expect(page.locator('.goal-message-badge')).toHaveCount(1);
   await expect(page.locator('.extension-widget')).toHaveCount(0);
   assert.equal(await page.locator('.message').filter({ hasText: 'goal_id:' }).count(), 0);
   await expect(card).toContainText('Goal 已完成');
   assert.ok(!((await page.locator('.composer-bottom').textContent()) ?? '').includes('Goal：已完成'));
   await page.mouse.move(1, 1);
   await expect(card).toHaveCount(0, { timeout: 11000 });
-  await expect(goalButton.locator('.goal-completed-dot')).toHaveCount(1);
-  await goalButton.click();
+  await expect(previousResult.locator('.goal-completed-dot')).toHaveCount(1);
+  await previousResult.click();
   await expect(card.locator('.goal-details')).toBeVisible();
   const dimensions = await card.evaluate((element) => ({
     bar: element.querySelector('.goal-bar').getBoundingClientRect().height,
@@ -92,12 +128,13 @@ try {
   await page.keyboard.press('Escape');
   await expect(card.locator('.goal-details')).toHaveCount(0);
   await page.screenshot({ path: path.join(output, 'goal-completed.png'), animations: 'disabled' });
-  await goalButton.click();
+  await previousResult.click();
   await page.reload();
   await input.waitFor();
-  await expect(goalButton.locator('.goal-completed-dot')).toHaveCount(1);
+  await expect(previousResult.locator('.goal-completed-dot')).toHaveCount(1);
   await expect(card).toHaveCount(0);
-  await goalButton.click();
+  await expect(page.locator('.goal-message-badge')).toHaveCount(1);
+  await previousResult.click();
   await clear();
   provider.reset('hold');
   await createGoal('检查修改并保留验证结果，等待进一步确认');
@@ -122,16 +159,75 @@ try {
   await replacing;
   console.log('PASS active replacement cancellation preserves the Goal');
   assert.equal((await snapshot()).runtime.goal.id, originalId);
-  await card.getByRole('button', { name: '编辑目标', exact: true }).click();
-  const editing = page.getByRole('dialog', { name: '编辑 Goal', exact: true });
-  await editing.getByRole('textbox', { name: 'Goal 目标' }).fill('x'.repeat(4001));
-  await editing.getByRole('button', { name: '保存修改' }).click();
-  await expect(editing.getByRole('alert')).toContainText('引用文件路径');
-  await editing.getByRole('textbox', { name: 'Goal 目标' }).fill('修改后的目标仍然需要完成验证');
-  await editing.getByRole('button', { name: '保存修改' }).click();
-  await expect(editing).toHaveCount(0);
+  await input.fill(preservedDraft);
+  await page.evaluate(async () => {
+    const { state } = await window.desktop.invoke('bootstrap');
+    const session = state.sessions.find((s) => s.id === state.selectedSessionId);
+    await window.desktop.invoke(
+      'saveDraft',
+      session.id,
+      session.draft,
+      ['输入 文件.txt'],
+      [],
+      [{ id: 'kept-piece', text: '保留片段', offset: session.draft.length }],
+      [
+        {
+          id: 'kept-quote',
+          text: '保留引用',
+          role: 'assistant',
+          turn: 1,
+          messageTimestamp: 1,
+          section: 'text',
+        },
+      ],
+    );
+    await window.desktop.invoke('flushDraft');
+  });
+  await card.getByRole('button', { name: '编辑目标', exact: true }).first().click();
+  await input.fill('未保存的编辑缓冲区');
+  await page.evaluate(() => window.desktop.invoke('flushDraft'));
+  const editorSession = (await snapshot()).state.selectedSessionId;
+  await page.evaluate(() => window.desktop.invoke('newSession'));
+  await expect(mode).toHaveCount(0);
+  await page.evaluate((id) => window.desktop.invoke('selectSession', id), editorSession);
+  await expect(input).toHaveValue('未保存的编辑缓冲区');
+  await page.reload();
+  await expect(input).toHaveValue('未保存的编辑缓冲区');
+  await page.getByRole('button', { name: '取消修改目标' }).click();
+  await expect(input).toHaveValue(preservedDraft);
+  await expect(page.locator('.pasted-snippets')).toContainText('粘贴片段');
+  await expect(page.locator('.draft-quotes')).toContainText('保留引用');
+  await card.getByRole('button', { name: '编辑目标', exact: true }).first().click();
+  await input.fill('过期编辑仍要保留');
+  await page.evaluate(async () => {
+    const value = await window.desktop.invoke('bootstrap');
+    await window.desktop.invoke('goalAction', value.state.selectedSessionId, {
+      action: 'edit',
+      goalId: value.runtime.goal.id,
+      revision: value.runtime.goal.revision,
+      objective: '别处已修改的目标',
+    });
+  });
+  await page.getByRole('button', { name: '保存修改', exact: true }).click();
+  await expect(page.getByText('Goal 已变化，请重新打开编辑目标。', { exact: false }).first()).toBeVisible();
+  await expect(input).toHaveValue('过期编辑仍要保留');
+  await page.getByRole('button', { name: '取消修改目标' }).click();
+  await card.getByRole('button', { name: '编辑目标', exact: true }).first().click();
+  await input.fill('x'.repeat(4001));
+  await expect(page.getByRole('button', { name: '保存修改', exact: true })).toBeDisabled();
+  await expect(mode).toContainText('目标超过 4000 字');
+  await input.fill('修改后的目标仍然需要完成验证');
+  await page.getByRole('button', { name: '保存修改', exact: true }).click();
+  await expect(mode).toHaveCount(0);
+  await expect(input).toHaveValue(preservedDraft);
+  await expect(page.locator('.draft-quotes')).toContainText('保留引用');
+  await page.evaluate(async () => {
+    const { state } = await window.desktop.invoke('bootstrap');
+    await window.desktop.invoke('saveDraft', state.selectedSessionId, '', [], [], [], []);
+    await window.desktop.invoke('flushDraft');
+  });
   console.log('PASS active editing and objective length validation');
-  assert.equal((await snapshot()).runtime.goal.revision, 2);
+  assert.equal((await snapshot()).runtime.goal.revision, 3);
   await card.getByRole('button', { name: '暂停', exact: true }).click();
   await idle();
   await expect(card).toHaveClass(/paused/);
@@ -159,8 +255,8 @@ try {
   await expect(card).toHaveClass(/budget_limited/, { timeout: 60000 });
   await idle();
   await card.getByRole('button', { name: '调整上限并继续', exact: true }).click();
-  const budget = page.getByRole('dialog', { name: '调整上限并继续', exact: true });
-  await expect(budget.locator('details')).toHaveAttribute('open', '');
+  const budget = page.getByRole('group', { name: 'Goal 上限选择', exact: true });
+  await expect(page.getByRole('dialog')).toHaveCount(0);
   await expect(budget).toContainText('平均每次请求约');
   await budget.getByRole('combobox', { name: 'Goal 用量上限' }).selectOption('2m');
   provider.reset('complete');
@@ -168,7 +264,7 @@ try {
   await expect(card).toHaveClass(/completed/, { timeout: 60000 });
   await idle();
   assert.equal((await snapshot()).runtime.goal.tokenBudget, 2000000);
-  assert.equal(await input.inputValue(), preservedDraft);
+  assert.equal(await input.inputValue(), '');
   await clear();
   provider.reset('plan');
   await createGoal('执行三步计划并显示当前步骤');
@@ -186,12 +282,9 @@ try {
     const value = await window.desktop.invoke('bootstrap');
     return window.desktop.invoke('send', value.state.selectedSessionId, '/goal edit', [], 'steer', []);
   });
-  const slashEditDialog = page.getByRole('dialog', { name: '编辑 Goal', exact: true });
-  await expect(slashEditDialog.getByRole('textbox', { name: 'Goal 目标' })).toHaveValue(
-    '执行三步计划并显示当前步骤',
-  );
-  await slashEditDialog.getByRole('textbox', { name: 'Goal 目标' }).fill('通过命令修改后的目标');
-  await slashEditDialog.getByRole('button', { name: '保存修改' }).click();
+  await expect(input).toHaveValue('执行三步计划并显示当前步骤');
+  await input.fill('通过命令修改后的目标');
+  await page.getByRole('button', { name: '保存修改' }).click();
   await slashEdit;
   assert.equal((await snapshot()).runtime.goal.objective, '通过命令修改后的目标');
   const beforeReplacement = (await snapshot()).runtime.goal.id;
@@ -230,7 +323,7 @@ try {
   const oldSession = (await snapshot()).state.selectedSessionId;
   await page.evaluate(() => window.desktop.invoke('newSession'));
   await page.evaluate((id) => window.desktop.invoke('selectSession', id), oldSession);
-  await expect(goalButton.locator('.goal-completed-dot')).toHaveCount(1);
+  await expect(previousResult.locator('.goal-completed-dot')).toHaveCount(1);
   await expect(card).toHaveCount(0);
   const requestCount = provider.requests.length;
   const legacySnapshot = await snapshot();
@@ -279,7 +372,7 @@ try {
     timeout: 30000,
   });
   page = await app.firstWindow();
-  const restoredGoalButton = page.getByRole('button', { name: 'Goal 目标管理', exact: true });
+  const restoredGoalButton = page.getByRole('button', { name: '查看上个 Goal 结果', exact: true });
   await expect(restoredGoalButton.locator('.goal-completed-dot')).toHaveCount(1);
   await expect(page.getByRole('region', { name: 'Goal 状态' })).toHaveCount(0);
   assert.equal((await page.evaluate(() => window.desktop.invoke('bootstrap'))).runtime.connected, false);
@@ -304,6 +397,7 @@ try {
     'PASS G2 states, editing, replacement, plans, quota settings, title, budget resume, restored dot and result navigation with real Pi',
   );
 } catch (error) {
+  await fs.writeFile(path.join(output, 'goal-ui-provider.json'), JSON.stringify(provider.requests, null, 2));
   await page?.screenshot({ path: path.join(output, 'goal-failure.png'), animations: 'disabled' });
   throw error;
 } finally {
