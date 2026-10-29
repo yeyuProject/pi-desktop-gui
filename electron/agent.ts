@@ -469,6 +469,11 @@ export class AgentService extends EventEmitter {
         this.activity();
         return;
       }
+      case 'desktop_plan':
+        r.plan = record.plan;
+        if (r.plan) r.planUpdateRequest = (r.planUpdateRequest ?? 0) + 1;
+        this.publish(true);
+        return;
       case 'desktop_goal':
         r.goal = record.goal;
         if (record.open) r.goalOpenRequest = (r.goalOpenRequest ?? 0) + 1;
@@ -899,10 +904,11 @@ export class AgentService extends EventEmitter {
           this.runtime === runtime &&
           !runtime.connected &&
           !this.connecting &&
-          (transcript.goal || runtime.goal) &&
+          (transcript.goal || runtime.goal || transcript.plan || runtime.plan) &&
           (!runtime.sessionId || runtime.sessionId === sessionId)
         ) {
           runtime.sessionId = sessionId;
+          runtime.plan = transcript.plan ?? null;
           runtime.goal = transcript.goal
             ? {
                 ...transcript.goal,

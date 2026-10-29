@@ -1,3 +1,4 @@
+import { hidePlanTools } from '../lib/plan-transcript';
 import { isGoalStartMessage } from '../../shared/goal-input';
 import { useEffect, useLayoutEffect, useMemo, useRef, useState, type RefObject } from 'react';
 import type { Message, Runtime, Session } from '../../shared/types';
@@ -50,16 +51,18 @@ export function useHistory(
   const messages = useMemo(
     () =>
       hideRecoveredErrors(
-        (own && (runtime.connected || runtime.messages.length)
-          ? runtime.messages
-          : history && history.sessionId === selected?.id
-            ? history.messages
-            : empty
-        )
-          .map((message, index, all) =>
-            isGoalStartMessage(all, index) ? { ...message, goalStart: true } : message,
+        hidePlanTools(
+          (own && (runtime.connected || runtime.messages.length)
+            ? runtime.messages
+            : history && history.sessionId === selected?.id
+              ? history.messages
+              : empty
           )
-          .filter((message) => message.role !== 'custom' || message.display !== false),
+            .map((message, index, all) =>
+              isGoalStartMessage(all, index) ? { ...message, goalStart: true } : message,
+            )
+            .filter((message) => message.role !== 'custom' || message.display !== false),
+        ),
       ),
     [own, runtime.connected, runtime.messages, history, selected?.id],
   );

@@ -220,6 +220,8 @@ test('bridge publishes scoped grants, revokes them and resets them on session st
       if (name === DESKTOP_BRIDGE_COMMAND) handler = command.handler;
     },
     registerTool: () => {},
+    getActiveTools: () => ['desktop_plan'],
+    setActiveTools: () => {},
   } as any);
   if (previous === undefined) delete process.env.PI_DESKTOP_APPROVAL;
   else process.env.PI_DESKTOP_APPROVAL = previous;

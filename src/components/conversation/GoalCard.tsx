@@ -1,3 +1,4 @@
+import { planProgress } from '../../lib/plan-progress';
 import { useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { Check, ChevronDown, ChevronRight, LoaderCircle, Pause, X, CircleAlert } from 'lucide-react';
 import type { GoalAction, GoalSnapshot } from '../../../shared/goal';
@@ -120,11 +121,9 @@ export function GoalCard({
         );
   const elapsed =
     seconds === null ? '—' : `${Math.floor(seconds / 60)}:${String(seconds % 60).padStart(2, '0')}`;
-  const stepIndex = goal.plan?.findIndex((step) => step.status === 'in_progress') ?? -1;
-  const currentIndex =
-    stepIndex >= 0 ? stepIndex : (goal.plan?.findIndex((step) => step.status === 'pending') ?? -1);
-  const progress = goal.plan?.length
-    ? `步骤 ${currentIndex < 0 ? goal.plan.length : currentIndex + 1} / ${goal.plan.length} · ${currentIndex < 0 ? '步骤已完成，等待核验' : goal.plan[currentIndex].text}`
+  const steps = planProgress(goal.plan);
+  const progress = steps.total
+    ? `步骤 ${steps.index} / ${steps.total} · ${steps.done ? '步骤已完成，等待核验' : steps.text}`
     : `用时 ${elapsed}`;
   const locked = disabled || pending;
   const reason =

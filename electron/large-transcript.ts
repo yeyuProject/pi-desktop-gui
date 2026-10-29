@@ -1,3 +1,4 @@
+import { DESKTOP_PLAN_ENTRY_TYPE, readPlanView } from './plan-state';
 import fs from 'node:fs/promises';
 import { createReadStream } from 'node:fs';
 import { setImmediate as yieldToEvents } from 'node:timers/promises';
@@ -5,7 +6,15 @@ import type { Message } from '../shared/types';
 import { sessionUsage } from './pi/session-usage';
 import { DESKTOP_GOAL_ENTRY_TYPE, readGoalView } from './goal-state';
 
-type Entry = { id: string; parentId?: string; offset: number; length: number; type: string; goal: boolean };
+type Entry = {
+  id: string;
+  parentId?: string;
+  offset: number;
+  length: number;
+  type: string;
+  goal: boolean;
+  plan: boolean;
+};
 /** Index offsets without retaining message bodies, then load a bounded preview of the active branch. */
 export async function readLargeTranscript(file: string) {
   const byId = new Map<string, Entry>();
@@ -39,6 +48,7 @@ export async function readLargeTranscript(file: string) {
         type: row.type,
         offset: start,
         length: bytes.length,
+        plan: row.type === 'custom' && row.customType === DESKTOP_PLAN_ENTRY_TYPE,
         goal: row.type === 'custom' && row.customType === DESKTOP_GOAL_ENTRY_TYPE,
       };
       byId.set(row.id, last);
@@ -72,8 +82,10 @@ export async function readLargeTranscript(file: string) {
   let bytes = 0,
     limited = false;
   let goalEntry: Entry | undefined;
+  let planEntry: Entry | undefined;
   while (last && !seen.has(last.id)) {
     seen.add(last.id);
+    if (!planEntry && last.plan) planEntry = last;
     if (!goalEntry && last.goal) goalEntry = last;
     if (!limited && ['message', 'custom_message', 'branch_summary'].includes(last.type)) {
       if (bytes + last.length > 16 * 1024 * 1024) {
@@ -91,6 +103,8 @@ export async function readLargeTranscript(file: string) {
   }
   const messages: Message[] = [];
   let goalView: ReturnType<typeof readGoalView> = {};
+  let planView: ReturnType<typeof readPlanView> = { plan: null };
+  if (planEntry) branch.push(planEntry);
   if (goalEntry) branch.push(goalEntry);
   const handle = await fs.open(file, 'r');
   try {
@@ -104,6 +118,7 @@ export async function readLargeTranscript(file: string) {
       }
       const row = JSON.parse(buffer.toString('utf8'));
       if (row.id !== entry.id) throw new Error('会话文件在读取时发生变化，请重新打开');
+      if (entry.plan) planView = readPlanView([row]);
       if (entry.goal) goalView = readGoalView([row]);
       if (row.type === 'message' && row.message) messages.push(row.message);
       else if (row.type === 'custom_message')
@@ -134,10 +149,14 @@ export async function readLargeTranscript(file: string) {
     messages,
     stats: { tokens, cost },
     ...goalView,
+    ...planView,
     warning:
       (limited
         ? '此会话较大，仅显示当前分支最近的内容（最多 16 MiB）。完整历史仍保留，可导出或在 Pi 终端查看。'
         : '此会话较大，已按当前分支读取。完整历史仍保留。') +
-      (goalView.warning ? '\n' + goalView.warning : ''),
+      [goalView.warning, planView.warning]
+        .filter(Boolean)
+        .map((warning) => '\n' + warning)
+        .join(''),
   };
 }

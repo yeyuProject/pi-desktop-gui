@@ -1,3 +1,4 @@
+import { verifyPlanUI } from '../tests/support/plan-ui.mjs';
 import { _electron as electron } from 'playwright';
 import assert from 'node:assert/strict';
 import fs from 'node:fs/promises';
@@ -655,3 +656,5 @@ try {
     console.warn('Cleanup after the original failure:', cleanupError.message);
   }
 }
+
+await verifyPlanUI({ output });

@@ -1,3 +1,4 @@
+import type { PlanSnapshot } from './plan';
 import type { GoalDraft, GoalStartInput } from './goal-input';
 import type { AppDialog, AppMenuId } from './app-dialogs';
 import type { ApprovalMode, ApprovalRequest, ApprovalGrant } from './approval';
@@ -237,6 +238,8 @@ export interface ProviderInfo {
 }
 export interface Runtime {
   goal?: GoalSnapshot | null;
+  plan?: PlanSnapshot | null;
+  planUpdateRequest?: number;
   goalOpenRequest?: number;
   sessionId?: string;
   status: RunStatus;

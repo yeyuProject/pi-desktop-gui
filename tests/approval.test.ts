@@ -18,6 +18,8 @@ function bridge(mode: 'confirm' | 'readonly') {
       },
       registerCommand: () => {},
       registerTool: () => {},
+      getActiveTools: () => ['desktop_plan'],
+      setActiveTools: () => {},
       getAllTools: () => [{ name: 'external_writer', annotations: { readOnlyHint: true } }],
     } as never);
   } finally {
@@ -117,4 +119,9 @@ test('manual ! commands obey read-only mode before the shell starts', async () =
   const response = await handler({ command: 'echo blocked', excludeFromContext: false, cwd: '.' }, {});
   assert.notEqual(response?.result?.exitCode, 0);
   assert.match(response.result.output, /只读/);
+});
+
+test('desktop_plan only writes session metadata and never requires approval', () => {
+  for (const mode of ['auto', 'confirm', 'readonly'] as const)
+    assert.equal(decide(mode, 'desktop_plan'), 'allow');
 });

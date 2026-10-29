@@ -1,3 +1,4 @@
+import { hidePlanTools } from '../src/lib/plan-transcript';
 import * as goalInput from '../shared/goal-input';
 import * as goal from '../shared/goal';
 import test, { type TestContext } from 'node:test';
@@ -199,6 +200,7 @@ function harness(
     '../../shared/goal': goal,
     '../lib/format': { readableError },
     '../lib/conversation-layout': { hideRecoveredErrors },
+    '../lib/plan-transcript': { hidePlanTools },
     '../../shared/pi-version': { PI_SOURCE_URL: '' },
   };
   const require = (id: string) => {

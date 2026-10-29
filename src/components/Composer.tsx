@@ -1,3 +1,4 @@
+import { PlanCard } from './conversation/PlanCard';
 import { goalCommandPreview } from '../../shared/goal-input';
 import { MAX_GOAL_OBJECTIVE_LENGTH } from '../../shared/goal';
 import { GoalBudgetPicker } from './GoalBudgetPicker';
@@ -359,6 +360,17 @@ export function Composer(props: ComposerProps) {
           openProviders={() => setFeatureTab('providers')}
           edit={() => editGoal(goal)}
           replace={() => openGoalComposer(true)}
+        />
+      )}
+      {!goalView.visible && ownRuntime && runtime.plan && (
+        <PlanCard
+          key={`${selected?.id}:${runtime.plan.turnId}`}
+          plan={runtime.plan}
+          running={ownRunning}
+          updateRequest={runtime.planUpdateRequest}
+          expanded={props.expanded}
+          toggle={props.toggleTool}
+          composing={goalMode}
         />
       )}
       <div

@@ -44,6 +44,7 @@ export function decide(
       'desktop_goal_get',
       'desktop_goal_update',
       'desktop_goal_plan',
+      'desktop_plan',
       'desktop_goal_complete',
       'desktop_goal_blocked',
     ].includes(toolName) ||

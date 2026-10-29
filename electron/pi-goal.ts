@@ -1,10 +1,10 @@
+import { validatePlanSteps } from '../shared/plan';
 import type { ImageContent } from '@earendil-works/pi-ai';
 import { randomUUID } from 'node:crypto';
 import {
   goalRequestTokens,
   validateGoalAction,
   validateGoalObjective,
-  validateGoalPlan,
   type GoalAction,
 } from '../shared/goal';
 import { classifyModelError } from '../shared/errors';
@@ -407,7 +407,7 @@ export function registerDesktopGoal(pi: ExtensionAPI) {
     exposure: 'model-only',
     async execute(_id, params, _signal, _onUpdate, ctx) {
       const current = requireCurrent(params);
-      validateGoalPlan(params.steps);
+      validatePlanSteps(params.steps);
       save({ ...current, plan: params.steps.map((step) => ({ ...step, text: step.text.trim() })) }, ctx);
       return { content: [{ type: 'text', text: JSON.stringify(goal!.plan) }], details: goalSnapshot(goal) };
     },
@@ -564,6 +564,7 @@ export function registerDesktopGoal(pi: ExtensionAPI) {
     },
   });
   return {
+    isActive: () => goal?.status === 'active',
     action: async (value: unknown, ctx: ExtensionContext) => {
       validateGoalAction(value);
       if (value.action !== 'start' && goal?.id !== value.goalId)

@@ -651,7 +651,10 @@ export function useWorkbench() {
     }),
     [],
   );
-  const liveTools = ownRuntime ? runtime.tools : noTools;
+  const liveTools = useMemo(
+    () => (ownRuntime ? runtime.tools.filter((tool) => tool.name !== 'desktop_plan') : noTools),
+    [ownRuntime, runtime.tools],
+  );
   const liveToolIdKey = JSON.stringify(liveTools.map((t) => t.id));
   const liveToolIds = useMemo(() => new Set<string>(JSON.parse(liveToolIdKey)), [liveToolIdKey]);
   const historyTools = useRef(new WeakMap<Message, { call: ContentBlock | undefined; tool: ToolActivity }>());

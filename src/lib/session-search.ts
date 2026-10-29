@@ -119,7 +119,10 @@ export class SessionSearch {
           for (const block of message.content)
             if (block.type === 'toolCall' && block.id) calls.set(block.id, block);
         const id = message.role === 'toolResult' ? (message.toolCallId ?? '') : undefined;
-        if (id !== undefined) seen.add(id);
+        if (id !== undefined) {
+          seen.add(id);
+          if ([message.toolName, byId.get(id)?.name, calls.get(id)?.name].includes('desktop_plan')) continue;
+        }
         for (const part of this.parts(
           message,
           id === undefined ? undefined : byId.get(id),
@@ -128,7 +131,7 @@ export class SessionSearch {
           add(part, index);
       }
       for (const tool of tools) {
-        if (seen.has(tool.id)) continue;
+        if (tool.name === 'desktop_plan' || seen.has(tool.id)) continue;
         let cached = this.tools.get(tool);
         if (!cached) {
           cached = part(

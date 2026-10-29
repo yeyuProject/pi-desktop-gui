@@ -1,3 +1,5 @@
+import { readPlanView } from './plan-state';
+import type { PlanSnapshot } from '../shared/plan';
 import fs from 'node:fs/promises';
 import path from 'node:path';
 import { createHash, randomUUID } from 'node:crypto';
@@ -617,6 +619,7 @@ type Transcript = {
   stats: SessionUsage;
   warning?: string;
   goal?: GoalSnapshot;
+  plan?: PlanSnapshot | null;
 };
 const transcriptCache = new Map<string, { stamp: string; bytes: number; value: Transcript }>();
 const transcriptReads = new Map<string, Promise<Transcript>>();
@@ -694,9 +697,13 @@ async function readSessionFileUncached(file: string): Promise<Transcript> {
     cursor = byId.get(cursor.parentId);
   }
   branch.reverse();
+  const goalView = readGoalView(branch);
+  const planView = readPlanView(branch);
   return {
     cwd: header.cwd,
-    ...readGoalView(branch),
+    ...goalView,
+    ...planView,
+    warning: [goalView.warning, planView.warning].filter(Boolean).join('\n') || undefined,
     name: entries.findLast((e) => e.type === 'session_info')?.name,
     messages: branch.flatMap((e): Message[] => {
       if (e.type === 'message' && e.message) return [e.message];

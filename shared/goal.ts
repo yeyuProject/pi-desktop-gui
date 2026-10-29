@@ -1,10 +1,9 @@
+import type { PlanStep as GoalStep } from './plan';
+
 export const MAX_GOAL_OBJECTIVE_LENGTH = 4000;
 export const GOAL_BUDGET_PRESETS = ['', '500k', '2m', '5m'] as const;
 export type GoalStatus = 'active' | 'paused' | 'blocked' | 'budget_limited' | 'usage_limited' | 'completed';
-export interface GoalStep {
-  text: string;
-  status: 'pending' | 'in_progress' | 'completed';
-}
+export type { PlanStep as GoalStep } from './plan';
 
 export interface GoalSnapshot {
   id: string;
@@ -68,23 +67,6 @@ export function validateGoalObjective(objective: unknown): asserts objective is 
   if (typeof objective !== 'string' || !objective.trim()) throw new Error('请输入需要完成的目标。');
   if (objective.length > MAX_GOAL_OBJECTIVE_LENGTH)
     throw new Error('目标不能超过 4000 字；请把详细要求写进项目文件，并在目标里引用文件路径。');
-}
-
-export function validateGoalPlan(steps: unknown): asserts steps is GoalStep[] {
-  if (
-    !Array.isArray(steps) ||
-    steps.length > 12 ||
-    steps.some(
-      (step) =>
-        !step ||
-        typeof step.text !== 'string' ||
-        !step.text.trim() ||
-        step.text.length > 4000 ||
-        !['pending', 'in_progress', 'completed'].includes(step.status),
-    ) ||
-    steps.filter((step) => step.status === 'in_progress').length > 1
-  )
-    throw new Error('计划最多 12 项，每项需要文字和有效状态，同时只能有一项正在执行。');
 }
 
 /** Pi input already excludes cache reads. Use this basis for Goal and its request estimate. */

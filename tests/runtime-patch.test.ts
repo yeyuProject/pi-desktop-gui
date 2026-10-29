@@ -153,3 +153,25 @@ test('unchanged user image bodies are encoded once while the reply streams', () 
     { type: 'image', mimeType: 'image/png', data: 'opaque-image' },
   ]);
 });
+
+test('plan scalar patches update, clear, resync and cannot leak across sessions', () => {
+  const { s, view, patches } = service();
+  s.runtime.sessionId = 'plan-session';
+  s.runtime.plan = { turnId: 123, steps: [{ text: 'work', status: 'pending' }] };
+  s.publish(true);
+  assert.deepEqual(view().plan, s.runtime.plan);
+  s.runtime.plan.steps[0].status = 'completed';
+  s.runtime.planUpdateRequest = 1;
+  s.publish(true);
+  assert.equal(view().plan?.steps[0].status, 'completed');
+  s.resync();
+  s.publish(true);
+  assert.deepEqual(patches.at(-1)?.plan, s.runtime.plan);
+  s.runtime.plan = null;
+  s.publish(true);
+  assert.equal(view().plan, null);
+  s.runtime = { ...emptyRuntime(), sessionId: 'other' };
+  s.publish(true);
+  assert.equal(view().plan, undefined);
+  assert.equal(view().planUpdateRequest, undefined);
+});

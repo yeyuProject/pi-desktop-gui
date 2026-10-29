@@ -1,5 +1,6 @@
+import { validatePlanSteps } from '../shared/plan';
 import type { SessionEntry } from '@earendil-works/pi-coding-agent';
-import { validateGoalPlan, type GoalSnapshot } from '../shared/goal';
+import { type GoalSnapshot } from '../shared/goal';
 
 export const DESKTOP_GOAL_ENTRY_TYPE = 'desktop-goal';
 export const MAX_GOAL_NO_PROGRESS_RUNS = 3;
@@ -80,7 +81,7 @@ export function readGoalState(entries: readonly SessionEntry[]): DesktopGoalStat
     (!Array.isArray(goal.references) || !goal.references.every((v) => typeof v === 'string'))
   )
     throw invalid();
-  if (goal.plan !== undefined) validateGoalPlan(goal.plan);
+  if (goal.plan !== undefined) validatePlanSteps(goal.plan);
   return structuredClone(goal) as unknown as DesktopGoalState;
 }
 export interface GoalRunActivity {

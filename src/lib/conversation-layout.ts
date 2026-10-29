@@ -18,7 +18,7 @@ export function placeRuntimeTools(messages: Message[], tools: ToolActivity[]) {
   const afterMessage = new Map<number, ToolActivity[]>();
   const trailing: ToolActivity[] = [];
   for (const tool of tools) {
-    if (results.has(tool.id)) continue;
+    if (tool.name === 'desktop_plan' || results.has(tool.id)) continue;
     let id: string | undefined = tool.id;
     const seen = new Set<string>();
     while (id && !messageForTool.has(id) && !seen.has(id)) {

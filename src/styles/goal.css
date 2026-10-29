@@ -221,3 +221,38 @@
 .composer .goal-send-button {
   padding: 0 10px;
 }
+
+.plan-card .goal-bar {
+  font-size: calc(11px * var(--font-scale));
+}
+.plan-summary {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.plan-remaining {
+  flex-shrink: 0;
+  color: var(--muted);
+}
+.plan-icon {
+  flex-shrink: 0;
+  color: var(--muted);
+}
+.plan-card .goal-details {
+  font-size: calc(12px * var(--font-scale));
+}
+.plan-card .goal-plan .plan-step-status,
+.plan-card .goal-plan .plan-step-status span {
+  color: var(--muted);
+  font-size: calc(11px * var(--font-scale));
+}
+.plan-completed {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 24px;
+  height: 24px;
+  margin-bottom: 6px;
+}

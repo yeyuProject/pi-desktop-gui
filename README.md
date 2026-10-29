@@ -50,6 +50,7 @@ Sessions and workspaces stay on your machine. Model requests go to whichever pro
 - **Quick chat or full project** — Start a standalone chat without a repository, or open a project to get the file tree, Git changes and snapshots.
 - **Concurrent conversations** — Each connected chat has its own Pi process. Switch chats while tasks continue. Model and reasoning changes apply to the next new user task; tool continuations and mid-run additions retain the current settings. A double <kbd>Esc</kbd> stops only the current chat.
 - **Steer while it runs** — Add instructions mid-run (steer) or queue follow-ups within each conversation.
+- **Task plans** — When Pi creates a plan for a multi-step task, a compact bar above the composer shows the current step. Expand the checklist, keep its view across chats and restarts, and recover the active branch’s plan. Finished plans shrink to a dot after eight seconds; unfinished ones show the remaining count. Planning depends on the model, and simple tasks keep the existing layout.
 - **Built-in Goals** — Start a Goal directly from the composer, keeping files, images, pasted snippets and conversation quotes. Inline budget controls and a separate objective editor preserve your unsent drafts across sessions and restarts. Keep working without a continuation-count limit. A compact bar shows a plan or active elapsed time, with pause, resume and objective editing. Completion requires a requirement-by-requirement audit; optional usage limits allow a bounded wrap-up. Goal usage excludes cache hits, and provider quota failures have their own state. Completed Goals collapse after eight seconds; saved active Goals reopen paused. `/goal edit` and other commands remain available. See [Goal controls and limits](docs/goal.md).
 - **Clear retry progress** — See retry backoff and response wait time, cancel an active retry request, and distinguish recovered attempts from failures in the run log. Consecutive empty error replies show the latest failure once, with earlier attempts expandable.
 - **Keyboard-first** — Global search across sessions, in-session find, and shortcuts for every panel.
@@ -65,6 +66,8 @@ Sessions and workspaces stay on your machine. Model requests go to whichever pro
     <td align="center"><sub>Light and dark themes</sub></td>
   </tr>
 </table>
+
+<p align="center"><img src="docs/assets/screenshots/task-plan.png" width="900" alt="Task plan above the composer with completed, active and pending steps" /></p>
 
 See the [release notes](docs/releases/) for what changed in each version.
 

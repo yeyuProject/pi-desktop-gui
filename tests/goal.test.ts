@@ -1,3 +1,4 @@
+import { validatePlanSteps } from '../shared/plan';
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs/promises';
@@ -19,12 +20,7 @@ import type {
 } from '@earendil-works/pi-coding-agent';
 import type { AssistantMessage, ToolCall } from '@earendil-works/pi-ai';
 import { goalContext } from '../electron/goal-context';
-import {
-  goalNotificationTitle,
-  goalRequestTokens,
-  validateGoalObjective,
-  validateGoalPlan,
-} from '../shared/goal';
+import { goalNotificationTitle, goalRequestTokens, validateGoalObjective } from '../shared/goal';
 import { registerDesktopGoal } from '../electron/pi-goal';
 import { GOAL_BUDGET_PRESETS, parseGoalBudget, type GoalSnapshot } from '../shared/goal';
 import {
@@ -613,7 +609,7 @@ test('plan constraints, branch persistence, revision checks and completion audit
   assert.deepEqual(restored.state()!.plan, params.steps);
   assert.equal(restored.state()!.status, 'paused');
   assert.throws(
-    () => validateGoalPlan(Array.from({ length: 13 }, () => ({ text: 'x', status: 'pending' }))),
+    () => validatePlanSteps(Array.from({ length: 13 }, () => ({ text: 'x', status: 'pending' }))),
     /最多 12/,
   );
   await assert.rejects(
