@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import React from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
-import { THEMES } from '../shared/window-theme';
+import { THEMES, UI_STYLES, STYLE_META, styleTheme } from '../shared/window-theme';
 
 // Render the real components without a browser. This checks DOM/name contracts,
 // not focus, visibility, or native Electron interactions (covered by the UI script).
@@ -27,37 +27,51 @@ const once = (labels: string[], expected: string) =>
   assert.equal(labels.filter((label) => label === expected).length, 1, `Expected unique ${expected}`);
 
 test('real appearance dialog has two Close controls, but one scoped footer Close and each exact theme label', () => {
-  for (const theme of THEMES) {
-    const html = renderToStaticMarkup(
-      React.createElement(SettingsModal, {
-        settingsOpen: true,
-        settingsTab: 'appearance',
-        prefs: {
-          theme,
-          fontScale: 1,
-          sidebarWidth: 240,
-          inspectorWidth: 380,
-          inspectorSplit: 50,
-          editorPath: '',
-        },
-        runtime: { status: 'idle' },
-        setSettingsOpen() {},
-        setSettingsTab() {},
-        setPrefs() {},
-        attempt: async () => {},
-        saveSettings() {},
-        chooseSettingPath() {},
-        updatePanel: null,
-      } as unknown as React.ComponentProps<typeof SettingsModal>),
-    );
-    assert.equal((html.match(/role="dialog"/g) ?? []).length, 1);
-    assert.match(html, /role="dialog" aria-modal="true" aria-label="设置"/);
-    assert.equal(names(html).filter((name) => name === '关闭').length, 2);
-    once(names(section(html, 'header')), '关闭');
-    once(names(section(html, 'footer')), '关闭');
-    once(names(section(html, 'nav')), '外观与编辑器');
-    for (const label of ['浅色', '深色', '跟随系统', '护眼米黄', '豆沙绿', '深蓝']) once(names(html), label);
-  }
+  for (const uiStyle of UI_STYLES)
+    for (const theme of THEMES.filter((theme) => styleTheme(theme, uiStyle) === theme)) {
+      const html = renderToStaticMarkup(
+        React.createElement(SettingsModal, {
+          settingsOpen: true,
+          settingsTab: 'appearance',
+          prefs: {
+            theme,
+            uiStyle,
+            fontScale: 1,
+            sidebarWidth: 240,
+            inspectorWidth: 380,
+            inspectorSplit: 50,
+            editorPath: '',
+          },
+          runtime: { status: 'idle' },
+          setSettingsOpen() {},
+          setSettingsTab() {},
+          setPrefs() {},
+          attempt: async () => {},
+          saveSettings() {},
+          chooseSettingPath() {},
+          updatePanel: null,
+        } as unknown as React.ComponentProps<typeof SettingsModal>),
+      );
+      assert.equal((html.match(/role="dialog"/g) ?? []).length, 1);
+      assert.match(html, /role="dialog" aria-modal="true" aria-label="设置"/);
+      assert.equal(names(html).filter((name) => name === '关闭').length, 2);
+      once(names(section(html, 'header')), '关闭');
+      once(names(section(html, 'footer')), '关闭');
+      once(names(section(html, 'nav')), '外观与编辑器');
+      for (const style of UI_STYLES) once(names(html), STYLE_META[style].label);
+      for (const [key, label] of Object.entries({
+        light: '浅色',
+        dark: '深色',
+        system: '跟随系统',
+        sepia: '护眼米黄',
+        green: '豆沙绿',
+        navy: '深蓝',
+      })) {
+        if (styleTheme(key as typeof theme, uiStyle) === key)
+          once(names(html), STYLE_META[uiStyle].themeLabels?.[key as typeof theme] ?? label);
+        else assert.ok(!names(html).includes(label));
+      }
+    }
 });
 
 test('real titlebar menu labels are unique exact names and macOS has no renderer menu', () => {

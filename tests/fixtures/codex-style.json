@@ -1,0 +1,132 @@
+{
+  "light": {
+    "session": {
+      "color": "rgb(13, 13, 13)",
+      "background-color": "rgb(232, 232, 232)",
+      "border-color": "rgb(13, 13, 13)",
+      "box-shadow": "none",
+      "border-radius": "8px"
+    },
+    "send": {
+      "color": "rgb(255, 255, 255)",
+      "background-color": "rgb(13, 13, 13)",
+      "border-color": "rgb(255, 255, 255)",
+      "box-shadow": "none",
+      "border-radius": "10px"
+    },
+    "added": {
+      "color": "rgb(13, 13, 13)",
+      "background-color": "color(srgb 0.0862745 0.439216 0.184314 / 0.09)",
+      "border-color": "rgb(13, 13, 13)",
+      "box-shadow": "none",
+      "border-radius": "0px"
+    },
+    "removed": {
+      "color": "rgb(13, 13, 13)",
+      "background-color": "color(srgb 0.705882 0.137255 0.0941176 / 0.08)",
+      "border-color": "rgb(13, 13, 13)",
+      "box-shadow": "none",
+      "border-radius": "0px"
+    },
+    "connection": {
+      "color": "rgb(13, 13, 13)",
+      "background-color": "rgb(22, 112, 47)",
+      "border-color": "rgb(13, 13, 13)",
+      "box-shadow": "none",
+      "border-radius": "50%"
+    },
+    "tool": {
+      "color": "rgb(13, 13, 13)",
+      "background-color": "rgba(0, 0, 0, 0)",
+      "border-color": "rgb(13, 13, 13)",
+      "box-shadow": "none",
+      "border-radius": "0px"
+    },
+    "goal": {
+      "color": "rgb(13, 13, 13)",
+      "background-color": "rgb(255, 255, 255)",
+      "border-color": "rgb(231, 231, 231)",
+      "box-shadow": "none",
+      "border-radius": "7px"
+    },
+    "user": {
+      "color": "rgb(13, 13, 13)",
+      "background-color": "rgb(243, 243, 243)",
+      "border-color": "rgb(13, 13, 13)",
+      "box-shadow": "none",
+      "border-radius": "12px"
+    },
+    "primary": {
+      "color": "rgb(255, 255, 255)",
+      "background-color": "rgb(13, 13, 13)",
+      "border-color": "rgb(13, 13, 13)",
+      "box-shadow": "none",
+      "border-radius": "8px"
+    }
+  },
+  "dark": {
+    "session": {
+      "color": "rgb(221, 221, 221)",
+      "background-color": "rgb(45, 45, 45)",
+      "border-color": "rgb(221, 221, 221)",
+      "box-shadow": "none",
+      "border-radius": "8px"
+    },
+    "send": {
+      "color": "rgb(13, 13, 13)",
+      "background-color": "rgb(242, 242, 242)",
+      "border-color": "rgb(13, 13, 13)",
+      "box-shadow": "none",
+      "border-radius": "10px"
+    },
+    "added": {
+      "color": "rgb(221, 221, 221)",
+      "background-color": "color(srgb 0.341176 0.670588 0.352941 / 0.09)",
+      "border-color": "rgb(221, 221, 221)",
+      "box-shadow": "none",
+      "border-radius": "0px"
+    },
+    "removed": {
+      "color": "rgb(221, 221, 221)",
+      "background-color": "color(srgb 0.94902 0.466667 0.478431 / 0.08)",
+      "border-color": "rgb(221, 221, 221)",
+      "box-shadow": "none",
+      "border-radius": "0px"
+    },
+    "connection": {
+      "color": "rgb(221, 221, 221)",
+      "background-color": "rgb(87, 171, 90)",
+      "border-color": "rgb(221, 221, 221)",
+      "box-shadow": "none",
+      "border-radius": "50%"
+    },
+    "tool": {
+      "color": "rgb(221, 221, 221)",
+      "background-color": "rgba(0, 0, 0, 0)",
+      "border-color": "rgb(221, 221, 221)",
+      "box-shadow": "none",
+      "border-radius": "0px"
+    },
+    "goal": {
+      "color": "rgb(221, 221, 221)",
+      "background-color": "rgb(33, 33, 33)",
+      "border-color": "rgb(42, 42, 42)",
+      "box-shadow": "none",
+      "border-radius": "7px"
+    },
+    "user": {
+      "color": "rgb(221, 221, 221)",
+      "background-color": "rgb(42, 42, 42)",
+      "border-color": "rgb(221, 221, 221)",
+      "box-shadow": "none",
+      "border-radius": "12px"
+    },
+    "primary": {
+      "color": "rgb(13, 13, 13)",
+      "background-color": "rgb(242, 242, 242)",
+      "border-color": "rgb(242, 242, 242)",
+      "box-shadow": "none",
+      "border-radius": "8px"
+    }
+  }
+}

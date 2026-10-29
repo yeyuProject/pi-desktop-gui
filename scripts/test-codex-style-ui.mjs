@@ -9,8 +9,9 @@ import path from 'node:path';
 import { startReadmeServer } from './readme-server.mjs';
 import { workbenchFixture } from '../tests/support/workbench-fixture.mjs';
 
-const record = process.argv.includes('--record-classic');
-const baselineFile = path.resolve('tests/fixtures/classic-style.json');
+const baselineStyle = process.argv.includes('--record-codex') ? 'codex' : 'classic';
+const record = process.argv.includes('--record-' + baselineStyle);
+const baselineFile = path.resolve(`tests/fixtures/${baselineStyle}-style.json`);
 const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'pi-style-ui-'));
 const entry = path.join(dir, 'main.cjs');
 await fs.writeFile(
@@ -29,7 +30,6 @@ app.whenReady().then(() => {
 const server = await startReadmeServer(process.env.PI_STYLE_DIST || 'dist');
 let app, page;
 const errors = [];
-const baseline = {};
 const output = path.resolve('test-results');
 await fs.mkdir(output, { recursive: true });
 const report = { contrast: {}, screenshots: [], overflow: [] };
@@ -233,17 +233,10 @@ async function load(options) {
   await page.locator('aside').getByText('src/auth/validate.ts').click();
   await page.locator('.diff-row.added').first().waitFor();
 }
-try {
-  app = await electron.launch({ args: [entry], colorScheme: null });
-  page = await app.firstWindow();
-  page.setDefaultTimeout(15000);
-  await page.emulateMedia({ reducedMotion: 'reduce' });
-  page.on('pageerror', (error) => errors.push(error.message));
-  await page.addInitScript({
-    content: `(${workbenchFixture.toString()})(JSON.parse(new URLSearchParams(location.search).get('fixture') || '{}'))`,
-  });
+async function collectBaseline(uiStyle) {
+  const baseline = {};
   for (const theme of ['light', 'dark']) {
-    await load({ theme, goal: true });
+    await load({ theme, uiStyle, goal: true });
     await page.getByRole('textbox', { name: '任务输入' }).fill('继续检查');
     await expect(page.locator('.send-button')).toBeEnabled();
     await page.mouse.move(1, 1);
@@ -253,14 +246,31 @@ try {
     await page.getByRole('button', { name: '设置', exact: true }).click();
     baseline[theme].primary = await computed('.modal .primary');
   }
+  return baseline;
+}
+try {
+  app = await electron.launch({ args: [entry], colorScheme: null });
+  page = await app.firstWindow();
+  page.setDefaultTimeout(15000);
+  await page.emulateMedia({ reducedMotion: 'reduce' });
+  page.on('pageerror', (error) => errors.push(error.message));
+  await page.addInitScript({
+    content: `(${workbenchFixture.toString()})(JSON.parse(new URLSearchParams(location.search).get('fixture') || '{}'))`,
+  });
+  const baseline = await collectBaseline(baselineStyle);
   assert.deepEqual(errors, []);
   if (record) {
     await fs.mkdir(path.dirname(baselineFile), { recursive: true });
     await fs.writeFile(baselineFile, JSON.stringify(baseline, null, 2) + '\n');
-    console.log('Recorded classic light/dark computed styles from the unchanged renderer.');
+    console.log(`Recorded ${baselineStyle} light/dark computed styles from the unchanged renderer.`);
   } else {
     assert.deepEqual(baseline, JSON.parse(await fs.readFile(baselineFile, 'utf8')));
     console.log('PASS classic light/dark computed styles remain identical.');
+    assert.deepEqual(
+      await collectBaseline('codex'),
+      JSON.parse(await fs.readFile('tests/fixtures/codex-style.json', 'utf8')),
+    );
+    console.log('PASS Codex light/dark computed styles remain identical.');
     for (const [theme, mode] of [
       ['light', 'day'],
       ['dark', 'night'],
@@ -285,7 +295,9 @@ try {
         .getByRole('button', { name: '关闭', exact: true })
         .click();
 
-      await page.keyboard.press(process.platform === 'darwin' ? 'Meta+k' : 'Control+k');
+      // Use the fixture's platform, which can differ from the Electron host.
+      const platform = await page.evaluate(() => window.desktop.platform);
+      await page.keyboard.press(platform === 'darwin' ? 'Meta+k' : 'Control+k');
       await page.getByRole('textbox', { name: '搜索项目和会话' }).waitFor();
       await screenshot(mode, 'command');
       await page.keyboard.press('Escape');

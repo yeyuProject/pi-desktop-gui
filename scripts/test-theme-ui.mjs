@@ -9,6 +9,7 @@ import path from 'node:path';
 import { Store } from '../electron/store.ts';
 import { busy } from '../shared/types.ts';
 import { hexColor } from './theme-colors.mjs';
+import { UI_STYLES, STYLE_META, stylePalettes, windowTheme } from '../shared/window-theme.ts';
 
 const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'pi-theme-ui-'));
 const output = path.resolve('test-results');
@@ -34,15 +35,25 @@ Object.assign(store.state.settings, {
 });
 await store.save();
 
-const palette = {
-  light: { background: '#ffffff', color: '#f5f7f6', symbolColor: '#18221f', height: 36 },
-  dark: { background: '#121816', color: '#141b18', symbolColor: '#e4ebe8', height: 36 },
-  sepia: { background: '#f7f1e3', color: '#efe6d2', symbolColor: '#3a3125', height: 36 },
-  green: { background: '#dcebdc', color: '#cfe2d0', symbolColor: '#1c2b20', height: 36 },
-  navy: { background: '#0f1828', color: '#0c1422', symbolColor: '#e2e9f3', height: 36 },
-  'codex-light': { background: '#ffffff', color: '#f9f9f9', symbolColor: '#0d0d0d', height: 36 },
-  'codex-dark': { background: '#181818', color: '#131313', symbolColor: '#dddddd', height: 36 },
-};
+const basicStyles = UI_STYLES.filter((style) => STYLE_META[style].basicThemesOnly);
+const appearanceTokens = {};
+for (const style of UI_STYLES) {
+  const css = await fs.readFile(`src/styles/${stylePalettes[style] ? style : 'base'}.css`, 'utf8');
+  appearanceTokens[style] = {};
+  for (const theme of ['light', 'dark']) {
+    const selector = stylePalettes[style]
+      ? `:root[data-style='${style}'][data-theme='${theme}']`
+      : theme === 'light'
+        ? ':root {'
+        : ":root[data-theme='dark']";
+    const start = css.indexOf(selector);
+    assert.ok(start >= 0, `${style} ${theme} CSS tokens`);
+    const block = css.slice(css.indexOf('{', start), css.indexOf('}', start));
+    appearanceTokens[style][theme] = Object.fromEntries(
+      [...block.matchAll(/--([\w-]+):\s*([^;]+);/g)].map((match) => [match[1], match[2]]),
+    );
+  }
+}
 const rgb = (hex) => `rgb(${[1, 3, 5].map((i) => parseInt(hex.slice(i, i + 2), 16)).join(', ')})`;
 const errors = [];
 const report = {
@@ -215,7 +226,7 @@ async function checkTheme(source, { changed = false, style = 'classic' } = {}) {
   assert.equal(native.source, nativeSource, 'Saved appearance must control Electron nativeTheme');
   if (source !== 'system') assert.equal(native.dark, nativeSource === 'dark');
   const effective = source === 'system' ? (native.dark ? 'dark' : 'light') : source;
-  const expected = palette[(style === 'codex' ? 'codex-' : '') + effective];
+  const expected = windowTheme(native.dark, effective, style);
   // Electron's native background has ARGB alpha order; CSS hex tokens below use RGBA.
   assert.equal(hexColor(native.background, 'electron'), hexColor(expected.background));
   await page.waitForFunction(
@@ -243,7 +254,7 @@ async function checkTheme(source, { changed = false, style = 'classic' } = {}) {
   assert.equal(hexColor(renderer.background), hexColor(expected.background));
   assert.equal(
     hexColor(renderer.accent),
-    hexColor(style === 'codex' ? (native.dark ? '#339cff' : '#005fcc') : native.dark ? '#74c7a3' : '#1f6b52'),
+    hexColor(appearanceTokens[style][native.dark ? 'dark' : 'light'].accent),
   );
   if (source === 'navy') assert.equal(hexColor(renderer.syntaxKeyword), hexColor('#c99cdf'));
   if (process.platform !== 'darwin') {
@@ -273,17 +284,18 @@ async function openAppearance() {
 async function chooseTheme(source, style = 'classic') {
   const settings = await openAppearance();
   const callsBefore = await app.evaluate(() => globalThis.themeUi.calls.length);
-  await settings.getByRole('button', { name: style === 'codex' ? 'Codex' : 'Pi 经典', exact: true }).click();
+  await settings.getByRole('button', { name: STYLE_META[style].label, exact: true }).click();
   await settings
     .locator('.theme-options')
     .getByRole('button', {
       name: {
-        light: style === 'codex' ? '白天' : '浅色',
-        dark: style === 'codex' ? '夜晚' : '深色',
+        light: '浅色',
+        dark: '深色',
         system: '跟随系统',
         sepia: '护眼米黄',
         green: '豆沙绿',
         navy: '深蓝',
+        ...STYLE_META[style].themeLabels,
       }[source],
       exact: true,
     })
@@ -481,43 +493,53 @@ try {
     );
     assert.equal((await bootstrap()).state.settings.uiStyle, 'classic');
   }
-  for (const [theme, expected] of [
-    ['sepia', 'light'],
-    ['green', 'light'],
-    ['navy', 'dark'],
-  ]) {
-    await page.evaluate((theme) => window.desktop.invoke('saveSettings', { theme, uiStyle: 'codex' }), theme);
-    await checkTheme(expected, { changed: true, style: 'codex' });
-    await page.evaluate(() => window.desktop.invoke('saveSettings', { fontScale: 1 }));
-    assert.equal((await bootstrap()).state.settings.uiStyle, 'codex');
-    await chooseTheme(theme);
-    const settings = await openAppearance();
-    await settings.getByRole('button', { name: 'Codex', exact: true }).click();
-    await page.waitForFunction(
-      (theme) =>
-        document.documentElement.dataset.theme === theme &&
-        document.documentElement.dataset.style === 'codex',
-      expected,
+  for (const style of basicStyles) {
+    for (const [theme, expected] of [
+      ['sepia', 'light'],
+      ['green', 'light'],
+      ['navy', 'dark'],
+    ]) {
+      await page.evaluate((appearance) => window.desktop.invoke('saveSettings', appearance), {
+        theme,
+        uiStyle: style,
+      });
+      await checkTheme(expected, { changed: true, style });
+      await page.evaluate(() => window.desktop.invoke('saveSettings', { fontScale: 1 }));
+      assert.equal((await bootstrap()).state.settings.uiStyle, style);
+      await chooseTheme(theme);
+      const settings = await openAppearance();
+      await settings.getByRole('button', { name: STYLE_META[style].label, exact: true }).click();
+      await page.waitForFunction(
+        ({ theme, style }) =>
+          document.documentElement.dataset.theme === theme &&
+          document.documentElement.dataset.style === style,
+        { theme: expected, style },
+      );
+      assert.equal(
+        await settings.locator('.theme-options').getByRole('button').count(),
+        UI_STYLES.length + 3,
+      );
+      assert.equal((await bootstrap()).state.settings.uiStyle, 'classic', 'Preview must not persist');
+      await settings.getByRole('button', { name: STYLE_META.classic.label, exact: true }).click();
+      assert.equal(await page.evaluate(() => document.documentElement.dataset.theme), expected);
+      await settings.getByRole('button', { name: STYLE_META[style].label, exact: true }).click();
+      await settings.locator(':scope > footer').getByRole('button', { name: '关闭', exact: true }).click();
+      await page
+        .getByRole('dialog', { name: '放弃尚未保存的修改？', exact: true })
+        .getByRole('button', { name: '放弃修改', exact: true })
+        .click();
+      await settings.waitFor({ state: 'hidden' });
+      await checkTheme(theme);
+    }
+    for (const theme of ['light', 'dark', 'system']) {
+      await chooseTheme(theme, style);
+      await screenshot(style + '-' + theme);
+    }
+    await chooseTheme('light');
+    pass(
+      `${STYLE_META[style].label} saves validate and normalize; style preview, cancel and all three saved modes work`,
     );
-    assert.equal(await settings.locator('.theme-options').getByRole('button').count(), 5);
-    assert.equal((await bootstrap()).state.settings.uiStyle, 'classic', 'Preview must not persist');
-    await settings.getByRole('button', { name: 'Pi 经典', exact: true }).click();
-    assert.equal(await page.evaluate(() => document.documentElement.dataset.theme), expected);
-    await settings.getByRole('button', { name: 'Codex', exact: true }).click();
-    await settings.locator(':scope > footer').getByRole('button', { name: '关闭', exact: true }).click();
-    await page
-      .getByRole('dialog', { name: '放弃尚未保存的修改？', exact: true })
-      .getByRole('button', { name: '放弃修改', exact: true })
-      .click();
-    await settings.waitFor({ state: 'hidden' });
-    await checkTheme(theme);
   }
-  for (const theme of ['light', 'dark', 'system']) {
-    await chooseTheme(theme, 'codex');
-    await screenshot('codex-' + theme);
-  }
-  await chooseTheme('light');
-  pass('Codex saves validate and normalize; style preview, cancel and all three saved modes work');
 
   const beforeShortcut = (await bootstrap()).state.sessions.length;
   await page.getByRole('textbox', { name: '任务输入', exact: true }).focus();
@@ -835,16 +857,20 @@ try {
     pass('macOS close/activate preserves hide/reopen behavior');
   }
 
-  await chooseTheme('dark', 'codex');
-  await page.reload();
-  await page.getByRole('textbox', { name: '任务输入', exact: true }).waitFor();
-  await checkTheme('dark', { style: 'codex' });
-  await app.close();
-  app = undefined;
-  await launch();
-  await checkTheme('dark', { style: 'codex' });
-  await checkTitlebarGeometry();
-  pass('saved Codex dark appearance survives renderer reload and a real application restart');
+  for (const style of basicStyles) {
+    await chooseTheme('dark', style);
+    await page.reload();
+    await page.getByRole('textbox', { name: '任务输入', exact: true }).waitFor();
+    await checkTheme('dark', { style });
+    await app.close();
+    app = undefined;
+    await launch();
+    await checkTheme('dark', { style });
+    await checkTitlebarGeometry();
+    pass(
+      `saved ${STYLE_META[style].label} dark appearance survives renderer reload and a real application restart`,
+    );
+  }
 
   const sessionId = (await bootstrap()).state.selectedSessionId;
   await page.evaluate((id) => window.desktop.invoke('send', id, 'hold', [], 'steer'), sessionId);

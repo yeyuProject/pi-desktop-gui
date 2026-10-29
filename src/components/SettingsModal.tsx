@@ -27,7 +27,7 @@ const api = window.desktop;
 import type { Workbench } from '../hooks/useWorkbench';
 import type { ReactNode } from 'react';
 import { useUnsavedChanges } from '../hooks/useUnsavedChanges';
-import { UI_STYLES, styleTheme } from '../../shared/window-theme';
+import { UI_STYLES, STYLE_META, styleTheme } from '../../shared/window-theme';
 const draftKeys = [
   'piPath',
   'nodePath',
@@ -390,7 +390,7 @@ export function SettingsModal(
                           setPrefs({ ...prefs, uiStyle: style, theme: styleTheme(prefs.theme, style) })
                         }
                       >
-                        {style === 'classic' ? 'Pi 经典' : 'Codex'}
+                        {STYLE_META[style].label}
                       </button>
                     ))}
                   </div>
@@ -407,7 +407,9 @@ export function SettingsModal(
                       ] as const
                     )
                       .filter(
-                        ([key]) => prefs.uiStyle !== 'codex' || ['light', 'dark', 'system'].includes(key),
+                        ([key]) =>
+                          !STYLE_META[prefs.uiStyle].basicThemesOnly ||
+                          styleTheme(key, prefs.uiStyle) === key,
                       )
                       .map(([key, label, Icon]) => (
                         <button
@@ -418,11 +420,7 @@ export function SettingsModal(
                           }}
                         >
                           {Icon ? <Icon size={23} /> : <span className="theme-swatch" data-theme={key} />}
-                          {prefs.uiStyle === 'codex' && key === 'light'
-                            ? '白天'
-                            : prefs.uiStyle === 'codex' && key === 'dark'
-                              ? '夜晚'
-                              : label}
+                          {STYLE_META[prefs.uiStyle].themeLabels?.[key] ?? label}
                         </button>
                       ))}
                   </div>

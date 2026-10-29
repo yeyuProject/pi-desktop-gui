@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { AppDialogRequests } from '../electron/app-dialogs';
 import type { AppDialog } from '../shared/app-dialogs';
-import { nativeThemeSource, windowTheme } from '../shared/window-theme';
+import { nativeThemeSource, stylePalettes, windowTheme, type UiStyle } from '../shared/window-theme';
 import fs from 'node:fs';
 
 test('confirmation needs an explicit valid reply; stale and duplicate replies cannot confirm', async () => {
@@ -120,26 +120,28 @@ test('native window palette agrees with light and dark renderer tokens', () => {
   }
 });
 
-test('Codex native palettes agree with renderer tokens in both appearances', () => {
-  const css = fs.readFileSync(new URL('../src/styles/codex.css', import.meta.url), 'utf8');
-  for (const theme of ['light', 'dark'] as const) {
-    const start = css.indexOf(`:root[data-style='codex'][data-theme='${theme}']`);
-    assert.ok(start >= 0);
-    const section = css.slice(start, css.indexOf('}', start));
-    const palette = windowTheme(theme === 'dark', theme, 'codex');
-    for (const [token, color] of [
-      ['--bg', palette.background],
-      ['--rail', palette.color],
-      ['--ink', palette.symbolColor],
-    ])
-      assert.match(section, new RegExp(`${token}: ${color};`));
-    assert.equal(palette.height, 36);
-    assert.deepEqual(windowTheme(theme === 'dark', 'system', 'codex'), palette);
+test('style native palettes agree with renderer tokens in both appearances', () => {
+  for (const style of Object.keys(stylePalettes) as UiStyle[]) {
+    const css = fs.readFileSync(new URL(`../src/styles/${style}.css`, import.meta.url), 'utf8');
+    for (const theme of ['light', 'dark'] as const) {
+      const start = css.indexOf(`:root[data-style='${style}'][data-theme='${theme}']`);
+      assert.ok(start >= 0);
+      const section = css.slice(start, css.indexOf('}', start));
+      const palette = windowTheme(theme === 'dark', theme, style);
+      for (const [token, color] of [
+        ['--bg', palette.background],
+        ['--rail', palette.color],
+        ['--ink', palette.symbolColor],
+      ])
+        assert.match(section, new RegExp(`${token}: ${color};`));
+      assert.equal(palette.height, 36);
+      assert.deepEqual(windowTheme(theme === 'dark', 'system', style), palette);
+    }
   }
 });
 
 test('system dark repeats every explicit dark token, including syntax and ANSI colors', () => {
-  for (const file of ['base', 'themes', 'conversation-v014', 'codex']) {
+  for (const file of ['base', 'themes', 'conversation-v014', ...Object.keys(stylePalettes)]) {
     const css = fs.readFileSync(new URL(`../src/styles/${file}.css`, import.meta.url), 'utf8');
     const media = css.indexOf('@media (prefers-color-scheme: dark)');
     assert.ok(media >= 0, file);

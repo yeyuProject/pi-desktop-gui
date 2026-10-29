@@ -4,7 +4,7 @@ import path from 'node:path';
 import * as ts from 'typescript/unstable/ast';
 import { API } from 'typescript/unstable/sync';
 import { transformSync } from 'esbuild';
-import { windowTheme } from '../shared/window-theme';
+import { UI_STYLES, windowTheme } from '../shared/window-theme';
 
 // Exercise current production functions; native transport and pixels are UI-test concerns.
 const api = new API();
@@ -248,24 +248,25 @@ test('background themes paint the native window and title bar with their own pal
   }
 });
 
-test('Codex appearance paints the native window and titlebar without changing macOS traffic lights', () => {
-  for (const isMac of [true, false])
-    for (const dark of [true, false]) {
-      const colors: string[] = [],
-        overlays: unknown[] = [];
-      themeFactory(
-        {
-          isDestroyed: () => false,
-          setBackgroundColor: (color: string) => colors.push(color),
-          setTitleBarOverlay: (overlay: unknown) => overlays.push(overlay),
-        },
-        { shouldUseDarkColors: dark },
-        isMac,
-        windowTheme,
-        { state: { settings: { theme: 'system', uiStyle: 'codex' } } },
-      )();
-      const { background, ...overlay } = windowTheme(dark, 'system', 'codex');
-      assert.deepEqual(colors, [background]);
-      assert.deepEqual(overlays, isMac ? [] : [overlay]);
-    }
+test('each appearance paints the native window and titlebar without changing macOS traffic lights', () => {
+  for (const uiStyle of UI_STYLES)
+    for (const isMac of [true, false])
+      for (const dark of [true, false]) {
+        const colors: string[] = [],
+          overlays: unknown[] = [];
+        themeFactory(
+          {
+            isDestroyed: () => false,
+            setBackgroundColor: (color: string) => colors.push(color),
+            setTitleBarOverlay: (overlay: unknown) => overlays.push(overlay),
+          },
+          { shouldUseDarkColors: dark },
+          isMac,
+          windowTheme,
+          { state: { settings: { theme: 'system', uiStyle } } },
+        )();
+        const { background, ...overlay } = windowTheme(dark, 'system', uiStyle);
+        assert.deepEqual(colors, [background]);
+        assert.deepEqual(overlays, isMac ? [] : [overlay]);
+      }
 });

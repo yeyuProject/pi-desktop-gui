@@ -17,7 +17,14 @@ import {
   type Rectangle,
 } from 'electron';
 import { AppDialogRequests, type DialogOptions } from './app-dialogs';
-import { nativeThemeSource, THEMES, UI_STYLES, styleTheme, windowTheme } from '../shared/window-theme';
+import {
+  nativeThemeSource,
+  THEMES,
+  UI_STYLES,
+  STYLE_META,
+  styleTheme,
+  windowTheme,
+} from '../shared/window-theme';
 import fs from 'node:fs/promises';
 import path from 'node:path';
 import { randomUUID } from 'node:crypto';
@@ -1184,8 +1191,10 @@ const handlers: Record<Exclude<keyof ApiMap, WorkspaceHandlerName>, (...args: an
       next.theme = value.theme;
     }
     if (value.uiStyle !== undefined) {
-      if (!(UI_STYLES as readonly unknown[]).includes(value.uiStyle))
-        throw new Error('请选择 Pi 经典或 Codex 界面风格。');
+      if (!(UI_STYLES as readonly unknown[]).includes(value.uiStyle)) {
+        const labels = UI_STYLES.map((style) => STYLE_META[style].label);
+        throw new Error(`请选择 ${labels.slice(0, -1).join('、')} 或 ${labels.at(-1)} 界面风格。`);
+      }
       next.uiStyle = value.uiStyle;
     }
     next.theme = styleTheme(next.theme, next.uiStyle);

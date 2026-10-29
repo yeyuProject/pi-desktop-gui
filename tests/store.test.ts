@@ -4,6 +4,7 @@ import fs from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import { Store } from '../electron/store';
+import { THEMES, UI_STYLES, styleTheme } from '../shared/window-theme';
 
 async function fixture(t: TestContext) {
   const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'pi-index-'));
@@ -74,17 +75,19 @@ test('background themes are kept and unknown themes are repaired to follow the s
   }
 });
 
-test('UI style defaults, validation and Codex background normalization survive reload', async (t) => {
+test('UI style defaults, validation and background normalization survive reload', async (t) => {
   const f = await fixture(t);
   assert.equal(f.store.state.settings.uiStyle, 'classic');
   for (const [uiStyle, theme, expectedStyle, expectedTheme, repaired] of [
     [undefined, 'sepia', 'classic', 'sepia', undefined],
     ['invalid', 'dark', 'classic', 'dark', 1],
     [null, 'light', 'classic', 'light', 1],
-    ['codex', 'sepia', 'codex', 'light', 1],
-    ['codex', 'green', 'codex', 'light', 1],
-    ['codex', 'navy', 'codex', 'dark', 1],
-    ['codex', 'system', 'codex', 'system', undefined],
+    ...UI_STYLES.flatMap((style) =>
+      THEMES.map((theme) => {
+        const normalized = styleTheme(theme, style);
+        return [style, theme, style, normalized, normalized === theme ? undefined : 1] as const;
+      }),
+    ),
   ] as const) {
     const data = { ...f.store.state, settings: { ...f.store.state.settings, uiStyle, theme } };
     await fs.writeFile(f.file('state.json'), JSON.stringify(data));
