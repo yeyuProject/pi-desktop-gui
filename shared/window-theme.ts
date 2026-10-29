@@ -1,6 +1,6 @@
 export const THEMES = ['light', 'dark', 'system', 'sepia', 'green', 'navy'] as const;
 export type Theme = (typeof THEMES)[number];
-export const UI_STYLES = ['classic', 'codex'] as const;
+export const UI_STYLES = ['classic', 'codex', 'claude'] as const;
 export type UiStyle = (typeof UI_STYLES)[number];
 
 export const STYLE_META: Record<
@@ -13,6 +13,7 @@ export const STYLE_META: Record<
     basicThemesOnly: true,
     themeLabels: { light: '白天', dark: '夜晚' },
   },
+  claude: { label: 'Claude', basicThemesOnly: true },
 };
 
 /** Background themes reuse the light or dark native appearance for menus, dialogs and scrollbars. */
@@ -40,6 +41,10 @@ export const stylePalettes: Partial<Record<UiStyle, { light: Palette; dark: Pale
   codex: {
     light: { background: '#ffffff', color: '#f9f9f9', symbolColor: '#0d0d0d' },
     dark: { background: '#181818', color: '#131313', symbolColor: '#dddddd' },
+  },
+  claude: {
+    light: { background: '#faf9f5', color: '#f5f4ed', symbolColor: '#141413' },
+    dark: { background: '#262624', color: '#1f1e1d', symbolColor: '#faf9f5' },
   },
 };
 

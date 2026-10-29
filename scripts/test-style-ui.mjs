@@ -8,6 +8,10 @@ import os from 'node:os';
 import path from 'node:path';
 import { startReadmeServer } from './readme-server.mjs';
 import { workbenchFixture } from '../tests/support/workbench-fixture.mjs';
+import { UI_STYLES, STYLE_META } from '../shared/window-theme.ts';
+
+const uiStyle = process.argv[process.argv.indexOf('--style') + 1];
+assert.ok(UI_STYLES.includes(uiStyle) && STYLE_META[uiStyle].basicThemesOnly, 'Use --style codex|claude');
 
 const baselineStyle = process.argv.includes('--record-codex') ? 'codex' : 'classic';
 const record = process.argv.includes('--record-' + baselineStyle);
@@ -85,7 +89,7 @@ async function tokens() {
 async function contrast(theme) {
   const colors = await tokens(),
     samples = [];
-  for (const foreground of ['ink', 'muted', 'accent', 'success', 'red', 'warning', 'primary']) {
+  for (const foreground of ['ink', 'muted', 'accent', 'success', 'red', 'warning']) {
     for (const background of [
       'bg',
       'surface',
@@ -105,24 +109,37 @@ async function contrast(theme) {
     ...['keyword', 'string', 'number', 'function', 'comment'].map((name) => ['syntax-' + name, 'code']),
   ])
     samples.push({ foreground, background, ratio: ratio(colors[foreground], colors[background]) });
-  assert.ok(ratio(colors.accent, colors.bg) >= 3);
+  for (const [foreground, background] of [
+    ['primary', 'bg'],
+    ['primary', 'surface'],
+    ['accent', 'bg'],
+  ])
+    samples.push({
+      foreground,
+      background,
+      ratio: ratio(colors[foreground], colors[background]),
+      minimum: 3,
+    });
   report.contrast[theme] = samples;
 }
 async function noOverflow(label) {
-  const values = await page.locator('.thread, .message.user .message-content').evaluateAll((nodes) =>
-    nodes.map((node) => ({
-      selector: node.className,
-      width: node.clientWidth,
-      scroll: node.scrollWidth,
-    })),
-  );
+  const composer = uiStyle === 'claude' ? ', .composer, .composer-toolbar > div' : '';
+  const values = await page
+    .locator('.thread, .message.user .message-content' + composer)
+    .evaluateAll((nodes) =>
+      nodes.map((node) => ({
+        selector: node.className,
+        width: node.clientWidth,
+        scroll: node.scrollWidth,
+      })),
+    );
   assert.ok(values.length >= 2);
   for (const value of values)
     assert.ok(value.scroll <= value.width + 1, `${label}: ${JSON.stringify(value)}`);
   report.overflow.push({ label, values });
 }
 async function screenshot(mode, name) {
-  const file = `codex-${mode}-${name}.png`;
+  const file = `${uiStyle}-${mode}-${name}.png`;
   await page.mouse.move(1, 1);
   await page.screenshot({ path: path.join(output, file), animations: 'disabled' });
   report.screenshots.push(file);
@@ -138,6 +155,8 @@ async function semantics() {
       probe.style.color = value;
       return getComputedStyle(probe).color;
     };
+    probe.style.boxShadow = 'var(--shadow-soft)';
+    const shadow = getComputedStyle(probe).boxShadow;
     const result = {
       selected: css('.session-row.active').backgroundColor === color('var(--selected)'),
       stripe: css('.session-row.active', '::before').content === 'none',
@@ -149,7 +168,7 @@ async function semantics() {
       tool: css('.tool-card.done summary', '::before').backgroundColor === color('var(--success)'),
       additions: css('.line-delta ins').color === color('var(--success)'),
       radius: css('.composer').borderRadius === '20px',
-      shadow: css('.composer').boxShadow === 'none',
+      shadow: css('.composer').boxShadow === shadow,
       focus: css('.composer').borderColor === color('var(--line-strong)'),
       avatar: [...document.querySelectorAll('.message.assistant .avatar')].every(
         (node) => getComputedStyle(node).display === 'none',
@@ -199,6 +218,71 @@ async function semantics() {
       return value;
     }),
   );
+}
+async function typography() {
+  const fonts = await page.evaluate(() => {
+    const root = getComputedStyle(document.documentElement);
+    const get = (selector) => {
+      const node = document.querySelector(selector);
+      assertNode(node, selector);
+      const style = getComputedStyle(node);
+      return { family: style.fontFamily, size: parseFloat(style.fontSize) };
+    };
+    function assertNode(node, selector) {
+      if (!node) throw new Error(`Missing typography fixture: ${selector}`);
+    }
+    return {
+      reply: root.getPropertyValue('--font-reply').trim(),
+      interface: root.fontFamily,
+      assistant: get('.message.assistant .message-content'),
+      user: get('.message.user .message-content'),
+      code: get('.message.assistant .message-content code'),
+      block: get('.message.assistant .code-block pre'),
+      table: get('.message.assistant .message-content table'),
+      thinking: get('.thinking'),
+      tool: get('.tool-card'),
+      sendRadius: getComputedStyle(document.querySelector('.send-button')).borderRadius,
+    };
+  });
+  assert.match(fonts.user.family, /sans-serif$/);
+  assert.equal(fonts.tool.family, fonts.interface);
+  assert.equal(fonts.thinking.family, fonts.interface);
+  assert.match(fonts.code.family, /ui-monospace/);
+  assert.match(fonts.block.family, /ui-monospace/);
+  if (fonts.reply) {
+    assert.match(fonts.assistant.family, /^ui-serif/);
+    assert.equal(fonts.assistant.size, 15);
+    assert.equal(fonts.table.family, fonts.interface);
+    assert.equal(fonts.sendRadius, '8px');
+  } else assert.equal(fonts.assistant.family, fonts.user.family);
+  await page.getByRole('button', { name: '设置', exact: true }).click();
+  await page.getByRole('button', { name: '外观与编辑器', exact: true }).click();
+  const scale = page.getByRole('slider', { name: '字号比例', exact: true });
+  await scale.focus();
+  await scale.press('End');
+  await expect
+    .poll(() =>
+      page
+        .locator('.message.assistant .message-content')
+        .first()
+        .evaluate((node) => parseFloat(getComputedStyle(node).fontSize)),
+    )
+    .toBe(fonts.assistant.size * 2);
+  await noOverflow(`${uiStyle}: 200% font scale`);
+  await scale.press('Home');
+  await expect
+    .poll(() =>
+      page
+        .locator('.message.assistant .message-content')
+        .first()
+        .evaluate((node) => parseFloat(getComputedStyle(node).fontSize)),
+    )
+    .toBe(fonts.assistant.size);
+  await page
+    .getByRole('dialog', { name: '设置', exact: true })
+    .locator(':scope > footer')
+    .getByRole('button', { name: '关闭', exact: true })
+    .click();
 }
 const selectors = {
   session: '.session-row.active',
@@ -271,11 +355,9 @@ try {
       JSON.parse(await fs.readFile('tests/fixtures/codex-style.json', 'utf8')),
     );
     console.log('PASS Codex light/dark computed styles remain identical.');
-    for (const [theme, mode] of [
-      ['light', 'day'],
-      ['dark', 'night'],
-    ]) {
-      await load({ theme, uiStyle: 'codex', goal: true });
+    for (const theme of ['light', 'dark']) {
+      const mode = theme;
+      await load({ theme, uiStyle, goal: true });
       await contrast(theme);
       await semantics();
       await noOverflow(`${mode}: workspace`);
@@ -320,7 +402,7 @@ try {
       await noOverflow(`${mode}: side chat`);
       await screenshot(mode, 'side-chat');
 
-      await load({ theme, uiStyle: 'codex', goal: true, approval: true });
+      await load({ theme, uiStyle, goal: true, approval: true });
       await expect(page.locator('.approval-card')).toBeVisible();
       await noOverflow(`${mode}: approval`);
       await screenshot(mode, 'approval');
@@ -329,7 +411,17 @@ try {
         border: getComputedStyle(node).borderColor,
         shadow: getComputedStyle(node).boxShadow,
       }));
-      assert.equal(running.shadow, 'none');
+      assert.equal(
+        running.shadow,
+        await page.evaluate(() => {
+          const node = document.createElement('i');
+          node.style.boxShadow = 'var(--shadow-soft)';
+          document.body.append(node);
+          const value = getComputedStyle(node).boxShadow;
+          node.remove();
+          return value;
+        }),
+      );
       assert.equal(
         running.border,
         await page.evaluate(() => {
@@ -342,7 +434,7 @@ try {
         }),
       );
 
-      await load({ theme, uiStyle: 'codex', goal: 'completed', stress: true });
+      await load({ theme, uiStyle, goal: 'completed', stress: true });
       await page.getByRole('button', { name: '查看上个 Goal 结果', exact: true }).click();
       assert.equal(
         await page.locator('.goal-icon').evaluate((node) => getComputedStyle(node).color),
@@ -350,6 +442,7 @@ try {
           .locator('.connection-dot.ready')
           .evaluate((node) => getComputedStyle(node).backgroundColor),
       );
+      await typography();
       await noOverflow(`${mode}: folded long prompt, quotes, files, images and wide code`);
       await page.locator('.user-message-expand').first().click();
       await page.locator('.skill-toggle').first().click();
@@ -367,22 +460,27 @@ try {
     }
     // Deterministically test media queries without changing the host's appearance.
     await page.emulateMedia({ colorScheme: 'dark' });
-    for (const uiStyle of ['classic', 'codex']) {
-      await load({ theme: 'system', uiStyle, goal: true });
+    for (const style of ['classic', uiStyle]) {
+      await load({ theme: 'dark', uiStyle: style, goal: true });
+      const explicit = await tokens();
+      await load({ theme: 'system', uiStyle: style, goal: true });
       const colors = await tokens();
-      assert.equal(colors['syntax-keyword'], uiStyle === 'classic' ? '#c99cdf' : '#f8a6c8');
+      assert.deepEqual(colors, explicit, `${style}: system dark tokens`);
       assert.ok(ratio(colors['syntax-keyword'], colors.code) >= 4.5);
     }
     assert.equal(report.screenshots.length, 16);
     for (const [theme, samples] of Object.entries(report.contrast)) {
-      for (const sample of samples) assert.ok(sample.ratio >= 4.5, `${theme}: ${JSON.stringify(sample)}`);
+      for (const sample of samples)
+        assert.ok(sample.ratio >= (sample.minimum ?? 4.5), `${theme}: ${JSON.stringify(sample)}`);
     }
     assert.deepEqual(errors, []);
     await fs.writeFile(
-      path.join(output, 'codex-style-ui.json'),
+      path.join(output, `${uiStyle}-style-ui.json`),
       JSON.stringify({ passed: true, ...report }, null, 2),
     );
-    console.log('PASS Codex contrast, geometry, accessibility, overflow and 16 Electron screenshots.');
+    console.log(
+      `PASS ${STYLE_META[uiStyle].label} contrast, geometry, typography, accessibility, overflow and 16 Electron screenshots.`,
+    );
   }
 } finally {
   await app?.close();

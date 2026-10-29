@@ -31,6 +31,8 @@ for (const [name, script, options] of [
   ['approval screenshot', 'scripts/readme-screenshots.mjs', { theme: 'light', approval: true }],
   ['Codex day screenshot', 'scripts/readme-screenshots.mjs', { theme: 'light', uiStyle: 'codex' }],
   ['Codex night screenshot', 'scripts/readme-screenshots.mjs', { theme: 'dark', uiStyle: 'codex' }],
+  ['Claude light screenshot', 'scripts/readme-screenshots.mjs', { theme: 'light', uiStyle: 'claude' }],
+  ['Claude dark screenshot', 'scripts/readme-screenshots.mjs', { theme: 'dark', uiStyle: 'claude' }],
   ['README demo', 'scripts/readme-demo.mjs', undefined],
 ]) {
   test(`${name} provides versioned independent bootstrap and completion snapshots`, async () => {

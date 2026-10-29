@@ -19,6 +19,8 @@ try {
     ['goal-composer', 'light', false],
     ['workspace-codex-light', 'light', false, 'codex'],
     ['workspace-codex-dark', 'dark', false, 'codex'],
+    ['workspace-claude-light', 'light', false, 'claude'],
+    ['workspace-claude-dark', 'dark', false, 'claude'],
   ];
   for (const [name, theme, approval, uiStyle = 'classic'] of shots) {
     const page = await browser.newPage({ viewport: { width: 1440, height: 900 }, deviceScaleFactor: 2 });
@@ -43,7 +45,7 @@ try {
       await page.getByRole('button', { name: '确定上限' }).click();
     }
     await page.waitForTimeout(800);
-    if (uiStyle === 'codex')
+    if (uiStyle !== 'classic')
       await page.locator('.thread').evaluate((node) => {
         node.scrollTop = 0;
       });

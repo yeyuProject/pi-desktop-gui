@@ -155,3 +155,12 @@ test('system dark repeats every explicit dark token, including syntax and ANSI c
     assert.deepEqual(tokens(system), tokens(dark), `${file}: system dark must match explicit dark`);
   }
 });
+
+test('primary remains a fill token rather than a text color', () => {
+  for (const file of fs
+    .readdirSync(new URL('../src/styles/', import.meta.url))
+    .filter((file) => file.endsWith('.css'))) {
+    const css = fs.readFileSync(new URL(`../src/styles/${file}`, import.meta.url), 'utf8');
+    assert.doesNotMatch(css, /(?:[;{]\s*)color\s*:\s*var\(--primary\b/, file);
+  }
+});

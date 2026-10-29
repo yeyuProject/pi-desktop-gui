@@ -1,3 +1,4 @@
+import { UI_STYLES, STYLE_META } from '../shared/window-theme.ts';
 import { _electron as electron } from 'playwright';
 import { expect } from 'playwright/test';
 import assert from 'node:assert/strict';
@@ -57,8 +58,9 @@ try {
   await page.getByRole('button', { name: '关闭', exact: true }).last().click();
   for (const [uiStyle, theme] of [
     ...['light', 'sepia', 'green', 'dark', 'navy'].map((theme) => ['classic', theme]),
-    ['codex', 'light'],
-    ['codex', 'dark'],
+    ...UI_STYLES.filter((style) => STYLE_META[style].basicThemesOnly).flatMap((style) =>
+      ['light', 'dark'].map((theme) => [style, theme]),
+    ),
   ]) {
     await page.evaluate((appearance) => window.desktop.invoke('saveSettings', appearance), {
       theme,

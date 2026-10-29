@@ -2,6 +2,129 @@
 
 首版功能 页面与交互设计
 
+## v0.14.57：Claude 界面风格（已实现）
+
+### UI9 Claude 风格：浅色 / 深色
+
+在 UI8 的风格机制上新增第三套界面风格，参照 Claude 桌面版，分浅色和深色。和 UI8 不同，Anthropic 官方公开了一套完整的宿主令牌：MCP Apps 设计规范的“Style variables”一节，列出了背景、文字、边框、状态色、圆角和阴影在浅色、深色下的取值。本节的颜色优先采用这套官方值。官方没有覆盖的部分（侧栏、悬停、选中、品牌色用法）参考社区取色，“依据”列逐项注明。核对日期 2026-10-29，来源：claude.com/docs/connectors/building/mcp-apps/design-guidelines（Style variables）、同站 transparent-theming 页、Ynd-i/swan PR #20（深色取色）、dcelasun/claude-desktop-bin `themes/README.md`（`window-shared.css` 中的 `#faf9f5`）。
+
+**背景与问题。**
+
+1. **风格枚举有 7 处写死 `'codex'`。** 位置：`shared/window-theme.ts:14,33`；`src/components/SettingsModal.tsx:393,410,421,423`；`electron/main.ts:1188` 的错误文案“请选择 Pi 经典或 Codex 界面风格。”。照这个写法加第三种风格，每处都要再加一个分支。`styleTheme` 的语义其实是“该风格是否只支持浅/深/跟随系统”，应改为按风格查表。
+2. **Claude 的强调色有两种用途。** Claude 用珊瑚色（`#d97757`）作为品牌色，用蓝色（官方 `color-text-info` `#3266AD`）表示链接和信息。UI8 拆出的 `--primary` / `--accent` 正好能分别承载这两种颜色，不需要新增语义令牌。
+3. **官方值有 3 处对比度不足。** 浅色次要文字 `#73726C` 在选中行（`#e8e6dc`）上只有 3.86:1；深色次要文字 `#9C9A92` 在强调底色上只有 4.03:1；白字放在品牌珊瑚色 `#d97757` 上只有 3.12:1。三处都低于本项目 4.5:1 的要求（UI6 验收 7），需要调整。
+4. **Claude 的回复正文用衬线字体。** 用户消息用无衬线字体，助手回复用衬线字体，这是 Claude 最容易辨认的特征之一。官方字体 Anthropic Sans / Serif 不能随应用分发，需要使用系统衬线字体回退。中文没有通用的系统衬线字体，回复正文的中文部分仍然使用无衬线字体。
+
+**目标。** 设置中可以选择 Claude 风格，提供浅色、深色、跟随系统三种模式，标题栏和原生窗口背景一并切换。经典和 Codex 风格的观感不变。功能、DOM 结构、可访问名称和快捷键均不变。
+
+**不做。**
+
+- Claude 桌面版的高对比度模式、自定义强调色和字体选择。
+- 照搬 Claude 的布局和信息架构。侧栏结构、检查器、标题栏、模型与审批菜单的位置不变，只改视觉。
+- 使用 Anthropic 或 Claude 的标志、Anthropic Sans / Serif 字体文件或其他品牌资产；不从 `assets.claude.ai` 加载字体。“π”品牌标保留，只换底色。
+- Claude 风格下的护眼米黄、豆沙绿、深蓝背景。
+- 启动首帧问题，同 UI8 的“不做”。
+
+**交互。**
+
+- 设置 → 外观与编辑器 → 界面风格：`Pi 经典` / `Codex` / `Claude`。
+- 选 `Claude` 后，主题选项只显示 `浅色`、`深色`、`跟随系统`（不改名，Claude 自己的叫法就是 Light / Dark）。从背景主题切换过来时的就近规则与 UI8 相同。
+- 在 Codex 和 Claude 之间切换时，保留当前的浅色/深色/跟随系统。
+- 预览、取消还原、保存、重启保持均沿用 UI8 机制。
+
+**技术方案。**
+
+- **风格表代替字面量**
+  - `shared/window-theme.ts`：`UI_STYLES` 改为 `['classic', 'codex', 'claude']`。新增 `STYLE_META: Record<UiStyle, { label: string; basicThemesOnly: boolean; themeLabels?: Partial<Record<Theme, string>> }>`：经典为 `{ label: 'Pi 经典', basicThemesOnly: false }`，Codex 为 `{ label: 'Codex', basicThemesOnly: true, themeLabels: { light: '白天', dark: '夜晚' } }`，Claude 为 `{ label: 'Claude', basicThemesOnly: true }`。
+  - `styleTheme` 改为按 `STYLE_META[style].basicThemesOnly` 判断。`windowTheme` 的色板改为 `stylePalettes: Partial<Record<UiStyle, { light; dark }>>` 查表，Claude 浅色为 `{ background: '#faf9f5', color: '#f5f4ed', symbolColor: '#141413' }`，深色为 `{ background: '#262624', color: '#1f1e1d', symbolColor: '#faf9f5' }`。
+  - `SettingsModal.tsx` 的风格按钮文案、主题过滤和主题标签都从 `STYLE_META` 读取，不再出现风格字面量。
+  - `electron/main.ts:1188` 的错误文案改为由 `STYLE_META` 生成：“请选择 Pi 经典、Codex 或 Claude 界面风格。”
+  - `store-state.ts`、`saveSettings` 的校验已经按 `UI_STYLES` 枚举，不需要改动；新增值的就近修正由 `styleTheme` 统一处理。
+- **Claude 样式**：新建 `src/styles/claude.css`，在 `src/styles.css` 中排在 `codex.css` 之后。令牌与组件覆盖的写法同 UI8：`:root[data-style='claude'][data-theme='light'|'dark']`，跟随系统写在 `@media (prefers-color-scheme: dark)` 中。不修改任何 TSX 结构。
+- **衬线字体**：新增 `--font-reply` 令牌。经典和 Codex 不定义，使用回退值 `inherit`；Claude 定义为 `ui-serif, Georgia, 'Times New Roman', 'PingFang SC', 'Microsoft YaHei', serif`，只作用于助手消息的 `.message-content`。代码、表格数字、工具卡片、思考过程仍使用界面字体或等宽字体。
+
+**Claude 令牌。** 下表所有文字色在 `--bg`、`--surface`、`--rail`、`--hover`、`--selected`、`--bubble`、`--code`、`--accent-soft` 上的对比度均不低于 4.5:1（括号内为最低值）。“官方”指 MCP Apps Style variables。
+
+| 令牌 | 用途 | 浅色 | 深色 | 依据 |
+| --- | --- | --- | --- | --- |
+| `--bg` | 对话区画布 | `#faf9f5` | `#262624` | 官方 background-tertiary / secondary |
+| `--surface` | 输入框、卡片、菜单 | `#ffffff` | `#30302e` | 官方 background-primary |
+| `--rail` | 侧栏、标题栏 | `#f5f4ed` | `#1f1e1d` | 浅色为官方 background-secondary；深色比画布暗一级，参照 swan 取色（侧栏比对话区暗） |
+| `--hover` | 悬停 | `#f0eee6` | `#353532` | 介于 rail 与 selected 之间 |
+| `--selected` | 选中行 | `#e8e6dc` | `#3a3936` | 浅色接近官方 border `#DEDCD1` 的浅色混合 |
+| `--bubble` | 用户消息气泡 | `#f0eee6` | `#141413` | 深色为官方 background-tertiary，气泡比画布暗 |
+| `--code` | 代码块 | `#f5f4ed` | `#1f1e1d` | 同 rail |
+| `--line` / `--line-strong` | 细线 | `#e4e3df` / `#cecdca` | `#383835` / `#4b4a47` | 官方 border `#1F1E1D` / `#DEDCD1` 按 10% / 20% 混合到画布上的不透明值 |
+| `--ink` | 正文 | `#141413`（14.73） | `#faf9f5`（10.77） | 官方 text-primary |
+| `--muted` | 次要文字 | `#66655f`（4.67） | `#a6a49b`（4.54） | 由官方 text-tertiary `#73726C` / `#9C9A92` 调整，见背景第 3 条 |
+| `--accent` | 链接、焦点、选中强调 | `#3266ad`（4.61） | `#80aadd`（4.71） | 官方 text-info |
+| `--accent-soft` | 强调底色 | `#e6eaee` | `#343b42` | 强调色按 10% / 16% 混合到画布 |
+| `--on-accent` | 强调色上的文字 | `#ffffff`（5.77） | `#141413`（7.65） | |
+| `--primary` / `--on-primary` | 发送、主要按钮、品牌标 | `#b95737` / `#ffffff`（4.69） | `#d97757` / `#141413`（5.90） | 深色为社区通用的 Claude 珊瑚色；浅色在同色相上加深，因为白字放在 `#d97757` 上只有 3.12 |
+| `--success` | 新增、完成、已连接 | `#265b19`（6.47） | `#7ab948`（4.79） | 官方 text-success |
+| `--red` | 错误、删除 | `#a73d39`（4.98） | `#ee8884`（4.59） | 浅色为官方 border-danger（官方 text-danger `#7F2C28` 与正文过近）；深色为官方 text-danger |
+| `--warning` | 警告文字 | `#5a4815`（7.07） | `#d1a041`（4.76） | 官方 text-warning |
+| `--signal` / `--signal-soft` | 运行中 | 同经典浅色 | 同经典深色 | |
+| `--shadow-soft` | 页内表面 | `0 1px 2px #0000000d` | `none` | 官方 shadow-hairline；深色靠表面明度区分 |
+| `--shadow` | 浮层、菜单、对话框 | `0 10px 15px -3px #0000001a, 0 4px 6px -4px #0000001a` | `0 10px 30px #00000066, 0 1px 3px #00000040` | 浅色为官方 shadow-lg；深色同 Codex |
+| `--radius-panel` | 面板 | `12px` | `12px` | 官方 border-radius-xl |
+| `--radius-control` | 按钮、输入 | `8px` | `8px` | 官方 border-radius-md |
+| `--content-width` | 阅读列 | `768px` | `768px` | 同 Codex |
+| 语法色 | 代码块 | 经典浅色值，数字改为 `#9a5a22`（4.93），注释改为 `#5e5d57`（5.99） | Codex 夜晚值，函数改为 `#7ab4f9`（7.71），注释改为 `#9c9a92`（5.91） | 在 `--code` 上测算；注释改为暖灰，与画布色调一致 |
+| ANSI 色 | 终端输出 | 同经典浅色 | 同经典深色 | |
+
+字体：界面字体同 Codex（系统界面字体优先，保留中文回退）；回复正文使用 `--font-reply`；等宽字体同 Codex。
+
+**组件覆盖（仅 Claude）。**
+
+- **会话行**：选中时用 `--selected` 底色、`--ink` 文字，去掉左侧色条，与 Codex 相同。
+- **输入框**：圆角 20px，`--surface` 底，`--line` 边框。浅色保留 `--shadow-soft`，因为 Claude 浅色下的输入框是浮在暖色画布上的白色卡片。聚焦时边框变为 `--line-strong`，没有强调色光晕。运行中的琥珀色边框保留，`:focus-visible` 轮廓用 `--accent`。
+- **发送按钮**：`--primary` 填充，圆角 8px（Claude 为圆角方形，不是圆形）。禁用态沿用现有透明度。
+- **用户消息**：`--bubble` 底，圆角 12px，`width: fit-content; max-width: min(80%, 620px); margin-left: auto`，标题行右对齐。溢出要求同 UI8 验收 7。
+- **助手消息**：隐藏 `.avatar`；名字只做视觉隐藏，写法与 Codex 相同。`.message.assistant .message-content` 使用 `--font-reply`，字号 `calc(15px * var(--font-scale))`，行高 1.7。`.message.assistant .message-content` 内的 `code`、`pre`、`table`、`.code-block`、`.thinking` 恢复界面字体或等宽字体。
+- **代码块**：圆角 12px。
+- **遮罩**：`.modal-backdrop` 浅色为 `#1f1e1d40`，深色为 `#00000066`。
+- **品牌标**：`--primary` 底，`--on-primary` 字，“π”不变。
+- 其余组件（Goal 状态卡、审批卡、检查器、差异视图、侧边对话、模型选择器、命令面板）只随令牌变化，按截图清单检查后再做局部覆盖。
+
+**实现顺序。** 先完成“风格表代替字面量”的重构，并单独提交：只有经典和 Codex 两种风格，所有现有测试必须通过，`tests/fixtures/classic-style.json` 不变。之后再加入 Claude。
+
+**实现注意。** 以下来自对 UI8 实现（`a5b666a`）的核对，规格正文没有展开，但容易出错：
+
+1. **`--primary` 不能当文字色检查。** `scripts/test-codex-style-ui.mjs:88` 把 `primary` 作为前景色，在全部 8 种背景上断言 ≥ 4.5:1。Codex 的墨色主色可以通过，Claude 的珊瑚色不能：浅色 `#b95737` 最低 3.75:1（`--selected`），深色 `#d97757` 最低 3.64:1（`--accent-soft`）。现有样式只把 `--primary` 用作填充色（`.primary`、`.send-button`、`.brand-mark` 的背景，`workbench.css:27` 的悬停边框），不用作文字色，所以应把 `primary` 从文字色循环中移除，只保留 `on-primary`/`primary` 这一对，再加一条非文字对比度断言：`--primary` 与 `--bg`、`--surface` ≥ 3:1。实现时不得把 `--primary` 用作文字色。
+2. **经典基线不需要重新录制。** `test-codex-style-ui.mjs` 的 `--record-classic` 只应在“未修改的渲染器”上运行。重构和加入 Claude 后，都只做比对，不要重录 `tests/fixtures/classic-style.json`。
+3. **Codex 没有计算样式基线。** 验收 5 对 Codex 的要求，做法是在重构开始前用当前代码录一份 `tests/fixtures/codex-style.json`（选择器与经典基线相同，`theme` 取 `light`、`dark`，`uiStyle: 'codex'`），之后只做比对。不要用截图像素差，截图受字体渲染影响，跨平台不稳定。
+4. **需要同步修改的硬编码位置**（除背景第 1 条外）：`scripts/test-theme-ui.mjs:43-44,218,246,276,281-282,489-517,838-845` 的 Codex 色板、强调色、按钮名和主题标签；`scripts/readme-screenshots.mjs:20-21,46` 与 `tests/readme-mock-state.test.mjs:32-33` 的截图清单；`tests/store.test.ts:84-87` 的修正用例；`tests/app-dialogs.test.ts:124-142`；`tests/desktop-chrome.test.ts:265-267`；`src/main.tsx:9` 的首帧 `data-style` 保持 `classic`。
+5. **测试脚本中的强调色断言**（`test-theme-ui.mjs:246`）应从 CSS 令牌或一张共享色板读取，不要再加一层三元表达式。
+6. **字号比例。** 助手正文的 15px 必须写成 `calc(15px * var(--font-scale))`，`test-theme-ui.mjs` 中已有的字号比例检查要覆盖 Claude。
+7. **发版材料。** 按 UI8 的惯例：新增 `docs/releases/v<版本>.md`（中英双语）、`docs/assets/README.md` 截图表补两行、双语 README 外观小节补两张截图；`package.json` 与 `package-lock.json` 同步版本号。
+
+**验收标准。**
+
+1. 外观设置中可以选择 `Pi 经典` / `Codex` / `Claude`。选 Claude 后主题只显示浅色、深色、跟随系统；米黄、豆沙绿切到浅色，深蓝切到深色；在 Codex 与 Claude 之间切换时保留当前主题。预览即时生效，取消还原，保存后重启仍保持。
+2. Claude 浅色/深色下，`--bg`、`--rail`、`--ink` 与 `windowTheme` 返回的原生背景色及 Windows/Linux 标题栏覆盖色相同；“跟随系统”跟随原生外观。
+3. 在 Electron 中实测：上表所有文字色在列出的各背景上 ≥ 4.5:1；`--on-accent` 与 `--accent`、`--on-primary` 与 `--primary` 之间 ≥ 4.5:1；`--primary` 作为填充色与 `--bg`、`--surface` 之间 ≥ 3:1；语法色在 `--code` 上 ≥ 4.5:1；焦点轮廓与 `--bg` 之间 ≥ 3:1。
+4. Claude 下：发送按钮和品牌标为珊瑚色，链接为蓝色；选中会话没有彩色竖条；差异新增、完成状态为绿色；用户消息右对齐；助手回复正文的计算字体以衬线字体开头，回复内的代码块和行内代码为等宽字体；读屏仍能读到“你”/“Pi”。
+5. 经典和 Codex 风格不变：`tests/fixtures/classic-style.json` 与新录的 `tests/fixtures/codex-style.json`（见“实现注意”第 3 条）在本节前后完全一致。
+6. 源码中除 `shared/window-theme.ts` 的 `UI_STYLES`、`STYLE_META` 和 CSS 选择器外，不再出现 `'codex'`、`'claude'` 字面量的分支判断。
+7. 溢出要求同 UI8 验收 7。
+
+**测试。**
+
+- `tests/app-dialogs.test.ts`：把 Codex 色板一致性测试改为遍历 `stylePalettes`，自动覆盖 Claude；跟随系统令牌重复检查的文件列表加入 `claude`。
+- `tests/desktop-chrome.test.ts`、`tests/store.test.ts`：风格用例改为遍历 `UI_STYLES`，覆盖 Claude 搭配背景主题的就近修正。
+- 新增 `STYLE_META` 单元测试：每种风格都有标签，`basicThemesOnly` 与 `stylePalettes` 一致（只支持基础主题的风格必须有专属色板）。
+- `scripts/test-theme-ui.mjs`、`scripts/test-review-ui.mjs`、`tests/support/turn-outline-ui.mjs` 的风格循环加入 Claude。
+- `scripts/test-codex-style-ui.mjs` 改名为 `scripts/test-style-ui.mjs`，按风格参数化（`--style codex|claude`）；`package.json` 的 `test:codex-style-ui` 改为 `test:style-ui` 并同时运行两种风格，CI 同步。截图存放在 `test-results/{codex,claude}-{light,dark}-*.png`，截图清单同 UI8。
+- 同步双语 README 的外观说明，新增 `docs/assets/screenshots/workspace-claude-{light,dark}.png`。
+
+**实现与验收（2026-10-29）。**
+
+- 风格表重构先单独提交为 `82ce315`，之后新增 Claude 浅色、深色、跟随系统；本次仅实现 UI9。
+- Claude 字体与组件覆盖独立于经典／Codex；回复为 `15px × --font-scale`，代码保持等宽。侧边对话挤窄输入区时，工具栏换行且模型按钮保持在输入框内。
+- Electron 实测每种风格每个明暗模式 58 组对比度。Claude 文字最低浅色 4.61:1、深色 4.54:1；主色填充最低分别 4.45:1、4.24:1。经典与预先录制的 Codex 计算样式基线均完全一致，未重录。
+- 已同步风格循环、CI、双语 README、发布说明及两张 Claude 工作区截图。详细检查、基线哈希、测试命令与平台范围见 [UI9 验证记录](testing/claude-appearance.md)。
+
 ## v0.14.56：Codex 界面风格（已实现）
 
 ### UI8 Codex 风格：白天 / 夜晚

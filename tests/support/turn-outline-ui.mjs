@@ -1,3 +1,4 @@
+import { UI_STYLES, STYLE_META } from '../../shared/window-theme.ts';
 import assert from 'node:assert/strict';
 import path from 'node:path';
 import fs from 'node:fs/promises';
@@ -269,8 +270,9 @@ export async function verifyTurnOutlineUI({ app, page, output }) {
     screenshots = [];
   for (const [uiStyle, theme] of [
     ...['light', 'dark', 'sepia', 'green', 'navy'].map((theme) => ['classic', theme]),
-    ['codex', 'light'],
-    ['codex', 'dark'],
+    ...UI_STYLES.filter((style) => STYLE_META[style].basicThemesOnly).flatMap((style) =>
+      ['light', 'dark'].map((theme) => [style, theme]),
+    ),
   ]) {
     const key = uiStyle === 'classic' ? theme : `${uiStyle}-${theme}`;
     await page.evaluate((appearance) => window.desktop.invoke('saveSettings', appearance), {
@@ -429,7 +431,7 @@ export async function verifyTurnOutlineUI({ app, page, output }) {
   await outside();
   await input.focus();
   console.log(
-    'PASS UI6 fixed ticks, hover delays, cleaned titles, filtered keyboard navigation and classic/Codex text contrast',
+    'PASS UI6 fixed ticks, hover delays, cleaned titles, filtered keyboard navigation and all style text contrast',
   );
   return { contrast, screenshots };
 }
@@ -711,6 +713,9 @@ export async function verifyMessageContentUI({ app, page, output }) {
   await jump(6);
   await expect(user(6).getByRole('button', { name: '展开全文（共 1 行）' })).toBeVisible();
   await jump(1);
+  // Collapsed rows expose only their tick; expand before targeting the row actions.
+  await row(5).locator('.turn-tick').hover();
+  await expect(outline).toHaveClass(/expanded/);
   await row(5).hover();
   const before = await thread.evaluate((element) => element.scrollTop);
   await outline.getByRole('button', { name: '复制第 5 轮回复', exact: true }).click();
@@ -730,6 +735,8 @@ export async function verifyMessageContentUI({ app, page, output }) {
     return event.defaultPrevented;
   });
   assert.equal(intercepted, false, 'Ctrl+C keeps system text copying');
+  await row(4).locator('.turn-tick').hover();
+  await expect(outline).toHaveClass(/expanded/);
   await row(4).hover();
   const missing = outline.getByRole('button', { name: '复制第 4 轮回复', exact: true });
   await expect(missing).toBeDisabled();

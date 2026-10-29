@@ -9,6 +9,8 @@ README 使用两类素材：`screenshots/` 中的真实界面截图，以及 202
 | [screenshots/workspace-dark.png](screenshots/workspace-dark.png) | 深色主题 | 1440 × 900 @2x |
 | [screenshots/workspace-codex-light.png](screenshots/workspace-codex-light.png) | Codex 白天风格 | 1440 × 900 @2x |
 | [screenshots/workspace-codex-dark.png](screenshots/workspace-codex-dark.png) | Codex 夜晚风格 | 1440 × 900 @2x |
+| [screenshots/workspace-claude-light.png](screenshots/workspace-claude-light.png) | Claude 浅色风格 | 1440 × 900 @2x |
+| [screenshots/workspace-claude-dark.png](screenshots/workspace-claude-dark.png) | Claude 深色风格 | 1440 × 900 @2x |
 | [screenshots/approval.png](screenshots/approval.png) | 确认模式下的命令审批卡片 | 1440 × 900 @2x |
 | [hero-banner.png](hero-banner.png) | 早期首屏品牌海报，README 已改用真实截图，保留为历史素材 | 约 16:9 横版 |
 | [architecture-bridge.png](architecture-bridge.png) | 本机 GUI 与 Pi CLI 通信关系 | 约 16:9 横版 |

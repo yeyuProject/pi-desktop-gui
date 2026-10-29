@@ -493,6 +493,13 @@ try {
     );
     assert.equal((await bootstrap()).state.settings.uiStyle, 'classic');
   }
+  await page.evaluate(async () => {
+    const { state } = await window.desktop.invoke('bootstrap');
+    await window.desktop.invoke('send', state.selectedSessionId, 'theme font sample', [], 'steer');
+  });
+  const replySample = page.locator('.message.assistant .message-content').filter({ hasText: '完成：中文' });
+  await replySample.waitFor();
+  await eventually(bootstrap, ({ runtime }) => !busy(runtime.status), 'Font sample did not settle');
   for (const style of basicStyles) {
     for (const [theme, expected] of [
       ['sepia', 'light'],
@@ -535,11 +542,42 @@ try {
       await chooseTheme(theme, style);
       await screenshot(style + '-' + theme);
     }
+    const fontSize = () => replySample.evaluate((node) => parseFloat(getComputedStyle(node).fontSize));
+    const originalFontSize = await fontSize();
+    const settings = await openAppearance();
+    const slider = settings.getByRole('slider', { name: '字号比例', exact: true });
+    await slider.focus();
+    await slider.press('End');
+    await eventually(fontSize, (value) => value === originalFontSize * 2, 'Reply font did not scale to 200%');
+    await slider.press('Home');
+    await eventually(fontSize, (value) => value === originalFontSize, 'Reply font did not return to 100%');
+    await settings.locator(':scope > footer').getByRole('button', { name: '关闭', exact: true }).click();
     await chooseTheme('light');
     pass(
       `${STYLE_META[style].label} saves validate and normalize; style preview, cancel and all three saved modes work`,
     );
   }
+
+  for (const theme of ['light', 'dark', 'system']) {
+    await chooseTheme(theme, basicStyles[0]);
+    const settings = await openAppearance();
+    for (const style of [...basicStyles].reverse()) {
+      await settings.getByRole('button', { name: STYLE_META[style].label, exact: true }).click();
+      await page.waitForFunction(
+        ({ style, theme }) =>
+          document.documentElement.dataset.style === style &&
+          document.documentElement.dataset.theme === theme,
+        { style, theme },
+      );
+    }
+    await settings.locator(':scope > footer').getByRole('button', { name: '关闭', exact: true }).click();
+    await settings.waitFor({ state: 'hidden' });
+    await checkTheme(theme, { style: basicStyles[0] });
+  }
+  await chooseTheme('light');
+  pass(
+    'switching between basic styles keeps light/dark/system; reply fonts respond to the 100–200% settings slider',
+  );
 
   const beforeShortcut = (await bootstrap()).state.sessions.length;
   await page.getByRole('textbox', { name: '任务输入', exact: true }).focus();

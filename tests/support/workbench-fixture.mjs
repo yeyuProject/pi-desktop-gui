@@ -156,6 +156,8 @@ export const workbenchFixture = ({ theme, approval, uiStyle = 'classic', goal = 
     },
   ];
   if (stress) {
+    messages.at(-1).content +=
+      '\n\nValidation summary:\n\n| Result | Count |\n| --- | ---: |\n| Passed | 6 |';
     const quote = {
       id: 'visual-quote',
       role: 'assistant',
