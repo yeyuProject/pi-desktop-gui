@@ -4,7 +4,7 @@ import type { ApprovalMode, ApprovalRequest, ApprovalGrant } from './approval';
 import type { AttachmentInfo } from './attachments';
 import type { CheckpointSummary, CheckpointPreview } from './checkpoints';
 import type { AgentRulesFile } from './workspace';
-import type { Theme } from './window-theme';
+import type { Theme, UiStyle } from './window-theme';
 import type { PromptTemplateInput, PromptTemplateDocument } from './prompts';
 import type { LocalUsageSummary } from './usage';
 import type { PiCompatibility } from './pi-version';
@@ -72,6 +72,7 @@ export interface Settings {
   modelId: string;
   thinking: string;
   theme: Theme;
+  uiStyle: UiStyle;
   expandThinking: boolean;
   fontScale: number;
   sidebarWidth: number;

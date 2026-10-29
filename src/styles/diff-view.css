@@ -1,5 +1,5 @@
 .diff-view {
-  --diff-word-add: color-mix(in srgb, var(--accent) 24%, transparent);
+  --diff-word-add: color-mix(in srgb, var(--success) 24%, transparent);
   --diff-word-del: color-mix(in srgb, var(--red) 24%, transparent);
   min-height: 0;
   flex: 1;
@@ -21,7 +21,7 @@
   padding-right: 12px;
 }
 .diff-row.added {
-  background: color-mix(in srgb, var(--accent) 9%, transparent);
+  background: color-mix(in srgb, var(--success) 9%, transparent);
 }
 .diff-row.removed {
   background: color-mix(in srgb, var(--red) 8%, transparent);

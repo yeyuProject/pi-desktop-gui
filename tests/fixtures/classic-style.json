@@ -1,0 +1,132 @@
+{
+  "light": {
+    "session": {
+      "color": "rgb(24, 34, 31)",
+      "background-color": "rgb(255, 255, 255)",
+      "border-color": "rgb(24, 34, 31)",
+      "box-shadow": "rgba(15, 31, 25, 0.06) 0px 1px 2px 0px, rgba(15, 31, 25, 0.04) 0px 6px 22px 0px",
+      "border-radius": "8px"
+    },
+    "send": {
+      "color": "rgb(255, 255, 255)",
+      "background-color": "rgb(31, 107, 82)",
+      "border-color": "rgb(255, 255, 255)",
+      "box-shadow": "none",
+      "border-radius": "10px"
+    },
+    "added": {
+      "color": "rgb(24, 34, 31)",
+      "background-color": "color(srgb 0.121569 0.419608 0.321569 / 0.09)",
+      "border-color": "rgb(24, 34, 31)",
+      "box-shadow": "none",
+      "border-radius": "0px"
+    },
+    "removed": {
+      "color": "rgb(24, 34, 31)",
+      "background-color": "color(srgb 0.705882 0.137255 0.0941176 / 0.08)",
+      "border-color": "rgb(24, 34, 31)",
+      "box-shadow": "none",
+      "border-radius": "0px"
+    },
+    "connection": {
+      "color": "rgb(24, 34, 31)",
+      "background-color": "rgb(31, 107, 82)",
+      "border-color": "rgb(24, 34, 31)",
+      "box-shadow": "none",
+      "border-radius": "50%"
+    },
+    "tool": {
+      "color": "rgb(24, 34, 31)",
+      "background-color": "rgba(0, 0, 0, 0)",
+      "border-color": "rgb(24, 34, 31)",
+      "box-shadow": "none",
+      "border-radius": "0px"
+    },
+    "goal": {
+      "color": "rgb(24, 34, 31)",
+      "background-color": "rgb(255, 255, 255)",
+      "border-color": "rgb(224, 229, 226)",
+      "box-shadow": "none",
+      "border-radius": "7px"
+    },
+    "user": {
+      "color": "rgb(24, 34, 31)",
+      "background-color": "rgb(226, 239, 233)",
+      "border-color": "rgb(24, 34, 31)",
+      "box-shadow": "none",
+      "border-radius": "14px 14px 4px"
+    },
+    "primary": {
+      "color": "rgb(255, 255, 255)",
+      "background-color": "rgb(31, 107, 82)",
+      "border-color": "rgb(31, 107, 82)",
+      "box-shadow": "none",
+      "border-radius": "8px"
+    }
+  },
+  "dark": {
+    "session": {
+      "color": "rgb(228, 235, 232)",
+      "background-color": "rgb(25, 33, 30)",
+      "border-color": "rgb(228, 235, 232)",
+      "box-shadow": "rgba(0, 0, 0, 0.25) 0px 1px 2px 0px, rgba(0, 0, 0, 0.19) 0px 6px 22px 0px",
+      "border-radius": "8px"
+    },
+    "send": {
+      "color": "rgb(14, 31, 24)",
+      "background-color": "rgb(116, 199, 163)",
+      "border-color": "rgb(14, 31, 24)",
+      "box-shadow": "none",
+      "border-radius": "10px"
+    },
+    "added": {
+      "color": "rgb(228, 235, 232)",
+      "background-color": "color(srgb 0.454902 0.780392 0.639216 / 0.09)",
+      "border-color": "rgb(228, 235, 232)",
+      "box-shadow": "none",
+      "border-radius": "0px"
+    },
+    "removed": {
+      "color": "rgb(228, 235, 232)",
+      "background-color": "color(srgb 1 0.603922 0.560784 / 0.08)",
+      "border-color": "rgb(228, 235, 232)",
+      "box-shadow": "none",
+      "border-radius": "0px"
+    },
+    "connection": {
+      "color": "rgb(228, 235, 232)",
+      "background-color": "rgb(116, 199, 163)",
+      "border-color": "rgb(228, 235, 232)",
+      "box-shadow": "none",
+      "border-radius": "50%"
+    },
+    "tool": {
+      "color": "rgb(228, 235, 232)",
+      "background-color": "rgba(0, 0, 0, 0)",
+      "border-color": "rgb(228, 235, 232)",
+      "box-shadow": "none",
+      "border-radius": "0px"
+    },
+    "goal": {
+      "color": "rgb(228, 235, 232)",
+      "background-color": "rgb(25, 33, 30)",
+      "border-color": "rgb(42, 53, 49)",
+      "box-shadow": "none",
+      "border-radius": "7px"
+    },
+    "user": {
+      "color": "rgb(228, 235, 232)",
+      "background-color": "rgb(29, 51, 42)",
+      "border-color": "rgb(228, 235, 232)",
+      "box-shadow": "none",
+      "border-radius": "14px 14px 4px"
+    },
+    "primary": {
+      "color": "rgb(14, 31, 24)",
+      "background-color": "rgb(116, 199, 163)",
+      "border-color": "rgb(116, 199, 163)",
+      "box-shadow": "none",
+      "border-radius": "8px"
+    }
+  }
+}

@@ -28,7 +28,7 @@
   color: var(--danger);
 }
 .goal-card.completed .goal-icon {
-  color: var(--accent);
+  color: var(--success);
 }
 .goal-objective {
   flex: 1;
@@ -124,7 +124,7 @@
   width: 6px;
   height: 6px;
   border-radius: 50%;
-  background: var(--accent);
+  background: var(--success);
 }
 @media (max-width: 899px) {
   .goal-budget progress {

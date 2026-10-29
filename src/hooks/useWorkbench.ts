@@ -242,6 +242,7 @@ export function useWorkbench() {
     if (!state) return;
     const appearance = settingsOpen && prefs ? prefs : state.settings;
     document.documentElement.dataset.theme = appearance.theme;
+    document.documentElement.dataset.style = appearance.uiStyle;
     document.documentElement.dataset.platform = api.platform;
     document.documentElement.style.setProperty('--font-scale', String(appearance.fontScale));
     document.documentElement.style.setProperty('--sidebar-width', appearance.sidebarWidth + 'px');

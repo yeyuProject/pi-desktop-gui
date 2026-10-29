@@ -364,8 +364,8 @@
 }
 .diff-lines > .added {
   color: var(--ink);
-  background: color-mix(in srgb, var(--accent) 12%, transparent);
-  box-shadow: inset 3px 0 var(--accent);
+  background: color-mix(in srgb, var(--success) 12%, transparent);
+  box-shadow: inset 3px 0 var(--success);
 }
 .diff-lines > .removed {
   color: var(--ink);

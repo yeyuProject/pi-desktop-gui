@@ -320,7 +320,7 @@
 }
 .line-delta ins {
   text-decoration: none;
-  color: var(--accent);
+  color: var(--success);
 }
 .line-delta del {
   text-decoration: none;

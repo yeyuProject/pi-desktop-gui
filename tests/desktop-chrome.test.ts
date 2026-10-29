@@ -247,3 +247,25 @@ test('background themes paint the native window and title bar with their own pal
     assert.notEqual(background, windowTheme(theme === 'navy').background);
   }
 });
+
+test('Codex appearance paints the native window and titlebar without changing macOS traffic lights', () => {
+  for (const isMac of [true, false])
+    for (const dark of [true, false]) {
+      const colors: string[] = [],
+        overlays: unknown[] = [];
+      themeFactory(
+        {
+          isDestroyed: () => false,
+          setBackgroundColor: (color: string) => colors.push(color),
+          setTitleBarOverlay: (overlay: unknown) => overlays.push(overlay),
+        },
+        { shouldUseDarkColors: dark },
+        isMac,
+        windowTheme,
+        { state: { settings: { theme: 'system', uiStyle: 'codex' } } },
+      )();
+      const { background, ...overlay } = windowTheme(dark, 'system', 'codex');
+      assert.deepEqual(colors, [background]);
+      assert.deepEqual(overlays, isMac ? [] : [overlay]);
+    }
+});

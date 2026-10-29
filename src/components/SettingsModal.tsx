@@ -27,12 +27,14 @@ const api = window.desktop;
 import type { Workbench } from '../hooks/useWorkbench';
 import type { ReactNode } from 'react';
 import { useUnsavedChanges } from '../hooks/useUnsavedChanges';
+import { UI_STYLES, styleTheme } from '../../shared/window-theme';
 const draftKeys = [
   'piPath',
   'nodePath',
   'agentDir',
   'editorPath',
   'theme',
+  'uiStyle',
   'expandThinking',
   'fontScale',
   'sidebarWidth',
@@ -375,6 +377,23 @@ export function SettingsModal(
               {settingsTab === 'appearance' && (
                 <>
                   <h3>界面外观</h3>
+                  <label className="field-label" id="ui-style-label">
+                    界面风格
+                  </label>
+                  <div className="theme-options" role="group" aria-labelledby="ui-style-label">
+                    {UI_STYLES.map((style) => (
+                      <button
+                        key={style}
+                        className={prefs.uiStyle === style ? 'active' : ''}
+                        aria-pressed={prefs.uiStyle === style}
+                        onClick={() =>
+                          setPrefs({ ...prefs, uiStyle: style, theme: styleTheme(prefs.theme, style) })
+                        }
+                      >
+                        {style === 'classic' ? 'Pi 经典' : 'Codex'}
+                      </button>
+                    ))}
+                  </div>
                   <label className="field-label">主题</label>
                   <div className="theme-options">
                     {(
@@ -386,18 +405,26 @@ export function SettingsModal(
                         ['green', '豆沙绿', null],
                         ['navy', '深蓝', null],
                       ] as const
-                    ).map(([key, label, Icon]) => (
-                      <button
-                        className={prefs.theme === key ? 'active' : ''}
-                        key={key}
-                        onClick={() => {
-                          setPrefs({ ...prefs, theme: key });
-                        }}
-                      >
-                        {Icon ? <Icon size={23} /> : <span className="theme-swatch" data-theme={key} />}
-                        {label}
-                      </button>
-                    ))}
+                    )
+                      .filter(
+                        ([key]) => prefs.uiStyle !== 'codex' || ['light', 'dark', 'system'].includes(key),
+                      )
+                      .map(([key, label, Icon]) => (
+                        <button
+                          className={prefs.theme === key ? 'active' : ''}
+                          key={key}
+                          onClick={() => {
+                            setPrefs({ ...prefs, theme: key });
+                          }}
+                        >
+                          {Icon ? <Icon size={23} /> : <span className="theme-swatch" data-theme={key} />}
+                          {prefs.uiStyle === 'codex' && key === 'light'
+                            ? '白天'
+                            : prefs.uiStyle === 'codex' && key === 'dark'
+                              ? '夜晚'
+                              : label}
+                        </button>
+                      ))}
                   </div>
                   <label className="field-label">
                     字号比例 <span>{Math.round(prefs.fontScale * 100)}%</span>

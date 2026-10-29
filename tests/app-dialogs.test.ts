@@ -119,3 +119,37 @@ test('native window palette agrees with light and dark renderer tokens', () => {
     assert.equal(palette.height, 36);
   }
 });
+
+test('Codex native palettes agree with renderer tokens in both appearances', () => {
+  const css = fs.readFileSync(new URL('../src/styles/codex.css', import.meta.url), 'utf8');
+  for (const theme of ['light', 'dark'] as const) {
+    const start = css.indexOf(`:root[data-style='codex'][data-theme='${theme}']`);
+    assert.ok(start >= 0);
+    const section = css.slice(start, css.indexOf('}', start));
+    const palette = windowTheme(theme === 'dark', theme, 'codex');
+    for (const [token, color] of [
+      ['--bg', palette.background],
+      ['--rail', palette.color],
+      ['--ink', palette.symbolColor],
+    ])
+      assert.match(section, new RegExp(`${token}: ${color};`));
+    assert.equal(palette.height, 36);
+    assert.deepEqual(windowTheme(theme === 'dark', 'system', 'codex'), palette);
+  }
+});
+
+test('system dark repeats every explicit dark token, including syntax and ANSI colors', () => {
+  for (const file of ['base', 'themes', 'conversation-v014', 'codex']) {
+    const css = fs.readFileSync(new URL(`../src/styles/${file}.css`, import.meta.url), 'utf8');
+    const media = css.indexOf('@media (prefers-color-scheme: dark)');
+    assert.ok(media >= 0, file);
+    const darkStart = css.indexOf("[data-theme='dark']");
+    const dark = css.slice(darkStart, css.indexOf('}', darkStart));
+    const systemStart = css.indexOf("[data-theme='system']", media);
+    const system = css.slice(systemStart, css.indexOf('}', systemStart));
+    const tokens = (block: string) =>
+      Object.fromEntries([...block.matchAll(/(--[\w-]+):\s*([^;]+);/g)].map((match) => [match[1], match[2]]));
+    assert.ok(Object.keys(tokens(dark)).length > 0, file);
+    assert.deepEqual(tokens(system), tokens(dark), `${file}: system dark must match explicit dark`);
+  }
+});

@@ -55,10 +55,19 @@ try {
   await confirmation.getByRole('button', { name: '取消', exact: true }).click();
   assert.equal((await page.evaluate(() => window.desktop.invoke('bootstrap'))).state.sessions.length, 1);
   await page.getByRole('button', { name: '关闭', exact: true }).last().click();
-  for (const theme of ['light', 'sepia', 'green', 'dark', 'navy']) {
-    await page.evaluate((theme) => window.desktop.invoke('saveSettings', { theme }), theme);
+  for (const [uiStyle, theme] of [
+    ...['light', 'sepia', 'green', 'dark', 'navy'].map((theme) => ['classic', theme]),
+    ['codex', 'light'],
+    ['codex', 'dark'],
+  ]) {
+    await page.evaluate((appearance) => window.desktop.invoke('saveSettings', appearance), {
+      theme,
+      uiStyle,
+    });
     await expect.poll(() => page.evaluate(() => document.documentElement.dataset.theme)).toBe(theme);
-    contrast[theme] = await page.evaluate(() => {
+    await expect.poll(() => page.evaluate(() => document.documentElement.dataset.style)).toBe(uiStyle);
+    const key = `${uiStyle}-${theme}`;
+    contrast[key] = await page.evaluate(() => {
       const root = getComputedStyle(document.documentElement);
       const luminance = (hex) => {
         const c = hex
@@ -73,7 +82,7 @@ try {
         b = luminance(root.getPropertyValue('--rail'));
       return (Math.max(a, b) + 0.05) / (Math.min(a, b) + 0.05);
     });
-    assert.ok(contrast[theme] >= 4.5, `${theme}: ${contrast[theme]}`);
+    assert.ok(contrast[key] >= 4.5, `${key}: ${contrast[key]}`);
   }
   await app.evaluate(({ Menu }) =>
     Menu.getApplicationMenu()

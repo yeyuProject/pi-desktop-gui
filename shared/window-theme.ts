@@ -1,11 +1,17 @@
 export const THEMES = ['light', 'dark', 'system', 'sepia', 'green', 'navy'] as const;
 export type Theme = (typeof THEMES)[number];
+export const UI_STYLES = ['classic', 'codex'] as const;
+export type UiStyle = (typeof UI_STYLES)[number];
 
 /** Background themes reuse the light or dark native appearance for menus, dialogs and scrollbars. */
 export function nativeThemeSource(theme: Theme): 'light' | 'dark' | 'system' {
   if (theme === 'sepia' || theme === 'green') return 'light';
   if (theme === 'navy') return 'dark';
   return theme;
+}
+
+export function styleTheme(theme: Theme, style: UiStyle): Theme {
+  return style === 'codex' ? nativeThemeSource(theme) : theme;
 }
 
 /** These colors match --bg, --rail and --ink in src/styles/base.css and src/styles/themes.css. */
@@ -17,10 +23,17 @@ const palettes = {
   navy: { background: '#0f1828', color: '#0c1422', symbolColor: '#e2e9f3' },
 };
 
-export function windowTheme(dark: boolean, theme: Theme = 'system') {
+const codexPalettes = {
+  light: { background: '#ffffff', color: '#f9f9f9', symbolColor: '#0d0d0d' },
+  dark: { background: '#181818', color: '#131313', symbolColor: '#dddddd' },
+};
+
+export function windowTheme(dark: boolean, theme: Theme = 'system', style: UiStyle = 'classic') {
   const palette =
-    theme === 'sepia' || theme === 'green' || theme === 'navy'
-      ? palettes[theme]
-      : palettes[dark ? 'dark' : 'light'];
+    style === 'codex'
+      ? codexPalettes[dark ? 'dark' : 'light']
+      : theme === 'sepia' || theme === 'green' || theme === 'navy'
+        ? palettes[theme]
+        : palettes[dark ? 'dark' : 'light'];
   return { ...palette, height: 36 };
 }

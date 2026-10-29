@@ -1,6 +1,6 @@
 import { readGoalDraft } from '../shared/goal-input';
 import path from 'node:path';
-import { THEMES } from '../shared/window-theme';
+import { THEMES, UI_STYLES, styleTheme } from '../shared/window-theme';
 import { busy, type AppState, type Project, type Session, type Settings } from '../shared/types';
 import { isDraftQuote } from '../shared/message-content';
 
@@ -13,6 +13,7 @@ export const defaultSettings: Settings = {
   modelId: '',
   thinking: '',
   theme: 'system',
+  uiStyle: 'classic',
   expandThinking: false,
   fontScale: 1,
   sidebarWidth: 240,
@@ -169,11 +170,18 @@ export function parseState(value: unknown) {
     const valid =
       key === 'theme'
         ? (THEMES as readonly unknown[]).includes(candidate)
-        : typeof defaultSettings[key] === 'number'
-          ? typeof candidate === 'number' && Number.isFinite(candidate) && candidate > 0
-          : typeof candidate === typeof defaultSettings[key];
+        : key === 'uiStyle'
+          ? (UI_STYLES as readonly unknown[]).includes(candidate)
+          : typeof defaultSettings[key] === 'number'
+            ? typeof candidate === 'number' && Number.isFinite(candidate) && candidate > 0
+            : typeof candidate === typeof defaultSettings[key];
     if (valid) Object.assign(state.settings, { [key]: candidate });
     else repairedSettings++;
+  }
+  const theme = styleTheme(state.settings.theme, state.settings.uiStyle);
+  if (theme !== state.settings.theme) {
+    state.settings.theme = theme;
+    repairedSettings++;
   }
   if (typeof value.selectedSessionId === 'string' && sessionIds.has(value.selectedSessionId)) {
     state.selectedSessionId = value.selectedSessionId;

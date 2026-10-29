@@ -1,8 +1,16 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
+import { workbenchFixture } from './support/workbench-fixture.mjs';
 
 function desktopMock(script, options) {
+  if (script === 'scripts/readme-screenshots.mjs') {
+    return new Function(
+      'window',
+      'options',
+      `(${workbenchFixture.toString()})(options); return window.desktop;`,
+    )({}, options);
+  }
   const source = fs.readFileSync(script, 'utf8');
   const start = source.indexOf('const mock = ');
   const end = source.indexOf('\nconst server = ', start);
@@ -21,6 +29,8 @@ for (const [name, script, options] of [
   ['light screenshot', 'scripts/readme-screenshots.mjs', { theme: 'light', approval: false }],
   ['dark screenshot', 'scripts/readme-screenshots.mjs', { theme: 'dark', approval: false }],
   ['approval screenshot', 'scripts/readme-screenshots.mjs', { theme: 'light', approval: true }],
+  ['Codex day screenshot', 'scripts/readme-screenshots.mjs', { theme: 'light', uiStyle: 'codex' }],
+  ['Codex night screenshot', 'scripts/readme-screenshots.mjs', { theme: 'dark', uiStyle: 'codex' }],
   ['README demo', 'scripts/readme-demo.mjs', undefined],
 ]) {
   test(`${name} provides versioned independent bootstrap and completion snapshots`, async () => {
