@@ -1,3 +1,4 @@
+import { isGoalStartMessage } from '../../shared/goal-input';
 import { useEffect, useLayoutEffect, useMemo, useRef, useState, type RefObject } from 'react';
 import type { Message, Runtime, Session } from '../../shared/types';
 import { hideRecoveredErrors } from '../lib/conversation-layout';
@@ -54,7 +55,11 @@ export function useHistory(
           : history && history.sessionId === selected?.id
             ? history.messages
             : empty
-        ).filter((message) => message.role !== 'custom' || message.display !== false),
+        )
+          .map((message, index, all) =>
+            isGoalStartMessage(all, index) ? { ...message, goalStart: true } : message,
+          )
+          .filter((message) => message.role !== 'custom' || message.display !== false),
       ),
     [own, runtime.connected, runtime.messages, history, selected?.id],
   );

@@ -1,6 +1,13 @@
+import {
+  editGoalDraft,
+  exitGoalCommand,
+  goalCommandPreview,
+  withGoalBudget,
+  type GoalDraft,
+} from '../../shared/goal-input';
+import type { GoalSnapshot } from '../../shared/goal';
 import { useEffect, useRef, useState, type RefObject, type Dispatch, type SetStateAction } from 'react';
 import {
-  busy,
   type AppState,
   type Runtime,
   type Session,
@@ -48,7 +55,8 @@ export function useDraft({
   setError,
   setNotice,
 }: DraftOptions) {
-  const running = busy(runtime.status);
+  const [draftGoal, setDraftGoal] = useState<GoalDraft>();
+  const goalDraftRef = useRef<GoalDraft>(undefined);
   const [draft, setDraft] = useState(''),
     [attachments, setAttachments] = useState<string[]>([]),
     [sendMode, setSendMode] = useState<'steer' | 'followUp'>('steer');
@@ -86,6 +94,10 @@ export function useDraft({
   const withAttachments = async (operation: () => Promise<void>) => {
     const id = selected?.id;
     if (!id) return;
+    if (goalDraftRef.current?.kind === 'edit') {
+      setError('请先保存或取消目标修改');
+      return;
+    }
     attachmentJobs.current[id] = (attachmentJobs.current[id] ?? 0) + 1;
     updateAttachmentJobs((value) => value + 1);
     try {
@@ -107,17 +119,29 @@ export function useDraft({
   const input = useRef<HTMLTextAreaElement>(null),
     commandList = useRef<HTMLDivElement>(null),
     fileList = useRef<HTMLDivElement>(null);
-  const commandMatch = /^(\/\/?)([^\s]*)$/.exec(draft);
+  const commandMatch = draftGoal?.kind === 'edit' ? null : /^(\/\/?)([^\s]*)$/.exec(draft);
   const commandQuery = commandMatch?.[2].toLowerCase();
   const piOnly = commandMatch?.[1] === '//';
   const allCommands: (PiCommand & { prefix: string })[] = [
     ...(piOnly
       ? []
       : builtinCommands.filter((c) => project || c.name !== 'trust').map((c) => ({ ...c, prefix: '/' }))),
-    ...runtime.commands.map((c) => ({
-      ...c,
-      prefix: piOnly || builtinCommands.some((b) => b.name === c.name) ? '//' : '/',
-    })),
+    ...(piOnly
+      ? []
+      : [
+          {
+            name: 'goal',
+            description: '持续执行目标；edit、status、pause、resume、clear',
+            source: 'desktop' as const,
+            prefix: '/',
+          },
+        ]),
+    ...runtime.commands
+      .filter((c) => piOnly || c.name !== 'goal')
+      .map((c) => ({
+        ...c,
+        prefix: piOnly || builtinCommands.some((b) => b.name === c.name) ? '//' : '/',
+      })),
   ];
   const commandOptions =
     commandQuery !== undefined && !hideCommands
@@ -135,12 +159,15 @@ export function useDraft({
           )
           .slice(0, 40)
       : [];
-  const typedCommand = /^(\/\/?)(\S+)(?:\s|$)/.exec(draft);
+  const typedCommand = draftGoal?.kind === 'edit' ? null : /^(\/\/?)(\S+)(?:\s|$)/.exec(draft);
   const activeCommand = typedCommand
     ? allCommands.find((c) => c.prefix === typedCommand[1] && c.name === typedCommand[2])
     : undefined;
   const completeCommand = (c: PiCommand & { prefix: string }) => {
-    persistDraft(c.prefix + c.name + ' ');
+    if (c.name === 'goal' && c.prefix === '/') {
+      persistDraft('');
+      openGoalComposer();
+    } else persistDraft(c.prefix + c.name + ' ');
     setHideCommands(true);
     input.current?.focus();
   };
@@ -152,6 +179,10 @@ export function useDraft({
     quotes = composerDraft.current.quotes,
   ) => {
     if (!selected || stateRef.current?.selectedSessionId !== selected.id) return;
+    if (goalDraftRef.current?.kind === 'edit') {
+      setError('请先保存或取消目标修改');
+      return;
+    }
     draftRevision.current++;
     const picturesChanged = pictures !== composerDraft.current.images;
     if (picturesChanged) {
@@ -180,15 +211,67 @@ export function useDraft({
       pendingDrafts.current--;
     });
   };
+  const persistDraftGoal = (value: GoalDraft | undefined) => {
+    if (!selected || stateRef.current?.selectedSessionId !== selected.id) return;
+    draftRevision.current++;
+    goalDraftRef.current = value;
+    setDraftGoal(value);
+    pendingDrafts.current++;
+    savingDraft.current = attempt(() => api.invoke('saveDraftGoal', selected.id, value ?? null)).finally(
+      () => {
+        pendingDrafts.current--;
+      },
+    );
+  };
+  const exitGoalMode = () => {
+    const current = goalDraftRef.current;
+    persistDraftGoal(current?.kind === 'edit' ? current.restore : undefined);
+    if (current?.kind !== 'edit' && goalCommandPreview(composerDraft.current.draft))
+      persistDraft(exitGoalCommand(composerDraft.current.draft));
+    setHideCommands(true);
+    setFileQuery(null);
+    focusComposer();
+  };
+  const openGoalComposer = (replace = false) => {
+    if (!selected) return;
+    if (!replace && (goalDraftRef.current || goalCommandPreview(composerDraft.current.draft)?.objective)) {
+      exitGoalMode();
+      return;
+    }
+    const goal = runtime.sessionId === selected.id ? runtime.goal : undefined;
+    if (!replace && goal && goal.status !== 'completed')
+      void attempt(() => api.invoke('openGoal', selected.id));
+    else persistDraftGoal({ kind: 'start' });
+    setHideCommands(true);
+    focusComposer();
+  };
+  const editGoal = (goal: GoalSnapshot) => {
+    if (goalDraftRef.current?.kind === 'edit') {
+      focusComposer();
+      return;
+    }
+    persistDraftGoal(editGoalDraft(goal, goalDraftRef.current));
+    setHideCommands(true);
+    setFileQuery(null);
+    focusComposer();
+  };
+  const setGoalBudget = (tokenBudget?: number) => {
+    if (goalCommandPreview(composerDraft.current.draft))
+      persistDraft(withGoalBudget(composerDraft.current.draft, tokenBudget));
+    persistDraftGoal({ kind: 'start', tokenBudget });
+  };
   const flushDraft = async () => {
     // invoke calls from this renderer are ordered. Flush the accepted save now,
     // before waiting for its acknowledgment, rather than waiting out the debounce.
     if (pendingDrafts.current) await api.invoke('flushDraft');
     await savingDraft.current;
   };
-  const composeDraft = () =>
+  const composeDraft = (body = composerDraft.current.draft) =>
     composeQuotedInput(
-      composeDraftText(composerDraft.current.draft, composerDraft.current.snippets),
+      composeDraftText(
+        body,
+        moveSnippetOffsets(composerDraft.current.draft, body, composerDraft.current.snippets),
+      ),
       composerDraft.current.quotes,
     );
   const addQuote = (quote: DraftQuote) => {
@@ -270,12 +353,14 @@ export function useDraft({
   };
   const onDraft = (value: string) => {
     recall.current = -1;
+    if (goalDraftRef.current?.kind === 'edit') {
+      persistDraftGoal({ ...goalDraftRef.current, objective: value });
+      return;
+    }
     persistDraft(value);
     setHideCommands(false);
     setCommandIndex(0);
     setFileIndex(0);
-    if (value === '/' && selected && !runtime.connected && !running)
-      void attempt(() => api.invoke('connect', selected.id));
     const match = value.match(/(?:^|\s)@([^\s@]*)$/);
     setFileQuery(project && match ? match[1] : null);
   };
@@ -372,7 +457,7 @@ export function useDraft({
     // Observe the container so wrapping changes also resize the input.
     observer.observe(textarea.parentElement!);
     return () => observer.disconnect();
-  }, [draft, inputMaxHeight, state?.settings.fontScale, Boolean(state)]);
+  }, [draft, draftGoal, inputMaxHeight, state?.settings.fontScale, Boolean(state)]);
   useEffect(() => {
     localStorage.setItem('pi.composerMaxHeight', String(inputMaxHeight));
   }, [inputMaxHeight]);
@@ -387,6 +472,8 @@ export function useDraft({
       snippets: selected.draftSnippets ?? [],
       quotes: selected.draftQuotes ?? [],
     };
+    goalDraftRef.current = selected.draftGoal;
+    setDraftGoal(selected.draftGoal);
     setDraft(selected.draft);
     setAttachments(selected.attachments);
     setSnippets(selected.draftSnippets ?? []);
@@ -394,6 +481,7 @@ export function useDraft({
   }, [
     selected?.id,
     selected?.draft,
+    selected?.draftGoal,
     selected?.attachments.join('|'),
     selected?.draftSnippets,
     selected?.draftQuotes,
@@ -491,7 +579,13 @@ export function useDraft({
     fileList.current?.querySelector('[aria-selected="true"]')?.scrollIntoView({ block: 'nearest' });
   }, [fileIndex]);
   return {
-    draft,
+    draft: draftGoal?.kind === 'edit' ? draftGoal.objective : draft,
+    draftGoal,
+    openGoalComposer,
+    exitGoalMode,
+    editGoal,
+    setGoalBudget,
+    persistDraftGoal,
     attachments,
     images,
     sendMode,

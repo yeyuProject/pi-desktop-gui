@@ -120,20 +120,6 @@
   color: var(--muted);
   font-size: 11px;
 }
-.goal-dialog label {
-  display: grid;
-  gap: 5px;
-  margin: 6px 0;
-}
-.goal-dialog details {
-  margin-top: 12px;
-}
-.goal-dialog summary {
-  cursor: pointer;
-}
-.goal-dialog p {
-  font-size: 12px;
-}
 .goal-completed-dot {
   width: 6px;
   height: 6px;
@@ -150,4 +136,88 @@
   .goal-reason {
     display: none;
   }
+}
+
+.goal-mode-bar {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+  padding: 7px 10px;
+  margin: -1px -1px 5px;
+  border: 1px solid color-mix(in srgb, var(--accent) 30%, var(--line));
+  border-radius: 8px 8px 0 0;
+  background: color-mix(in srgb, var(--accent) 12%, var(--surface));
+  color: var(--text);
+  font-size: 12px;
+}
+.goal-mode-bar > span:not(.goal-budget-picker) {
+  color: var(--muted);
+}
+.goal-mode-bar > small {
+  flex-basis: 100%;
+  color: var(--warning);
+}
+.goal-mode-bar > button {
+  margin-left: auto;
+}
+.goal-mode-bar button {
+  min-height: 24px;
+  padding: 2px 5px;
+  font-size: 12px;
+}
+.goal-button[aria-pressed='true'] {
+  color: var(--accent);
+  background: var(--hover);
+}
+.goal-budget-picker {
+  position: relative;
+  display: inline-flex;
+  flex-shrink: 0;
+}
+.goal-budget-popover {
+  position: absolute;
+  bottom: calc(100% + 6px);
+  right: 0;
+  z-index: 80;
+  width: min(300px, 80vw);
+  padding: 12px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--surface);
+  color: var(--text);
+  box-shadow: 0 8px 32px #0003;
+  white-space: normal;
+}
+.goal-budget-popover label {
+  display: grid;
+  gap: 6px;
+  margin-bottom: 8px;
+}
+.goal-budget-popover p {
+  font-size: 12px;
+  line-height: 1.5;
+}
+.goal-budget-popover button {
+  display: inline-block;
+}
+.goal-message-badge {
+  color: var(--accent);
+  font-size: 11px;
+}
+.goal-previous-result {
+  padding: 4px;
+  min-width: 20px;
+}
+.goal-previous-result .goal-completed-dot {
+  display: block;
+}
+.composer .send-button {
+  min-width: 30px;
+  width: auto;
+  white-space: nowrap;
+}
+
+.composer .goal-send-button {
+  padding: 0 10px;
 }

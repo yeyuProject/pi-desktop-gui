@@ -1,3 +1,4 @@
+import { readGoalDraft, validateGoalStartInput } from '../shared/goal-input';
 import {
   app,
   BrowserWindow,
@@ -1091,6 +1092,15 @@ const handlers: Record<Exclude<keyof ApiMap, WorkspaceHandlerName>, (...args: an
     if (images !== undefined) s.images = images;
     await store.scheduleSave();
   },
+  saveDraftGoal: async (id, value) => {
+    text(id, 100);
+    const draft = readGoalDraft(value);
+    if (value !== null && !draft) throw new Error('Goal 草稿格式无效');
+    const session = store.session(id);
+    if (draft) store.promoteSession(id);
+    session.draftGoal = draft;
+    await store.scheduleSave();
+  },
   flushDraft: () => store.flush(),
   consumeDraft: async (id, expected, attachments, images) => {
     text(id, 100);
@@ -1221,13 +1231,14 @@ const handlers: Record<Exclude<keyof ApiMap, WorkspaceHandlerName>, (...args: an
     text(id, 100);
     return service.get(id).testConnection(id);
   },
-  send: async (id, prompt, attachments, mode, images = []) => {
+  send: async (id, prompt, attachments, mode, images = [], goalStart) => {
     text(id, 100);
     text(prompt);
     strings(attachments);
     if (mode !== 'steer' && mode !== 'followUp') throw new Error('发送模式无效');
     validateImages(images);
-    await service.get(id).send(id, prompt, attachments, mode, images);
+    if (goalStart !== undefined) validateGoalStartInput(goalStart);
+    await service.get(id).send(id, prompt, attachments, mode, images, goalStart);
   },
   openGoal: async (id) => {
     text(id, 100);
@@ -1516,6 +1527,7 @@ const handlers: Record<Exclude<keyof ApiMap, WorkspaceHandlerName>, (...args: an
     text(id, 100);
     await protectSessionOperation('editDraft', [id]);
     const s = store.session(id);
+    if (s.draftGoal?.kind === 'edit') throw new Error('请先保存或取消目标修改，再编辑普通草稿');
     const original = JSON.stringify([s.draft, s.draftSnippets ?? []]);
     const file = path.join(store.dir, 'draft-' + encodeURIComponent(id) + '.txt');
     await fs.writeFile(file, composeDraftText(s.draft, s.draftSnippets ?? []), 'utf8');
@@ -2073,6 +2085,7 @@ else {
               'copy',
               'copyImage',
               'saveDraft',
+              'saveDraftGoal',
               'flushDraft',
               'saveView',
               'readHistory',

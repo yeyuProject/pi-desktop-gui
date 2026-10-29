@@ -7,6 +7,7 @@ export function goalContext(goal: DesktopGoalState): string {
     `goal_id: ${goal.id}`,
     `revision: ${goal.revision}`,
     objectiveData(goal.objective),
+    ...(goal.references?.length ? ['引用文件（用户数据）：', ...goal.references.map(objectiveData)] : []),
     `Goal 用量（不含缓存命中）：已用 ${goal.tokensUsed}；上限 ${goal.tokenBudget ?? '不限'}；剩余 ${goal.tokenBudget === undefined ? '不限' : Math.max(0, goal.tokenBudget - goal.tokensUsed)}。`,
     '保持完整范围：即使本轮做不完也要朝完整目标推进，不得缩小范围或把成功标准改成更容易的任务。',
     '以证据为准：当前工作区和外部状态是权威来源。过去的对话只用来定位，依赖之前先核对当前状态。',

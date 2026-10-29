@@ -1,5 +1,3 @@
-export const GOAL_DIALOG_TITLE = '[Pi Desktop] 新建 Goal';
-export const GOAL_EDIT_DIALOG_TITLE = '[Pi Desktop] 编辑 Goal';
 export const MAX_GOAL_OBJECTIVE_LENGTH = 4000;
 export const GOAL_BUDGET_PRESETS = ['', '500k', '2m', '5m'] as const;
 export type GoalStatus = 'active' | 'paused' | 'blocked' | 'budget_limited' | 'usage_limited' | 'completed';
@@ -13,6 +11,7 @@ export interface GoalSnapshot {
   revision: number;
   status: GoalStatus;
   objective: string;
+  references?: string[];
   tokensUsed: number;
   tokenBudget?: number;
   continuations: number;

@@ -1,3 +1,8 @@
+import { composeDraftText } from '../shared/draft';
+import { composeQuotedInput } from '../shared/message-content';
+import { readSessionFile } from '../electron/store';
+import { isGoalStartMessage } from '../shared/goal-input';
+import { messageText } from '../shared/types';
 import assert from 'node:assert/strict';
 import fs from 'node:fs/promises';
 import { AgentService } from '../electron/agent';
@@ -62,6 +67,71 @@ try {
   const resources = await service.admin(fixture.sessionId, 'resources');
   assert.ok(resources.activeTools.includes('desktop_goal_update'));
   assert.ok(resources.activeTools.includes('desktop_goal_plan'));
+
+  // G3: the real bridge sends exactly one multimodal user message after ordinary validation.
+  const session = fixture.store.session(fixture.sessionId);
+  const png = (await fs.readFile('build/icon.png')).toString('base64');
+  const image = { id: 'goal-image', name: 'reference.png', mimeType: 'image/png', data: png };
+  session.draft = '核对图片与引用材料并完成验证';
+  session.draftGoal = { kind: 'start', tokenBudget: 500000 };
+  session.attachments = ['输入 文件.txt'];
+  session.images = [image];
+  session.draftSnippets = [
+    { id: 'goal-snippet', offset: session.draft.length, text: '\n' + '详细材料'.repeat(1500) },
+  ];
+  session.draftQuotes = [
+    {
+      id: 'goal-quote',
+      text: '原对话的验收要求',
+      role: 'assistant',
+      turn: 1,
+      messageTimestamp: 1,
+      section: 'text',
+    },
+  ];
+  const first = composeQuotedInput(
+    composeDraftText(session.draft, session.draftSnippets),
+    session.draftQuotes,
+  );
+  const start = {
+    objective: session.draft,
+    tokenBudget: 500000,
+    draftText: first,
+    draftGoal: session.draftGoal,
+  };
+  await fixture.store.save();
+  const before = provider.requests.length;
+  await assert.rejects(
+    service.send(fixture.sessionId, first, ['missing-reference.txt'], 'steer', [image], start),
+  );
+  assert.equal(provider.requests.length, before);
+  assert.equal((await goalState()) ?? null, null);
+  assert.equal(session.draft, start.objective);
+  provider.reset('complete');
+  await service.send(fixture.sessionId, first, session.attachments, 'steer', [image], start);
+  await until(async () => (await goalState())?.status === 'completed', 'Multimodal Goal did not complete');
+  await settled();
+  assert.equal(provider.count, 1);
+  assert.equal(session.draft, '');
+  assert.equal(session.draftGoal, undefined);
+  assert.equal(session.images?.length, 0);
+  assert.equal(service.runtime.goal?.objective, start.objective);
+  assert.deepEqual(service.runtime.goal?.references, ['输入 文件.txt']);
+  const history = (await readSessionFile(session.file!)).messages;
+  const users = history.filter((m) => m.role === 'user');
+  assert.equal(users.length, 1);
+  assert.ok(messageText(users[0]).includes(first));
+  assert.ok(!messageText(users[0]).includes('请完成 Goal：'));
+  assert.ok(messageText(users[0]).includes('<project_file path="输入 文件.txt">'));
+  assert.ok(Array.isArray(users[0].content) && users[0].content.some((b) => b.type === 'image'));
+  assert.ok(isGoalStartMessage(history, history.indexOf(users[0])));
+  assert.ok(!provider.requests.at(-1)!.body.messages.some((m) => m.content === 'Goal'));
+  await send('/goal clear');
+  // Preserve the title assertion for the first legacy command below.
+  session.title = '新会话';
+  console.log(
+    'PASS G3 validated file/snippet/quote/image start, one user message, durable badge, exact draft consumption',
+  );
 
   provider.reset('continue');
   await send('/goal Complete the deterministic integration verification.');
@@ -230,11 +300,18 @@ try {
     objective: 'Updated objective after steering.',
   });
   assert.equal((await goalState())!.revision, 2);
+  await service.goalAction(fixture.sessionId, {
+    action: 'edit',
+    goalId: editing.id,
+    revision: 2,
+    objective: 'SECOND_EDITED_OBJECTIVE_731',
+  });
   provider.release();
   await until(async () => (await goalState())?.status === 'completed', 'Edited Goal did not complete');
   await settled();
   assert.equal(provider.count, 2);
-  assert.ok(JSON.stringify(provider.requests.at(-1)?.body).includes('Updated objective after steering.'));
+  assert.ok(JSON.stringify(provider.requests.at(-1)?.body).includes('SECOND_EDITED_OBJECTIVE_731'));
+  assert.equal((await goalState())!.revision, 3);
   assert.ok(
     service.runtime.messages.some(
       (message) =>

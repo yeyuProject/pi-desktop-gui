@@ -1,7 +1,6 @@
+import type { ImageContent } from '@earendil-works/pi-ai';
 import { randomUUID } from 'node:crypto';
 import {
-  GOAL_DIALOG_TITLE,
-  GOAL_EDIT_DIALOG_TITLE,
   goalRequestTokens,
   validateGoalAction,
   validateGoalObjective,
@@ -92,9 +91,15 @@ export function registerDesktopGoal(pi: ExtensionAPI) {
     return next;
   };
   const save = (next: DesktopGoalState | undefined, ctx: ExtensionContext) => {
+    const previous = { goal, activeSince, accountingGoalId, stateRevision, hasGoalHistory, stateError };
     advance(next);
-    // Persist before publishing or aborting. Late events see the stopped state.
-    pi.appendEntry(DESKTOP_GOAL_ENTRY_TYPE, goal ?? null);
+    // A failed append must not commit a new in-memory Goal.
+    try {
+      pi.appendEntry(DESKTOP_GOAL_ENTRY_TYPE, goal ?? null);
+    } catch (error) {
+      ({ goal, activeSince, accountingGoalId, stateRevision, hasGoalHistory, stateError } = previous);
+      throw error;
+    }
     render(ctx);
   };
   const pause = (reason: string, ctx: ExtensionContext) => {
@@ -106,7 +111,7 @@ export function registerDesktopGoal(pi: ExtensionAPI) {
     if (missing.length)
       throw new Error(`Goal 工具已停用：${missing.join('、')}。请在工具设置中启用后再开始或恢复。`);
   };
-  const requireModel = async (ctx: ExtensionContext) => {
+  const requireModel = async (ctx: ExtensionContext, allowRunning = false) => {
     const model = ctx.model;
     if (!model) throw new Error('请先选择一个可用模型，再开始或恢复 Goal。');
     const revision = stateRevision;
@@ -114,7 +119,7 @@ export function registerDesktopGoal(pi: ExtensionAPI) {
       const auth = await ctx.modelRegistry.getApiKeyAndHeaders(model);
       if (!auth.ok) throw new Error('当前模型尚未通过认证，请检查服务商登录或密钥后再开始 Goal。');
     }
-    if (revision !== stateRevision || !ctx.isIdle())
+    if (revision !== stateRevision || (!allowRunning && !ctx.isIdle()))
       throw new Error('Goal 或任务状态已变化，请重新确认后再开始或恢复。');
     if (ctx.model?.provider !== model.provider || ctx.model?.id !== model.id)
       throw new Error('所选模型已变化，请重新开始或恢复 Goal。');
@@ -166,7 +171,8 @@ export function registerDesktopGoal(pi: ExtensionAPI) {
       messages: [
         ...event.messages.filter(
           (message) =>
-            message.role !== 'custom' || ![GOAL_CONTEXT, 'desktop-goal-budget'].includes(message.customType),
+            message.role !== 'custom' ||
+            ![GOAL_CONTEXT, 'desktop-goal-budget', 'desktop-goal-start'].includes(message.customType),
         ),
         { role: 'custom' as const, customType: GOAL_CONTEXT, content, display: false, timestamp: Date.now() },
       ],
@@ -407,7 +413,8 @@ export function registerDesktopGoal(pi: ExtensionAPI) {
     },
   });
 
-  const execute = async (command: GoalCommand | GoalAction, ctx: ExtensionContext) => {
+  type StartPayload = { references?: string[]; firstMessage?: { text: string; images?: ImageContent[] } };
+  const execute = async (command: (GoalCommand | GoalAction) & StartPayload, ctx: ExtensionContext) => {
     if (command.action === 'clear') {
       const ownedRun = goal !== undefined && goal.id === accountingGoalId;
       save(undefined, ctx);
@@ -451,7 +458,9 @@ export function registerDesktopGoal(pi: ExtensionAPI) {
       );
       pi.sendMessage(
         { customType: GOAL_CONTEXT, content: goalUpdatedContext(goal!), display: false },
-        ctx.isIdle() ? {} : { deliverAs: 'steer' },
+        // The context hook projects the latest revision at the next provider boundary.
+        // Record the edit without leaving a queued turn that could run after completion.
+        { triggerTurn: false, ...(ctx.isIdle() ? {} : { deliverAs: 'steer' as const }) },
       );
     } else if (command.action === 'resume' || command.action === 'budget') {
       if (!goal || goal.status === 'completed') throw new Error('当前没有可恢复的 Goal。');
@@ -479,10 +488,12 @@ export function registerDesktopGoal(pi: ExtensionAPI) {
       pi.sendUserMessage(`继续完成 Goal：\n${goal!.objective}`);
     } else if (command.action === 'start') {
       validateGoalObjective(command.objective);
+      requireTools();
+      await requireModel(ctx, true);
       if (goal && goal.status !== 'completed') {
         const prior = { id: goal.id, revision: goal.revision, status: goal.status };
         if (!(await ctx.ui.confirm('替换当前 Goal？', '当前 Goal 的进度记录会清除，已完成的修改保留。')))
-          return;
+          return false;
         if (goal?.id !== prior.id || goal.revision !== prior.revision || goal.status !== prior.status)
           throw new Error('Goal 已变化，请重新确认替换。');
         if (!ctx.isIdle()) {
@@ -503,6 +514,7 @@ export function registerDesktopGoal(pi: ExtensionAPI) {
           id: randomUUID(),
           revision: 1,
           objective: command.objective.trim(),
+          references: command.references?.length ? [...command.references] : undefined,
           status: 'active',
           tokenBudget: command.tokenBudget,
           tokensUsed: 0,
@@ -517,28 +529,33 @@ export function registerDesktopGoal(pi: ExtensionAPI) {
         },
         ctx,
       );
-      pi.sendUserMessage(`请完成 Goal：\n${goal!.objective}`);
+      pi.sendMessage(
+        { customType: 'desktop-goal-start', content: 'Goal', display: false, details: { goalId: goal!.id } },
+        { triggerTurn: false },
+      );
+      const first = command.firstMessage;
+      pi.sendUserMessage(
+        first ? [{ type: 'text', text: first.text }, ...(first.images ?? [])] : command.objective,
+      );
     }
+    return true;
   };
   pi.registerCommand('goal', {
     description: '持续执行目标：/goal [--tokens N] <目标>；edit [新目标]、status、pause、resume、clear',
     handler: async (input, ctx) => {
       try {
-        let command: GoalCommand | GoalAction = parseGoalCommand(input);
+        const command = parseGoalCommand(input);
         if (stateError && command.action !== 'clear') throw new Error(stateError);
-        if ((command.action === 'menu' && !goal) || (command.action === 'edit' && !command.objective)) {
-          const previous = goal && { id: goal.id, revision: goal.revision };
-          const editing = command.action === 'edit';
-          if (editing && !goal) throw new Error('当前没有可编辑的 Goal。');
-          const response = await ctx.ui.input(editing ? GOAL_EDIT_DIALOG_TITLE : GOAL_DIALOG_TITLE, '');
-          if (response === undefined) return;
-          if (goal?.id !== previous?.id || goal?.revision !== previous?.revision)
-            throw new Error('Goal 已变化，请重新打开 Goal。');
-          const action: unknown = JSON.parse(response);
-          validateGoalAction(action);
-          if (action.action !== (editing ? 'edit' : 'start'))
-            throw new Error('Goal 操作无效，请重新打开 Goal。');
-          command = action;
+        if (
+          (command.action === 'menu' && (!goal || goal.status === 'completed')) ||
+          (command.action === 'edit' && !command.objective)
+        ) {
+          if (command.action === 'edit' && !goal) throw new Error('当前没有可编辑的 Goal。');
+          ctx.ui.notify(
+            '__PI_DESKTOP__' +
+              JSON.stringify({ type: 'desktop_goal_compose', edit: command.action === 'edit' }),
+          );
+          return;
         }
         await execute(command, ctx);
       } catch (error) {
@@ -552,8 +569,7 @@ export function registerDesktopGoal(pi: ExtensionAPI) {
       if (value.action !== 'start' && goal?.id !== value.goalId)
         throw new Error('Goal 已变化，请重新打开 Goal。');
       if (stateError && value.action !== 'clear') throw new Error(stateError);
-      await execute(value, ctx);
-      return { applied: true };
+      return { applied: await execute(value, ctx) };
     },
   };
 }

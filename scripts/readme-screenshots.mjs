@@ -378,6 +378,7 @@ try {
     ['workspace-light', 'light', false],
     ['workspace-dark', 'dark', false],
     ['approval', 'light', true],
+    ['goal-composer', 'light', false],
   ];
   for (const [name, theme, approval] of shots) {
     const page = await browser.newPage({ viewport: { width: 1440, height: 900 }, deviceScaleFactor: 2 });
@@ -392,6 +393,15 @@ try {
       .click();
     await page.locator('aside').getByText('src/auth/validate.ts').click();
     await page.locator('.preview-toolbar').waitFor();
+    if (name === 'goal-composer') {
+      await page.getByRole('button', { name: 'Goal 目标管理', exact: true }).click();
+      await page
+        .getByRole('textbox', { name: '任务输入' })
+        .fill('完善登录校验与错误提示，补齐边界测试并确认全部通过。');
+      await page.getByRole('button', { name: 'Goal 上限', exact: true }).click();
+      await page.getByRole('combobox', { name: 'Goal 用量上限' }).selectOption('500k');
+      await page.getByRole('button', { name: '确定上限' }).click();
+    }
     await page.waitForTimeout(800);
     if (errors.length) throw new Error(`${name}: ${errors.join('; ')}`);
     await page.screenshot({ path: path.join(outDir, `${name}.png`) });
