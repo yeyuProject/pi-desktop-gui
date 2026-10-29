@@ -2,6 +2,176 @@
 
 首版功能 页面与交互设计
 
+## 代码腐化治理（待实现）
+
+### H1 文档、测试入口与代码现状重新对齐
+
+2026-10-29 基于 `main@f1eb0cd`（v0.14.56）排查。排查方法：`tsc --noUnusedLocals --noUnusedParameters`、只在声明文件中出现的导出、文档引用的路径是否存在、`scripts/test-*` 是否接入 `package.json` 和 CI、文件行数与 v0.8.0 R2 的对比，以及版本号和发布说明的核对。`npm run lint` 和 `npm run format:check` 均通过。代码本身没有大面积腐化，问题集中在三类：本文档的数字与基线落后于代码；有测试未接入任何入口；两个主进程文件重新膨胀。
+
+**背景与问题。**
+
+1. **本文档写的 Pi 回归基线还是 1.1.0。** v0.14.47（`2656235`）已把 `shared/pi-version.ts:2` 的 `VERIFIED` 和开发依赖改为 1.4.0，双语 README 和 `docs/goal.md:69` 同步改了，本文档没改。仍写 1.1.0 的位置：“12 官方资料与版本依据”开头两段、F01 环境检查、v0.7.0 小节开头的审批验收说明、S1 的“跨目录验证结论”。S1–S11 引用的 `blob/v1.1.0` 文档链接也没有按 1.4.0 重新核对。“版本升级必须重新运行协议和生命周期验收”这条约定，目前没有记录可以证明已经执行过。
+2. **R2 的数字已经过时，拆分成果在退化。** R2 写的是“`App.tsx` 为 73 行，`src/` 最大文件为 676 行”。v0.8.0 定的上限是 `App.tsx` ≤ 400 行、单个文件 ≤ 800 行。现在 `src/App.tsx` 483 行；`src/` 下超过 800 行的有 `components/Conversation.tsx`、`components/Composer.tsx`（均 873 行）、`hooks/useWorkbench.ts`（841 行）、`styles/conversation-v014.css`（815 行）。主进程两个文件在 v0.8.0 时约 1200 行，现在 `electron/agent.ts` 2527 行、`electron/main.ts` 2346 行。v0.8 验收记录（`docs/v0.8-validation.md:40`）当时就点名这两处，建议继续拆分。之后 Goal 和侧边对话又直接加进 `AgentService`（`agent.ts:1462` `goalAction`、`agent.ts:2344` `sideChat`），`main.ts:571` 的 `handlers` 也还有 90 个左右的方法。目前只有工作区相关的 IPC 拆到了 `electron/ipc/workspace-handlers.ts`。
+3. **执行约定被绕开。** “执行约定”要求平台差异统一放在 `electron/platform.ts`。下列位置仍直接判断 `process.platform`，且 `platform.ts` 已导出 `isWindows`：`electron/snapshot.ts:43`、`electron/environment.ts:48`（同一函数下一行就用了 `isWindows`）、`electron/main.ts:246`、`main.ts:1663`、`main.ts:1729`。`main.ts:541`、`main.ts:1922`、`main.ts:1946` 是把平台值传给诊断和更新模块，属于数据传递，不在本条范围内。
+4. **有测试没有接入入口。**
+   - `scripts/test-workspace-v014-performance.ts` 不在 `package.json` 的任何命令中，CI 也不运行。`docs/v0.14-validation.md:53` 把它列为 v0.14 的性能证据。脚本目前仍能运行（本机 1 万文件中位 153 ms），但只打印结果、没有断言，回归时不会失败。
+   - 另有 7 个 `test:*` 命令没有出现在 CI 中，但都不算问题：`test:scroll-ui`、`test:transcript-ui`、`test:images-ui` 已包含在 `test:ui` 里，`test:v014-ui`、`test:retry-ui` 包含在 `test:features-ui` 里，`test:retry` 包含在 `test:features` 里，`test:concurrency` 的两个脚本 CI 已分别运行。它们只是本地快捷方式。
+5. **本文档引用的测试文件不存在。** W3 和 E1 的“测试”段写的 `tests/workspace.test.ts` 从未存在。实际覆盖分别在 `tests/workspace-watch.test.ts` 和 `tests/workspace-v014.test.ts`。
+6. **未使用的符号。** lint 规则用 `args: 'none'` 关闭了未使用参数检查，`varsIgnorePattern: '^_'` 放过了下划线变量，所以下列问题 lint 发现不了，`tsc --noUnusedLocals --noUnusedParameters` 能报出来：
+   - `electron/main.ts:254` `_lastToast` 只写不读。注释说明是为了保留通知对象，避免点击回调被回收，属于有意为之，但没有测试保护。
+   - `src/features/HelpTab.tsx:4` 的 `source`、`src/features/ProvidersTab.tsx:15,36` 的 `filter`、`disabled`、`src/hooks/useLayer.ts:8` 的 `action`：组件和函数签名声明了但没有使用。
+   - 只在声明文件中出现、项目内无调用的导出：`electron/updater.ts:69` `fetchReleaseNotes`、`electron/platform.ts:339` `trashName`。
+   - `electron/updater.ts` 的 `installOnQuit` 字段始终为 `false`，`prepareForQuit(_allowInstall)` 忽略参数。`main.ts` 的三处调用（1762、1842、1992 行）都不会产生实际效果。
+7. **`any` 集中在 Pi 事件入口。** `src`、`electron`、`shared` 共 42 处 `any`，15 处在 `electron/agent.ts`，包括事件入口 `onEvent(record: any)`（460 行）和扩展入口 `extension(record: any)`（738 行）。lint 以“Pi 载荷是动态的”为由关闭了 `no-explicit-any`。RPC 响应已经由 `electron/pi/protocol.ts` 的 `validateRpcResult` 校验，但事件流（`text_delta`、`toolcall_end`、`message_end`、`agent_settled`、`extension_ui_request` 等）仍然直接按字段读取。这和 R3“不猜测字段”的约定不一致：Pi 改了事件字段时，只会表现为界面静默缺内容，不会报协议错误。
+8. **以版本号命名的文件。** `src/styles/conversation-v014.css`、`src/styles/workspace-v014.css`、5 个 `tests/*-v014.test.ts` 和 4 个 `scripts/test-*-v014*` 都按 v0.14.0 的交付批次命名。`conversation-v014.css` 之后又经过 v0.14.20、v0.14.39、v0.14.48、v0.14.50、v0.14.53、v0.14.56 的修改，已经不是“v0.14 的样式”。从文件名看不出职责，新功能的样式只能凭记忆找位置。
+9. **本文档节标题缺版本号，发布说明有重复。** 从 v0.14.41 到 v0.14.53，以下实际发布的功能在本文档中没有对应小节：v0.14.41 的变更哈希与模型列表缓存、v0.14.42 与 v0.14.45 的回复 TPS、v0.14.43 的“默认展开思考过程”、v0.14.47 的 Pi 1.4.0 基线与内置工具设置重连、v0.14.52 的超出发送上限时保留草稿。“Goal 状态卡与已实现功能修正”“对话内容引用与侧边对话”“长提问折叠与按轮次复制结果”三节没有标注版本号（实际为 v0.14.53、v0.14.50/51、v0.14.50/51）。`docs/releases/v0.14.48.md` 和 `v0.14.49.md`、`v0.14.50.md` 和 `v0.14.51.md` 正文相同，仅后者补充了“前一版未公开发布”的说明。
+10. **执行约定第 7 条没有落实。** 约定要求未做完的部分直接删除、不保留待办，但 v0.7.0 的“长会话性能（原 C4）”还留着“`App.tsx` 的拆分见下一版 R2”。R2 早已交付，这句话已经过时。
+
+**目标。** 本文档中的数字、基线和文件路径与代码一致；每个测试脚本要么有断言并接入 CI，要么写明是手动度量工具；主进程两个文件不再承载新的功能模块；执行约定可以通过自动检查保证，而不是靠记忆。
+
+**不做。**
+
+- 不为了降低行数增加纯转发的模块层。拆分以职责为准，与 `docs/v0.8-validation.md:40` 的建议一致。
+- 不把 `any` 全部换成精确类型。只要求进入 `AgentService` 的事件先经过协议层校验。
+- 不重写发布说明的历史文件，只在本文档补齐缺失的小节。
+- 不清理 `work/`、`test-results/`、`release/` 等本地目录。它们已被 `.gitignore` 排除，不影响仓库。
+
+**修正项。**
+
+| 编号 | 修正 | 位置 |
+| --- | --- | --- |
+| H1-1 | 按 Pi 1.4.0 重新核对 S1–S11 链接与第 12 节说明；F01、v0.7.0、S1 中的“1.1.0”改为引用当前基线，跨目录结论注明验证时使用的版本。基线升级流程写入执行约定：改 `VERIFIED` 时同步检查本文档 | `docs/PRD.md` S1、v0.7.0、F01、第 12 节 |
+| H1-2 | R2 数字改为当前值，并注明“v0.8.0 时为 73 / 676 行”；文件行数上限加入 `npm run lint`（`App.tsx` ≤ 500 行、`src/` 与 `electron/` 单个文件 ≤ 900 行，`agent.ts`、`main.ts` 暂按现状设上限，只允许减少） | `docs/PRD.md` R2、`tools/lint/config.mjs` |
+| H1-3 | 侧边对话和 Goal 从 `AgentService` 拆出独立服务，`AgentService` 只保留 Pi 进程生命周期与事件分发；`main.ts` 的侧边对话、Goal、Pi 配置类 handler 仿照 `ipc/workspace-handlers.ts` 迁出 | `electron/agent.ts:1462,2344`、`electron/main.ts:571` |
+| H1-4 | 5 处 `process.platform` 判断改用 `platform.ts` 导出的常量或函数；lint 增加 `no-restricted-properties` 规则，禁止 `platform.ts`、`preload.ts` 之外直接读取 `process.platform` | `electron/snapshot.ts:43`、`environment.ts:48`、`main.ts:246,1663,1729` |
+| H1-5 | `test-workspace-v014-performance.ts` 增加耗时与增量比例断言（阈值取当前实测值的 2 倍），加入 `test:performance-core` 并进入 CI；或在脚本顶部和 `v0.14-validation.md` 注明为手动度量工具 | `scripts/test-workspace-v014-performance.ts` |
+| H1-6 | W3、E1 测试说明改为实际文件 | `docs/PRD.md` W3、E1 |
+| H1-7 | 删除未使用的参数和导出（`source`、`filter`、`disabled`、`action`、`fetchReleaseNotes`、`trashName`）；删除 `installOnQuit` 与 `prepareForQuit` 及其调用；`_lastToast` 改名为 `retainedToast` 并补充说明，不再依赖下划线豁免 | 见背景第 6 条 |
+| H1-8 | Pi 事件进入 `AgentService` 前先由 `electron/pi/protocol.ts` 校验类型与必需字段。字段不符时触发 `protocolError`，诊断中记录事件类型，不再静默丢失内容。`onEvent`、`extension` 的参数改为校验后的联合类型 | `electron/agent.ts:460,738`、`electron/pi/protocol.ts` |
+| H1-9 | 按职责重命名 `-v014` 文件，例如 `conversation-v014.css` 按内容拆为 `turn-outline.css` 和 `code-block.css`，测试文件名对应被测模块。一次重命名一组，`git mv` 保留历史 | 背景第 8 条所列文件 |
+| H1-10 | 补齐背景第 9 条所列版本的小节，给三个无版本号小节加上版本号 | `docs/PRD.md` |
+| H1-11 | 删除 v0.7.0 小节中过时的“下一版 R2”说明 | `docs/PRD.md` v0.7.0“长会话性能（原 C4）” |
+
+**验收。**
+
+1. 本文档中除 S1–S11 历史链接外，不再出现与 `shared/pi-version.ts` 不一致的回归基线版本。
+2. 本文档中以反引号引用的 `electron/`、`src/`、`shared/`、`scripts/`、`tests/` 路径全部存在，示例路径（如验收用例中的 `src/a.ts`）除外。可以写成单元测试自动检查。
+3. `npx tsc --noEmit --noUnusedLocals --noUnusedParameters` 无输出。
+4. `scripts/test-*` 下的每个文件都被 `package.json` 或 CI 引用，或在文件顶部注明是手动工具。
+5. `electron/agent.ts`、`electron/main.ts` 的行数低于本次排查时的 2527、2346 行；新增功能不再直接加入这两个文件。
+6. 在 `platform.ts`、`preload.ts` 之外新增 `process.platform` 判断时，`npm run lint` 失败。
+7. 构造一个缺少必需字段的 `message_end` 事件，桌面端显示协议错误而不是空消息。
+
+**测试。** 新增 `tests/docs-consistency.test.ts`，覆盖验收 1、2、4；lint 规则覆盖验收 6；`tests/` 中现有的协议测试补充事件校验用例（验收 7）；H1-3 拆分前后，`npm run test:features` 与 `npm run test:features-ui` 全部通过。
+
+**注意。** 截至排查时，本地分支 `codex/slim-update-flow` 有未提交的修改，已经删除了 H1-7 中的 `source`、`filter`、`disabled`、`action`、`fetchReleaseNotes`、`prepareForQuit` 和 `installOnQuit`。该分支基于 v0.14.46，落后 `main` 24 个提交，合并时 `main.ts` 会有冲突。H1-7 应在该分支合并后，再确认剩余项。
+
+## Claude 界面风格（待实现）
+
+### UI9 Claude 风格：浅色 / 深色
+
+在 UI8 的风格机制上新增第三套界面风格，参照 Claude 桌面版，分浅色和深色。和 UI8 不同，Anthropic 官方公开了一套完整的宿主令牌：MCP Apps 设计规范的“Style variables”一节，列出了背景、文字、边框、状态色、圆角和阴影在浅色、深色下的取值。本节的颜色优先采用这套官方值。官方没有覆盖的部分（侧栏、悬停、选中、品牌色用法）参考社区取色，“依据”列逐项注明。核对日期 2026-10-29，来源：claude.com/docs/connectors/building/mcp-apps/design-guidelines（Style variables）、同站 transparent-theming 页、Ynd-i/swan PR #20（深色取色）、dcelasun/claude-desktop-bin `themes/README.md`（`window-shared.css` 中的 `#faf9f5`）。
+
+**背景与问题。**
+
+1. **风格枚举有 7 处写死 `'codex'`。** 位置：`shared/window-theme.ts:14,33`；`src/components/SettingsModal.tsx:393,410,421,423`；`electron/main.ts:1188` 的错误文案“请选择 Pi 经典或 Codex 界面风格。”。照这个写法加第三种风格，每处都要再加一个分支。`styleTheme` 的语义其实是“该风格是否只支持浅/深/跟随系统”，应改为按风格查表。
+2. **Claude 的强调色有两种用途。** Claude 用珊瑚色（`#d97757`）作为品牌色，用蓝色（官方 `color-text-info` `#3266AD`）表示链接和信息。UI8 拆出的 `--primary` / `--accent` 正好能分别承载这两种颜色，不需要新增语义令牌。
+3. **官方值有 3 处对比度不足。** 浅色次要文字 `#73726C` 在选中行（`#e8e6dc`）上只有 3.86:1；深色次要文字 `#9C9A92` 在强调底色上只有 4.03:1；白字放在品牌珊瑚色 `#d97757` 上只有 3.12:1。三处都低于本项目 4.5:1 的要求（UI6 验收 7），需要调整。
+4. **Claude 的回复正文用衬线字体。** 用户消息用无衬线字体，助手回复用衬线字体，这是 Claude 最容易辨认的特征之一。官方字体 Anthropic Sans / Serif 不能随应用分发，需要使用系统衬线字体回退。中文没有通用的系统衬线字体，回复正文的中文部分仍然使用无衬线字体。
+
+**目标。** 设置中可以选择 Claude 风格，提供浅色、深色、跟随系统三种模式，标题栏和原生窗口背景一并切换。经典和 Codex 风格的观感不变。功能、DOM 结构、可访问名称和快捷键均不变。
+
+**不做。**
+
+- Claude 桌面版的高对比度模式、自定义强调色和字体选择。
+- 照搬 Claude 的布局和信息架构。侧栏结构、检查器、标题栏、模型与审批菜单的位置不变，只改视觉。
+- 使用 Anthropic 或 Claude 的标志、Anthropic Sans / Serif 字体文件或其他品牌资产；不从 `assets.claude.ai` 加载字体。“π”品牌标保留，只换底色。
+- Claude 风格下的护眼米黄、豆沙绿、深蓝背景。
+- 启动首帧问题，同 UI8 的“不做”。
+
+**交互。**
+
+- 设置 → 外观与编辑器 → 界面风格：`Pi 经典` / `Codex` / `Claude`。
+- 选 `Claude` 后，主题选项只显示 `浅色`、`深色`、`跟随系统`（不改名，Claude 自己的叫法就是 Light / Dark）。从背景主题切换过来时的就近规则与 UI8 相同。
+- 在 Codex 和 Claude 之间切换时，保留当前的浅色/深色/跟随系统。
+- 预览、取消还原、保存、重启保持均沿用 UI8 机制。
+
+**技术方案。**
+
+- **风格表代替字面量**
+  - `shared/window-theme.ts`：`UI_STYLES` 改为 `['classic', 'codex', 'claude']`。新增 `STYLE_META: Record<UiStyle, { label: string; basicThemesOnly: boolean; themeLabels?: Partial<Record<Theme, string>> }>`：经典为 `{ label: 'Pi 经典', basicThemesOnly: false }`，Codex 为 `{ label: 'Codex', basicThemesOnly: true, themeLabels: { light: '白天', dark: '夜晚' } }`，Claude 为 `{ label: 'Claude', basicThemesOnly: true }`。
+  - `styleTheme` 改为按 `STYLE_META[style].basicThemesOnly` 判断。`windowTheme` 的色板改为 `stylePalettes: Partial<Record<UiStyle, { light; dark }>>` 查表，Claude 浅色为 `{ background: '#faf9f5', color: '#f5f4ed', symbolColor: '#141413' }`，深色为 `{ background: '#262624', color: '#1f1e1d', symbolColor: '#faf9f5' }`。
+  - `SettingsModal.tsx` 的风格按钮文案、主题过滤和主题标签都从 `STYLE_META` 读取，不再出现风格字面量。
+  - `electron/main.ts:1188` 的错误文案改为由 `STYLE_META` 生成：“请选择 Pi 经典、Codex 或 Claude 界面风格。”
+  - `store-state.ts`、`saveSettings` 的校验已经按 `UI_STYLES` 枚举，不需要改动；新增值的就近修正由 `styleTheme` 统一处理。
+- **Claude 样式**：新建 `src/styles/claude.css`，在 `src/styles.css` 中排在 `codex.css` 之后。令牌与组件覆盖的写法同 UI8：`:root[data-style='claude'][data-theme='light'|'dark']`，跟随系统写在 `@media (prefers-color-scheme: dark)` 中。不修改任何 TSX 结构。
+- **衬线字体**：新增 `--font-reply` 令牌。经典和 Codex 不定义，使用回退值 `inherit`；Claude 定义为 `ui-serif, Georgia, 'Times New Roman', 'PingFang SC', 'Microsoft YaHei', serif`，只作用于助手消息的 `.message-content`。代码、表格数字、工具卡片、思考过程仍使用界面字体或等宽字体。
+
+**Claude 令牌。** 下表所有文字色在 `--bg`、`--surface`、`--rail`、`--hover`、`--selected`、`--bubble`、`--code`、`--accent-soft` 上的对比度均不低于 4.5:1（括号内为最低值）。“官方”指 MCP Apps Style variables。
+
+| 令牌 | 用途 | 浅色 | 深色 | 依据 |
+| --- | --- | --- | --- | --- |
+| `--bg` | 对话区画布 | `#faf9f5` | `#262624` | 官方 background-tertiary / secondary |
+| `--surface` | 输入框、卡片、菜单 | `#ffffff` | `#30302e` | 官方 background-primary |
+| `--rail` | 侧栏、标题栏 | `#f5f4ed` | `#1f1e1d` | 浅色为官方 background-secondary；深色比画布暗一级，参照 swan 取色（侧栏比对话区暗） |
+| `--hover` | 悬停 | `#f0eee6` | `#353532` | 介于 rail 与 selected 之间 |
+| `--selected` | 选中行 | `#e8e6dc` | `#3a3936` | 浅色接近官方 border `#DEDCD1` 的浅色混合 |
+| `--bubble` | 用户消息气泡 | `#f0eee6` | `#141413` | 深色为官方 background-tertiary，气泡比画布暗 |
+| `--code` | 代码块 | `#f5f4ed` | `#1f1e1d` | 同 rail |
+| `--line` / `--line-strong` | 细线 | `#e4e3df` / `#cecdca` | `#383835` / `#4b4a47` | 官方 border `#1F1E1D` / `#DEDCD1` 按 10% / 20% 混合到画布上的不透明值 |
+| `--ink` | 正文 | `#141413`（14.73） | `#faf9f5`（10.77） | 官方 text-primary |
+| `--muted` | 次要文字 | `#66655f`（4.67） | `#a6a49b`（4.54） | 由官方 text-tertiary `#73726C` / `#9C9A92` 调整，见背景第 3 条 |
+| `--accent` | 链接、焦点、选中强调 | `#3266ad`（4.61） | `#80aadd`（4.71） | 官方 text-info |
+| `--accent-soft` | 强调底色 | `#e6eaee` | `#343b42` | 强调色按 10% / 16% 混合到画布 |
+| `--on-accent` | 强调色上的文字 | `#ffffff`（5.77） | `#141413`（7.65） | |
+| `--primary` / `--on-primary` | 发送、主要按钮、品牌标 | `#b95737` / `#ffffff`（4.69） | `#d97757` / `#141413`（5.90） | 深色为社区通用的 Claude 珊瑚色；浅色在同色相上加深，因为白字放在 `#d97757` 上只有 3.12 |
+| `--success` | 新增、完成、已连接 | `#265b19`（6.47） | `#7ab948`（4.79） | 官方 text-success |
+| `--red` | 错误、删除 | `#a73d39`（4.98） | `#ee8884`（4.59） | 浅色为官方 border-danger（官方 text-danger `#7F2C28` 与正文过近）；深色为官方 text-danger |
+| `--warning` | 警告文字 | `#5a4815`（7.07） | `#d1a041`（4.76） | 官方 text-warning |
+| `--signal` / `--signal-soft` | 运行中 | 同经典浅色 | 同经典深色 | |
+| `--shadow-soft` | 页内表面 | `0 1px 2px #0000000d` | `none` | 官方 shadow-hairline；深色靠表面明度区分 |
+| `--shadow` | 浮层、菜单、对话框 | `0 10px 15px -3px #0000001a, 0 4px 6px -4px #0000001a` | `0 10px 30px #00000066, 0 1px 3px #00000040` | 浅色为官方 shadow-lg；深色同 Codex |
+| `--radius-panel` | 面板 | `12px` | `12px` | 官方 border-radius-xl |
+| `--radius-control` | 按钮、输入 | `8px` | `8px` | 官方 border-radius-md |
+| `--content-width` | 阅读列 | `768px` | `768px` | 同 Codex |
+| 语法色 | 代码块 | 经典浅色值，数字改为 `#9a5a22`（4.93），注释改为 `#5e5d57`（5.99） | Codex 夜晚值，函数改为 `#7ab4f9`（7.71），注释改为 `#9c9a92`（5.91） | 在 `--code` 上测算；注释改为暖灰，与画布色调一致 |
+| ANSI 色 | 终端输出 | 同经典浅色 | 同经典深色 | |
+
+字体：界面字体同 Codex（系统界面字体优先，保留中文回退）；回复正文使用 `--font-reply`；等宽字体同 Codex。
+
+**组件覆盖（仅 Claude）。**
+
+- **会话行**：选中时用 `--selected` 底色、`--ink` 文字，去掉左侧色条，与 Codex 相同。
+- **输入框**：圆角 20px，`--surface` 底，`--line` 边框。浅色保留 `--shadow-soft`，因为 Claude 浅色下的输入框是浮在暖色画布上的白色卡片。聚焦时边框变为 `--line-strong`，没有强调色光晕。运行中的琥珀色边框保留，`:focus-visible` 轮廓用 `--accent`。
+- **发送按钮**：`--primary` 填充，圆角 8px（Claude 为圆角方形，不是圆形）。禁用态沿用现有透明度。
+- **用户消息**：`--bubble` 底，圆角 12px，`width: fit-content; max-width: min(80%, 620px); margin-left: auto`，标题行右对齐。溢出要求同 UI8 验收 7。
+- **助手消息**：隐藏 `.avatar`；名字只做视觉隐藏，写法与 Codex 相同。`.message.assistant .message-content` 使用 `--font-reply`，字号 `calc(15px * var(--font-scale))`，行高 1.7。`.message.assistant .message-content` 内的 `code`、`pre`、`table`、`.code-block`、`.thinking` 恢复界面字体或等宽字体。
+- **代码块**：圆角 12px。
+- **遮罩**：`.modal-backdrop` 浅色为 `#1f1e1d40`，深色为 `#00000066`。
+- **品牌标**：`--primary` 底，`--on-primary` 字，“π”不变。
+- 其余组件（Goal 状态卡、审批卡、检查器、差异视图、侧边对话、模型选择器、命令面板）只随令牌变化，按截图清单检查后再做局部覆盖。
+
+**实现顺序。** 先完成“风格表代替字面量”的重构，并单独提交：只有经典和 Codex 两种风格，所有现有测试必须通过，`tests/fixtures/classic-style.json` 不变。之后再加入 Claude。
+
+**验收标准。**
+
+1. 外观设置中可以选择 `Pi 经典` / `Codex` / `Claude`。选 Claude 后主题只显示浅色、深色、跟随系统；米黄、豆沙绿切到浅色，深蓝切到深色；在 Codex 与 Claude 之间切换时保留当前主题。预览即时生效，取消还原，保存后重启仍保持。
+2. Claude 浅色/深色下，`--bg`、`--rail`、`--ink` 与 `windowTheme` 返回的原生背景色及 Windows/Linux 标题栏覆盖色相同；“跟随系统”跟随原生外观。
+3. 在 Electron 中实测：上表所有文字色在列出的各背景上 ≥ 4.5:1；`--on-accent` 与 `--accent`、`--on-primary` 与 `--primary` 之间 ≥ 4.5:1；语法色在 `--code` 上 ≥ 4.5:1；焦点轮廓与 `--bg` 之间 ≥ 3:1。
+4. Claude 下：发送按钮和品牌标为珊瑚色，链接为蓝色；选中会话没有彩色竖条；差异新增、完成状态为绿色；用户消息右对齐；助手回复正文的计算字体以衬线字体开头，回复内的代码块和行内代码为等宽字体；读屏仍能读到“你”/“Pi”。
+5. 经典和 Codex 风格不变：`tests/fixtures/classic-style.json` 与 Codex 截图对比（像素差 < 0.1%）在本节前后一致。
+6. 源码中除 `shared/window-theme.ts` 的 `UI_STYLES`、`STYLE_META` 和 CSS 选择器外，不再出现 `'codex'`、`'claude'` 字面量的分支判断。
+7. 溢出要求同 UI8 验收 7。
+
+**测试。**
+
+- `tests/app-dialogs.test.ts`：把 Codex 色板一致性测试改为遍历 `stylePalettes`，自动覆盖 Claude；跟随系统令牌重复检查的文件列表加入 `claude`。
+- `tests/desktop-chrome.test.ts`、`tests/store.test.ts`：风格用例改为遍历 `UI_STYLES`，覆盖 Claude 搭配背景主题的就近修正。
+- 新增 `STYLE_META` 单元测试：每种风格都有标签，`basicThemesOnly` 与 `stylePalettes` 一致（只支持基础主题的风格必须有专属色板）。
+- `scripts/test-theme-ui.mjs`、`scripts/test-review-ui.mjs`、`tests/support/turn-outline-ui.mjs` 的风格循环加入 Claude。
+- `scripts/test-codex-style-ui.mjs` 改名为 `scripts/test-style-ui.mjs`，按风格参数化（`--style codex|claude`）；`package.json` 的 `test:codex-style-ui` 改为 `test:style-ui` 并同时运行两种风格，CI 同步。截图存放在 `test-results/{codex,claude}-{light,dark}-*.png`，截图清单同 UI8。
+- 同步双语 README 的外观说明，新增 `docs/assets/screenshots/workspace-claude-{light,dark}.png`。
+
 ## v0.14.56：Codex 界面风格（已实现）
 
 ### UI8 Codex 风格：白天 / 夜晚
