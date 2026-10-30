@@ -281,7 +281,10 @@ try {
   await input.fill('通过命令修改后的目标');
   await page.getByRole('button', { name: '保存修改' }).click();
   await slashEdit;
-  assert.equal((await snapshot()).runtime.goal.objective, '通过命令修改后的目标');
+  await expect(mode).toHaveCount(0, { timeout: 60000 });
+  await expect
+    .poll(async () => (await snapshot()).runtime.goal?.objective, { timeout: 60000 })
+    .toBe('通过命令修改后的目标');
   const beforeReplacement = (await snapshot()).runtime.goal.id;
   const acceptedReplacement = page.evaluate(async () => {
     const value = await window.desktop.invoke('bootstrap');
