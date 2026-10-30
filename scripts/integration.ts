@@ -68,6 +68,36 @@ try {
     });
   }
   console.log('PASS actual Pi cumulative input/output/cache usage stays separate from current context');
+  const liveUsageSession = store.createSession(projectId);
+  await service.connect(liveUsageSession.id);
+  await service.send(liveUsageSession.id, 'E2E_USAGE_LIVE', [], 'steer');
+  await waitFor(
+    () =>
+      provider.heldInitialUsageResponseCount === 1 &&
+      service.runtime.status === 'running' &&
+      (service.runtime.liveUsage?.outputTokens ?? 0) > 0,
+  );
+  assert.equal(store.session(liveUsageSession.id).stats?.tokens, 0, 'stream estimates are not persisted');
+  const firstEstimate = service.runtime.liveUsage!.outputTokens;
+  provider.advanceInitialUsageResponses();
+  await waitFor(() => (service.runtime.liveUsage?.outputTokens ?? 0) > firstEstimate);
+  provider.finishInitialUsageResponses();
+  await waitFor(
+    () =>
+      provider.heldUsageResponseCount === 1 &&
+      service.runtime.status === 'running' &&
+      service.runtime.stats?.tokens === 120 &&
+      (service.runtime.liveUsage?.outputTokens ?? 0) > 0,
+  );
+  assert.equal(store.session(liveUsageSession.id).stats?.tokens, 120, 'completed request usage is saved');
+  provider.releaseUsageResponses();
+  await waitFor(
+    () =>
+      service.runtime.status === 'completed' &&
+      service.runtime.stats?.tokens === 240 &&
+      !service.runtime.liveUsage,
+  );
+  console.log('PASS live output estimates and completed request usage during a real multi-step Pi run');
   await service.connect(sessionId);
   await service.send(sessionId, 'E2E_FILES：读取输入、写入输出并运行验证命令。', ['输入 文件.txt'], 'steer');
   await waitFor(() => ['completed', 'error'].includes(service.runtime.status));

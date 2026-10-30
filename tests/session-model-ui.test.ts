@@ -201,6 +201,18 @@ test('composer exposes zero and partial stats, while keeping absent or another s
     assert.doesNotMatch(markup, /context-meter/);
     assert.match(markup, /shortcut-link/);
   }
+  const liveWithoutStats = renderToStaticMarkup(
+    React.createElement(ComposerFooter, {
+      runtime: { ...emptyRuntime(), sessionId: session.id, connected: true, liveUsage: { outputTokens: 12 } },
+      ownRuntime: true,
+      ownRunning: true,
+      selected: session,
+      pending: false,
+      sessionEnabled: true,
+      running: true,
+    } as ComposerProps),
+  );
+  assert.match(liveWithoutStats, /累计 未知 \+ 输出约 12 tokens/);
 });
 
 test('a disabled model entry gives its reason and cannot expose a stale open picker', () => {

@@ -11,6 +11,11 @@ const exec = promisify(execFile);
 export async function createLocalProvider(options: { holdSlowResponses?: boolean } = {}) {
   const requests: any[] = [];
   const heldSlowResponses = new Set<http.ServerResponse>();
+  const heldInitialUsageResponses = new Map<
+    http.ServerResponse,
+    { advance: () => void; finish: () => void }
+  >();
+  const heldUsageResponses = new Map<http.ServerResponse, () => void>();
   const server = http.createServer(async (req, res) => {
     const chunks: Buffer[] = [];
     for await (const chunk of req) chunks.push(chunk);
@@ -117,6 +122,30 @@ export async function createLocalProvider(options: { holdSlowResponses?: boolean
             : `printf 'WAITING_FOR_STOP\\n'; sleep ${prompt.includes('E2E_ORPHAN') ? 2 : 30}; printf 'NOT_STOPPED' > should-not-exist.txt`),
       });
     }
+    if (prompt.startsWith('E2E_USAGE_LIVE')) {
+      if (results.length === 0) {
+        chunk({ role: 'assistant', content: '开始检查。' });
+        heldInitialUsageResponses.set(res, {
+          advance: () => {
+            if (!res.destroyed) chunk({ content: '正在读取文件。' });
+          },
+          finish: () => {
+            if (!res.destroyed) tool('read', { path: '输入 文件.txt' });
+          },
+        });
+        res.once('close', () => heldInitialUsageResponses.delete(res));
+        return;
+      }
+      chunk({ role: 'assistant', content: '文件已经读取。' });
+      heldUsageResponses.set(res, () => {
+        if (!res.destroyed) {
+          chunk({ content: '检查完成。' });
+          done();
+        }
+      });
+      res.once('close', () => heldUsageResponses.delete(res));
+      return;
+    }
     if (prompt.includes('E2E_SLOW') || prompt.includes('E2E_SIDE_HOLD')) {
       if (options.holdSlowResponses) {
         // A fixture-controlled gate: only client cancellation or provider.close ends this stream.
@@ -153,6 +182,27 @@ export async function createLocalProvider(options: { holdSlowResponses?: boolean
     requests,
     get heldSlowResponseCount() {
       return heldSlowResponses.size;
+    },
+    get heldUsageResponseCount() {
+      return heldUsageResponses.size;
+    },
+    get heldInitialUsageResponseCount() {
+      return heldInitialUsageResponses.size;
+    },
+    advanceInitialUsageResponses() {
+      for (const response of heldInitialUsageResponses.values()) response.advance();
+    },
+    finishInitialUsageResponses() {
+      for (const [response, callbacks] of heldInitialUsageResponses) {
+        heldInitialUsageResponses.delete(response);
+        callbacks.finish();
+      }
+    },
+    releaseUsageResponses() {
+      for (const [response, release] of heldUsageResponses) {
+        heldUsageResponses.delete(response);
+        release();
+      }
     },
     close: () =>
       new Promise<void>((resolve) => {

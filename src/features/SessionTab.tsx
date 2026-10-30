@@ -66,6 +66,9 @@ export function SessionTab({
           </button>
         )}
       </div>
+      {runtime.liveUsage && (
+        <p className="settings-copy">以下为 Pi 最近返回的会话统计；本次请求仍在进行中。</p>
+      )}
       <div className="feature-stats session-usage-details" aria-label="当前会话用量">
         <SessionUsageDetails stats={runtime.stats ?? {}} />
       </div>

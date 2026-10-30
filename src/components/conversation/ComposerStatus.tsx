@@ -216,9 +216,10 @@ export function ComposerFooter(props: ComposerProps) {
                 : `Enter 发送 · Shift+Enter 换行 · ↑ 上一条提问 · ${shortcut('/')} 快捷键。独立对话支持 Pi 工具，工作目录可在 Pi 功能中打开。`
             }
           >
-            {ownRuntime && runtime.stats ? (
+            {ownRuntime && (runtime.stats || runtime.liveUsage) ? (
               <ContextMeter
-                stats={runtime.stats}
+                stats={runtime.stats ?? {}}
+                liveUsage={runtime.liveUsage}
                 open={() => setFeatureTab('session')}
                 disabled={running || pending || !sessionEnabled}
                 branchDisabled={!sessionEnabled || (pending && !running)}
