@@ -47,8 +47,8 @@ export default function App() {
     return () => cancelAnimationFrame(frame);
   }, [Boolean(state)]);
   const updateBadge = useMemo(
-    () => <UpdateBadge update={model.update} open={() => setUpdateOpen(true)} />,
-    [model.update],
+    () => <UpdateBadge updates={model.updates} open={() => setUpdateOpen(true)} />,
+    [model.updates],
   );
   const recovery = useMemo(
     () =>
@@ -114,9 +114,9 @@ export default function App() {
       );
     await window.desktop.invoke('installUpdate');
   };
-  const updatePanel = model.update && (
+  const updatePanel = (
     <AboutUpdates
-      update={model.update}
+      updates={model.updates}
       busy={updateBusy}
       install={installUpdate}
       autoDownload={state.settings.autoDownloadUpdates}
@@ -470,9 +470,9 @@ export default function App() {
           onReturnToMessage={() => void model.returnToCheckpointMessage()}
         />
       )}
-      {updateOpen && model.update && (
+      {updateOpen && (
         <UpdateDialog
-          update={model.update}
+          updates={model.updates}
           busy={updateBusy}
           install={installUpdate}
           close={() => setUpdateOpen(false)}

@@ -1,14 +1,19 @@
-import { useState } from 'react';
+import { useState, useSyncExternalStore } from 'react';
+import { createPortal } from 'react-dom';
 import { Download, RefreshCw, ExternalLink } from 'lucide-react';
 import {
   installationLabels,
   releaseUrl,
   updateInstallNotice,
+  downloadSummary,
+  formatBytes,
+  formatRemaining,
   type UpdateState,
 } from '../../shared/app-update';
 import { Modal } from './Modal';
 import { RichText } from './conversation/Markdown';
 import { readableError } from '../lib/format';
+import type { UpdateStore } from '../lib/update-store';
 const api = window.desktop;
 
 interface UpdateProps {
@@ -16,20 +21,90 @@ interface UpdateProps {
   busy: boolean;
   install: () => Promise<void>;
 }
-export function UpdateBadge({ update, open }: { update?: UpdateState; open: () => void }) {
-  if (!update) return null;
+type UpdateSubscription = Omit<UpdateProps, 'update'> & { updates: UpdateStore };
+function verificationLabel(update: UpdateState) {
+  return update.installation === 'mac' ? '正在校验并准备更新…' : '正在校验更新…';
+}
+function announcement(update?: UpdateState) {
+  if (update?.state === 'downloading') {
+    if (update.download?.phase === 'verifying') return verificationLabel(update);
+    return update.download?.stalled ? '等待网络响应…' : '开始下载更新。';
+  }
+  if (update?.state === 'ready') return '更新已下载，可以重启安装。';
+  if (update?.state === 'error') return update.error;
+  return '';
+}
+export function UpdateBadge({ updates, open }: { updates: UpdateStore; open: () => void }) {
+  const update = useSyncExternalStore(updates.subscribe, updates.get);
+  // Keep one live region outside the sidebar's hidden subtree, including while a dialog is open.
+  const status = createPortal(
+    <span className="update-announcement" role="status" aria-atomic="true">
+      {announcement(update)}
+    </span>,
+    document.body,
+  );
+  if (!update) return status;
   const offered = update.version && ['available', 'downloading', 'ready'].includes(update.state);
-  if (!offered && !updateInstallNotice(update)) return null;
+  if (!offered && !updateInstallNotice(update)) return status;
   return (
-    <button className="update-badge" onClick={open}>
-      {!offered
-        ? '上次更新结果待确认'
-        : update.state === 'ready'
-          ? `重启以更新到 v${update.version}`
-          : update.state === 'downloading'
-            ? `正在下载更新 ${Math.floor(update.progress ?? 0)}%`
-            : `v${update.version} 可用`}
-    </button>
+    <>
+      {status}
+      <button className="update-badge" onClick={open}>
+        {!offered
+          ? '上次更新结果待确认'
+          : update.state === 'ready'
+            ? `重启以更新到 v${update.version}`
+            : update.state === 'downloading'
+              ? downloadSummary(update)
+              : `v${update.version} 可用`}
+      </button>
+    </>
+  );
+}
+export function DownloadProgress({ update }: { update: UpdateState }) {
+  const download = update.download;
+  if (!download) return null;
+  const transferring = download.phase === 'transferring';
+  const phase =
+    download.phase === 'verifying'
+      ? verificationLabel(update)
+      : download.stalled
+        ? '等待网络响应…'
+        : '正在连接…';
+  const remaining = download.remainingMs === undefined ? undefined : formatRemaining(download.remainingMs);
+  const transferred = formatBytes(download.transferred, download.total),
+    total = formatBytes(download.total);
+  const speed = download.stalled
+    ? '等待网络响应…'
+    : download.bytesPerSecond === undefined
+      ? '正在估算…'
+      : `${formatBytes(download.bytesPerSecond)}/s`;
+  return (
+    <div className="update-progress">
+      <div className="update-progress-track">
+        <progress
+          aria-label="更新下载进度"
+          max={100}
+          value={transferring ? update.progress : undefined}
+          aria-valuetext={
+            transferring
+              ? `已下载 ${transferred}，共 ${total}${remaining && !download.stalled ? `，${remaining}` : ''}${download.stalled ? '，等待网络响应' : ''}`
+              : phase
+          }
+        />
+        {transferring && <span>{Math.floor(update.progress ?? 0)}%</span>}
+      </div>
+      <p className="update-download-detail">
+        {transferring
+          ? `${transferred} / ${total} · ${speed}${remaining && !download.stalled ? ` · ${remaining}` : ''}`
+          : phase}
+      </p>
+      {transferring && download.differential && update.size !== undefined && (
+        <p className="update-download-detail">
+          增量更新：安装包 {formatBytes(update.size)}，只需下载变化部分
+        </p>
+      )}
+    </div>
   );
 }
 function UpdateActions({ update, busy, install }: UpdateProps) {
@@ -49,14 +124,12 @@ function UpdateActions({ update, busy, install }: UpdateProps) {
   };
   return (
     <>
-      {update.state === 'downloading' && (
-        <div className="update-progress">
-          <progress aria-label="更新下载进度" max={100} value={update.progress ?? 0} />
-          <span>正在下载 {Math.floor(update.progress ?? 0)}%</span>
-        </div>
+      {update.state === 'available' && update.size !== undefined && (
+        <p className="update-package-size">安装包 {formatBytes(update.size)}</p>
       )}
+      {update.state === 'downloading' && <DownloadProgress update={update} />}
       {(update.error || error) && (
-        <p className="inline-error" role="alert">
+        <p className="inline-error" role={error ? 'alert' : undefined}>
           {error || update.error}
         </p>
       )}
@@ -111,7 +184,9 @@ function UpdateActions({ update, busy, install }: UpdateProps) {
     </>
   );
 }
-export function UpdateDialog({ update, busy, install, close }: UpdateProps & { close: () => void }) {
+export function UpdateDialog({ updates, busy, install, close }: UpdateSubscription & { close: () => void }) {
+  const update = useSyncExternalStore(updates.subscribe, updates.get);
+  if (!update) return null;
   return (
     <Modal title={`Pi Desktop v${update.version ?? update.currentVersion}`} close={close}>
       <div className="modal-body">
@@ -133,17 +208,18 @@ export function UpdateDialog({ update, busy, install, close }: UpdateProps & { c
   );
 }
 export function AboutUpdates({
-  update,
+  updates,
   busy,
   install,
   autoDownload,
   saveAutoDownload,
   readOnly,
-}: UpdateProps & {
+}: UpdateSubscription & {
   autoDownload: boolean;
   saveAutoDownload: (value: boolean) => Promise<void>;
   readOnly: boolean;
 }) {
+  const update = useSyncExternalStore(updates.subscribe, updates.get);
   const [error, setError] = useState('');
   const run = async (action: () => Promise<unknown>) => {
     setError('');
@@ -153,6 +229,7 @@ export function AboutUpdates({
       setError(readableError(error));
     }
   };
+  if (!update) return null;
   return (
     <section className="about-updates" aria-label="关于与更新">
       <h3>关于与更新</h3>

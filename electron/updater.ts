@@ -1,6 +1,7 @@
 import { EventEmitter } from 'node:events';
 import { MacUpdateError } from './mac-update';
 import { UpdateSignatureError } from '../shared/update-signature';
+import { UpdateProgress } from './update-progress';
 import {
   compareAppVersions,
   stableVersion,
@@ -13,11 +14,12 @@ import {
 export interface DesktopRelease {
   version: string;
   notes: string;
+  size?: number;
 }
 export type UpdateDriverEvent =
   | { type: 'available' | 'downloaded'; release: DesktopRelease }
   | { type: 'not-available' }
-  | { type: 'progress'; percent: number }
+  | { type: 'progress'; transferred: number; total: number; percent: number }
   | { type: 'error'; error: Error };
 export interface UpdateDriver {
   subscribe(listener: (event: UpdateDriverEvent) => void): () => void;
@@ -93,6 +95,7 @@ export interface UpdateOptions {
   installFailed: () => void;
   previousAttempt?: UpdateInstallAttempt;
   recordAttempt?: (attempt: UpdateInstallAttempt) => Promise<void>;
+  now?: () => number;
 }
 
 /** Desktop update policy. The native updater and GitHub transport stay outside application state. */
@@ -105,6 +108,8 @@ export class UpdateService extends EventEmitter {
   private interval?: NodeJS.Timeout;
   private unsubscribe?: () => void;
   private installOnQuit = false;
+  private progress?: UpdateProgress;
+  private progressTimer?: NodeJS.Timeout;
   constructor(private readonly options: UpdateOptions) {
     super();
     this.autoDownload = options.autoDownload;
@@ -125,7 +130,26 @@ export class UpdateService extends EventEmitter {
   }
   private publish(value: Partial<UpdateState>) {
     this.state = { ...this.state, ...value };
+    if (this.state.state !== 'downloading') {
+      this.stopProgress();
+      this.state.download = undefined;
+    }
     this.emit('update', structuredClone(this.state));
+  }
+  private stopProgress() {
+    clearInterval(this.progressTimer);
+    this.progressTimer = undefined;
+    this.progress = undefined;
+  }
+  private beginProgress(size: number | undefined) {
+    this.stopProgress();
+    this.progress = new UpdateProgress(size, this.options.now);
+    this.progressTimer = setInterval(() => {
+      if (!this.progress || this.state.download?.phase === 'verifying') return;
+      this.publish({ download: this.progress.read() });
+    }, 1000);
+    this.progressTimer.unref();
+    return this.progress.read();
   }
   private fail(error: unknown) {
     const installing = this.state.installing;
@@ -151,8 +175,10 @@ export class UpdateService extends EventEmitter {
     if (!this.state.enabled) return;
     if (event.type === 'error') return this.fail(event.error);
     if (event.type === 'progress') {
-      if (Number.isFinite(event.percent))
-        this.publish({ state: 'downloading', progress: Math.max(0, Math.min(100, event.percent)) });
+      if (this.state.state === 'downloading' && this.progress?.progress(event.transferred, event.total)) {
+        const download = this.progress.read();
+        this.publish({ download, progress: (download.transferred / download.total) * 100 });
+      }
       return;
     }
     if (event.type === 'not-available') {
@@ -161,6 +187,7 @@ export class UpdateService extends EventEmitter {
         version: undefined,
         notes: undefined,
         progress: undefined,
+        size: undefined,
         error: undefined,
       });
       return;
@@ -170,9 +197,12 @@ export class UpdateService extends EventEmitter {
       this.fail(new Error('Invalid update version'));
       return;
     }
+    const downloading = event.type === 'available' && this.autoDownload;
     this.publish({
       state: event.type === 'downloaded' ? 'ready' : this.autoDownload ? 'downloading' : 'available',
       version,
+      size: event.release.size,
+      download: downloading ? this.beginProgress(event.release.size) : undefined,
       notes: this.options.fetchNotes
         ? this.state.version === version
           ? this.state.notes
@@ -210,8 +240,13 @@ export class UpdateService extends EventEmitter {
         else {
           const release = await (this.options.fetchRelease ?? fetchLatestRelease)();
           if (release && compareAppVersions(release.version, this.state.currentVersion) > 0)
-            this.publish({ state: 'available', version: release.version, notes: release.notes });
-          else this.publish({ state: 'idle', version: undefined, notes: undefined });
+            this.publish({
+              state: 'available',
+              version: release.version,
+              notes: release.notes,
+              size: release.size,
+            });
+          else this.publish({ state: 'idle', version: undefined, notes: undefined, size: undefined });
         }
       } catch (error) {
         this.fail(error);
@@ -228,7 +263,12 @@ export class UpdateService extends EventEmitter {
     if (this.state.state === 'ready' || this.state.state === 'downloading')
       return this.downloading ?? Promise.resolve();
     if (this.downloading) return this.downloading;
-    this.publish({ state: 'downloading', error: undefined, progress: 0 });
+    this.publish({
+      state: 'downloading',
+      error: undefined,
+      progress: 0,
+      download: this.beginProgress(this.state.size),
+    });
     this.downloading = this.options
       .driver!.download()
       .catch((error) => this.fail(error))
@@ -280,6 +320,7 @@ export class UpdateService extends EventEmitter {
     }
   }
   dispose() {
+    this.stopProgress();
     clearTimeout(this.timer);
     clearInterval(this.interval);
     this.unsubscribe?.();

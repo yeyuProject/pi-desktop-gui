@@ -1,4 +1,13 @@
 export type UpdateInstallation = 'nsis' | 'portable' | 'appimage' | 'deb' | 'mac' | 'development';
+export interface UpdateDownload {
+  transferred: number;
+  total: number;
+  differential: boolean;
+  bytesPerSecond?: number;
+  remainingMs?: number;
+  stalled: boolean;
+  phase: 'connecting' | 'transferring' | 'verifying';
+}
 export interface UpdateInstallAttempt {
   currentVersion: string;
   targetVersion: string;
@@ -15,10 +24,40 @@ export interface UpdateState {
   checkedAt?: number;
   version?: string;
   progress?: number;
+  size?: number;
+  download?: UpdateDownload;
   notes?: string;
   error?: string;
   installing: boolean;
   lastInstall?: UpdateInstallAttempt;
+}
+
+/** Byte quantities use the total's unit when displaying a downloaded/total pair. */
+export function formatBytes(bytes: number, unitOf = bytes) {
+  const [unit, divisor] =
+    unitOf >= 1024 ** 3
+      ? (['GB', 1024 ** 3] as const)
+      : unitOf >= 1024 ** 2
+        ? (['MB', 1024 ** 2] as const)
+        : (['KB', 1024] as const);
+  return `${(bytes / divisor).toFixed(1)} ${unit}`;
+}
+
+export function formatRemaining(ms: number) {
+  if (ms < 5000) return '剩余不到 5 秒';
+  if (ms < 60000) return `剩余约 ${Math.ceil(ms / 5000) * 5} 秒`;
+  if (ms < 3600000) return `剩余约 ${Math.ceil(ms / 60000)} 分钟`;
+  const minutes = Math.ceil(ms / 60000);
+  return `剩余约 ${Math.floor(minutes / 60)} 小时 ${minutes % 60} 分`;
+}
+
+export function downloadSummary(update: UpdateState) {
+  const download = update.download;
+  if (download?.phase === 'verifying') return '正在校验更新…';
+  if (download?.stalled) return '等待网络响应…';
+  if (download?.phase === 'connecting') return '正在连接…';
+  const remaining = download?.remainingMs === undefined ? '' : ` · ${formatRemaining(download.remainingMs)}`;
+  return `正在下载更新 ${Math.floor(update.progress ?? 0)}%${remaining}`;
 }
 
 export function updateInstallNotice(update: UpdateState) {

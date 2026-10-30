@@ -118,7 +118,9 @@ Get the installer for your platform from the [latest release](https://github.com
 | **macOS**   | Apple Silicon · Intel | `.dmg` · `.zip`                                                      |
 | **Linux**   | x86_64                | `.AppImage` (auto-updates) · `.deb`                                  |
 
-The Windows installer, macOS app and Linux AppImage support in-app updates (automatic downloads can be turned off in **Settings → About & Updates**). Other formats notify you when a new version is available. On Mac, run the app from a writable directory, preferably Applications. Versions through v0.14.30 need one manual install of v0.14.31 or later to enable Mac updates. Active tasks and approvals block restart.
+The Windows installer, macOS app and Linux AppImage support in-app updates. Downloads are manual by default; enable automatic downloads in **Settings → About & Updates**. Installation starts only after clicking Restart now. Other formats notify you when a new version is available. On Mac, run the app from a writable directory, preferably Applications. Versions through v0.14.30 need one manual install of v0.14.31 or later to enable Mac updates. Active tasks and approvals block restart.
+
+View the package size before downloading. During download, the app shows bytes received, progress, average speed over the last five seconds and estimated time remaining. Incremental updates show the smaller transfer size separately. After ten seconds without new data, a waiting message replaces the estimate. Once the download completes, the app shows verification status and, on Mac, update preparation.
 
 ### 3. Connect a model and start
 

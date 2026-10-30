@@ -7,15 +7,33 @@ import { SignedUpdateProvider } from './signed-update-provider';
 import { updateFeed, updateProxy } from './update-network';
 import type { Settings } from '../shared/types';
 
-function release(info: {
-  version: string;
-  releaseNotes?: string | { version: string; note: string | null }[] | null;
-}): DesktopRelease {
+export function release(
+  info: {
+    version: string;
+    releaseNotes?: string | { version: string; note: string | null }[] | null;
+    files?: readonly { url: string; size?: number }[];
+  },
+  platform: NodeJS.Platform = process.platform,
+  arch: string = process.arch,
+): DesktopRelease {
   const notes =
     typeof info.releaseNotes === 'string'
       ? info.releaseNotes
       : (info.releaseNotes ?? []).map((item) => `## ${item.version}\n${item.note ?? ''}`).join('\n\n');
-  return { version: info.version, notes: notes.slice(0, 200000) };
+  const extension =
+    platform === 'win32'
+      ? '.exe'
+      : platform === 'linux'
+        ? '.AppImage'
+        : platform === 'darwin'
+          ? `-mac-${arch}.zip`
+          : undefined;
+  const size = extension ? info.files?.find((file) => file.url.endsWith(extension))?.size : undefined;
+  return {
+    version: info.version,
+    notes: notes.slice(0, 200000),
+    ...(Number.isSafeInteger(size) && size! > 0 ? { size } : {}),
+  };
 }
 
 /** Keep electron-updater's event and return shapes at this single boundary. */
@@ -31,7 +49,14 @@ export function nativeUpdateDriver(updater: AppUpdater): UpdateDriver {
   updater.on('error', (error) => emit({ type: 'error', error }));
   updater.on('update-available', (info) => emit({ type: 'available', release: release(info) }));
   updater.on('update-not-available', () => emit({ type: 'not-available' }));
-  updater.on('download-progress', (progress) => emit({ type: 'progress', percent: progress.percent }));
+  updater.on('download-progress', (progress) =>
+    emit({
+      type: 'progress',
+      percent: progress.percent,
+      transferred: progress.transferred,
+      total: progress.total,
+    }),
+  );
   updater.on('update-downloaded', (info) => emit({ type: 'downloaded', release: release(info) }));
   return {
     subscribe(listener) {

@@ -44,7 +44,7 @@ export function useWorkbench() {
     environment,
     setEnvironment,
     storage,
-    update,
+    updates,
   } = useRuntime(setError, setPrefs);
   const [pendingSessions, setPendingSessions] = useState<Record<string, number>>({});
   const [selectionTransition, setSelectionTransition] = useState<{
@@ -750,7 +750,7 @@ export function useWorkbench() {
       sideChat,
       askHunk,
       rerunCommand,
-      update,
+      updates,
       state,
       storage,
       runtime,

@@ -51,6 +51,7 @@ try {
     globalThis.auditComposerRenders = 0;
     globalThis.auditAppRenders = 0;
     globalThis.auditUserRenders = 0;
+    globalThis.auditSidebarRenders = 0;
     globalThis.auditMarkdownWork = [];
     globalThis.auditSecondTimers = new Set();
     const startInterval = window.setInterval.bind(window),
@@ -78,6 +79,8 @@ try {
           if (fiber.memoizedProps?.messageContext && fiber.memoizedProps?.messages && worked)
             globalThis.auditConversationRenders++;
           if (fiber.memoizedProps?.m?.role === 'user' && worked) globalThis.auditUserRenders++;
+          if (fiber.memoizedProps?.updateBadge && fiber.memoizedProps?.activities && worked)
+            globalThis.auditSidebarRenders++;
           if (
             worked &&
             fiber.tag === 15 &&
@@ -316,6 +319,76 @@ try {
         idleCounts,
         'completion stops the former per-second application renders',
       );
+
+      await page.getByRole('button', { name: '设置', exact: true }).click();
+      await page.getByRole('button', { name: '关于与更新', exact: true }).click();
+      const sendProgress = (percent) =>
+        app.evaluate(({ BrowserWindow }, percent) => {
+          BrowserWindow.getAllWindows()[0].webContents.send('desktop:event', {
+            type: 'update',
+            update: {
+              currentVersion: '0.14.58',
+              version: '0.14.59',
+              installation: 'nsis',
+              mode: 'auto',
+              enabled: true,
+              installing: false,
+              state: 'downloading',
+              progress: percent,
+              size: 100 * 1024 ** 2,
+              download: {
+                transferred: percent * 1024 ** 2,
+                total: 100 * 1024 ** 2,
+                phase: 'transferring',
+                differential: false,
+                stalled: false,
+                bytesPerSecond: 1024 ** 2,
+                remainingMs: (100 - percent) * 1000,
+              },
+            },
+          });
+        }, percent);
+      const updateCounts = () =>
+        page.evaluate(() => ({
+          app: globalThis.auditAppRenders,
+          composer: globalThis.auditComposerRenders,
+          conversation: globalThis.auditConversationRenders,
+          sidebar: globalThis.auditSidebarRenders,
+        }));
+      await sendProgress(1);
+      await expect(page.getByRole('progressbar', { name: '更新下载进度' })).toHaveAttribute('value', '1');
+      const beforeProgress = await updateCounts();
+      assert.ok(
+        Object.values(beforeProgress).every((count) => count > 0),
+        'render probes must observe every protected component',
+      );
+      for (let percent = 2; percent <= 6; percent++) {
+        await page.waitForTimeout(1000);
+        await sendProgress(percent);
+        await expect(page.getByRole('progressbar', { name: '更新下载进度' })).toHaveAttribute(
+          'value',
+          String(percent),
+        );
+        assert.deepEqual(
+          await updateCounts(),
+          beforeProgress,
+          'update progress must not render App, Composer, Conversation or Sidebar',
+        );
+      }
+      result.updateProgress = {
+        pushes: 6,
+        intervalMs: 1000,
+        app: 0,
+        composer: 0,
+        conversation: 0,
+        sidebar: 0,
+      };
+      await page
+        .getByRole('dialog', { name: '设置', exact: true })
+        .locator(':scope > footer')
+        .getByRole('button', { name: '关闭', exact: true })
+        .click();
+      console.log('PASS per-second update progress only renders update surfaces');
 
       await app.evaluate(() => (globalThis.auditWorkspaceCalls = []));
       const userRenders = await page.evaluate(() => globalThis.auditUserRenders);

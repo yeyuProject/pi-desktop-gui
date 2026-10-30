@@ -9,7 +9,7 @@ import {
 } from 'react';
 import { type AppState, type Environment, type Settings, type StorageStatus } from '../../shared/types';
 import { readableError } from '../lib/format';
-import type { UpdateState } from '../../shared/app-update';
+import { UpdateStore } from '../lib/update-store';
 import { RuntimeStore } from '../lib/runtime-store';
 const api = window.desktop;
 export function useRuntime(
@@ -18,9 +18,9 @@ export function useRuntime(
 ) {
   const [snapshot, setSnapshot] = useState<{ state: AppState; revision: number }>(),
     [environment, setEnvironment] = useState<Environment>(),
-    [update, setUpdate] = useState<UpdateState>(),
     [storage, setStorage] = useState<StorageStatus>({ writable: false });
   const [runtimes] = useState(() => new RuntimeStore());
+  const [updates] = useState(() => new UpdateStore());
   const sessionId = snapshot?.state.selectedSessionId;
   const runtime = useSyncExternalStore(
     useCallback((listener) => runtimes.subscribe(sessionId, listener), [runtimes, sessionId]),
@@ -40,7 +40,7 @@ export function useRuntime(
       if (!alive) return;
       if (event.type === 'state') receiveState(event.state, event.revision);
       else if (event.type === 'storage') setStorage(event.storage);
-      else if (event.type === 'update') setUpdate(event.update);
+      else if (event.type === 'update') updates.set(event.update);
       else if (event.type === 'environment') setEnvironment(event.environment);
       else if (event.type === 'runtimeRemoved') {
         runtimes.remove(event.sessionId);
@@ -61,7 +61,7 @@ export function useRuntime(
         setEnvironment((previous) => previous ?? v.environment);
         setPrefs((previous) => previous ?? receivedState.current.state?.settings ?? v.state.settings);
         setStorage(v.storage);
-        setUpdate(v.update);
+        if (!updates.get()) updates.set(v.update);
       })
       .catch((e) => setError(readableError(e)));
     return () => {
@@ -82,6 +82,6 @@ export function useRuntime(
     environment,
     setEnvironment,
     storage,
-    update,
+    updates,
   };
 }

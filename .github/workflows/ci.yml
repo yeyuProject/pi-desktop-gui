@@ -116,6 +116,8 @@ jobs:
           if-no-files-found: ignore
 
   update-roundtrip:
+    env:
+      PI_UPDATE_PROGRESS_AUDIT: '1'
     if: ${{ github.event_name != 'workflow_dispatch' || !inputs.skip_tests }}
     strategy:
       fail-fast: false
