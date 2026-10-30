@@ -91,7 +91,13 @@ export class UpdateProgress {
         ...this.value,
         stalled: false,
         bytesPerSecond: speed,
-        remainingMs: speed ? ((this.value.total - this.value.transferred) / speed) * 1000 : undefined,
+        // A timer can run between byte reports. The time since the last report has already elapsed.
+        remainingMs: speed
+          ? Math.max(
+              0,
+              ((this.value.total - this.value.transferred) / speed) * 1000 - (now - this.lastAdvancedAt),
+            )
+          : undefined,
       };
     }
     return { ...this.value };

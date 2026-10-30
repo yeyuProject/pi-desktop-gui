@@ -50,6 +50,7 @@ Sessions and workspaces stay on your machine. Model requests go to whichever pro
 - **Quick chat or full project** — Start a standalone chat without a repository, or open a project to get the file tree, Git changes and snapshots.
 - **Concurrent conversations** — Each connected chat has its own Pi process. Switch chats while tasks continue. Model and reasoning changes apply to the next new user task; tool continuations and mid-run additions retain the current settings. A double <kbd>Esc</kbd> stops only the current chat.
 - **Steer while it runs** — Add instructions mid-run (steer) or queue follow-ups within each conversation.
+- **Questions from Pi** — Answer up to three questions above the composer, with single or multiple choices, recommendations and your own text. Replies continue the same turn and preserve its plan. Unfinished answers survive chat switches, and completed question cards can be searched and copied. Active Goals wait up to ten minutes before continuing with recommended choices; ordinary tasks keep waiting.
 - **Task plans** — When Pi creates a plan for a multi-step task, a compact bar above the composer shows the current step. Expand the checklist, keep its view across chats and restarts, and recover the active branch’s plan. Finished plans shrink to a dot after eight seconds; unfinished ones show the remaining count. Planning depends on the model, and simple tasks keep the existing layout.
 - **Built-in Goals** — Start a Goal directly from the composer, keeping files, images, pasted snippets and conversation quotes. Inline budget controls and a separate objective editor preserve your unsent drafts across sessions and restarts. Keep working without a continuation-count limit. A compact bar shows a plan or active elapsed time, with pause, resume and objective editing. Completion requires a requirement-by-requirement audit; optional usage limits allow a bounded wrap-up. Goal usage excludes cache hits, and provider quota failures have their own state. Completed Goals collapse after eight seconds; saved active Goals reopen paused. `/goal edit` and other commands remain available. See [Goal controls and limits](docs/goal.md).
 - **Clear retry progress** — See retry backoff and response wait time, cancel an active retry request, and distinguish recovered attempts from failures in the run log. Consecutive empty error replies show the latest failure once, with earlier attempts expandable.
@@ -68,6 +69,8 @@ Sessions and workspaces stay on your machine. Model requests go to whichever pro
 </table>
 
 <p align="center"><img src="docs/assets/screenshots/task-plan.png" width="900" alt="Task plan above the composer with completed, active and pending steps" /></p>
+
+<p align="center"><img src="docs/assets/screenshots/ask-panel.png" width="900" alt="Pi asks for a database choice above the composer while the conversation remains visible" /></p>
 
 See the [release notes](docs/releases/) for what changed in each version.
 

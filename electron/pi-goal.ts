@@ -205,9 +205,11 @@ export function registerDesktopGoal(pi: ExtensionAPI) {
       accountingGoalId = undefined;
   });
   pi.on('tool_execution_start', (event) => {
+    if (event.toolName === 'desktop_ask_user') return;
     if (goal?.status === 'active' && !goalTools.includes(event.toolName)) activity.usedTools = true;
   });
   pi.on('tool_execution_end', (event) => {
+    if (event.toolName === 'desktop_ask_user') return;
     if (goal?.status !== 'active' || goalTools.includes(event.toolName)) return;
     activity.usedTools = true;
     if (!event.isError) activity.successfulTool = true;

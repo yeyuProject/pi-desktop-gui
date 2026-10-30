@@ -1,4 +1,5 @@
 import type { PlanSnapshot } from './plan';
+import type { AskAnswer, AskRequest } from './ask';
 import type { GoalDraft, GoalStartInput } from './goal-input';
 import type { AppDialog, AppMenuId } from './app-dialogs';
 import type { ApprovalMode, ApprovalRequest, ApprovalGrant } from './approval';
@@ -156,11 +157,19 @@ export interface ExtensionDialog {
   title: string;
   /** Present when the dialog is a tool approval request from the desktop bridge. */
   approval?: ApprovalRequest;
+  ask?: AskRequest;
   message?: string;
   options?: string[];
   placeholder?: string;
   prefill?: string;
   expiresAt?: number;
+}
+export interface ExtensionResponse {
+  value?: string;
+  confirmed?: boolean;
+  cancelled?: boolean;
+  ask?: AskAnswer;
+  skipped?: boolean;
 }
 export interface Model {
   id: string;
@@ -536,7 +545,7 @@ export interface ApiMap {
   clearQueue: { args: [sessionId: string]; result: void };
   forceStop: { args: [sessionId: string]; result: boolean };
   respond: {
-    args: [sessionId: string, dialogId: string, { value?: string; confirmed?: boolean; cancelled?: boolean }];
+    args: [sessionId: string, dialogId: string, ExtensionResponse];
     result: void;
   };
   files: { args: [string, string]; result: FileItem[] };

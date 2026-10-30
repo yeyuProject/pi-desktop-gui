@@ -1,4 +1,5 @@
 import { PlanCard } from './conversation/PlanCard';
+import { AskPanel } from './conversation/AskPanel';
 import { goalCommandPreview } from '../../shared/goal-input';
 import { MAX_GOAL_OBJECTIVE_LENGTH } from '../../shared/goal';
 import { GoalBudgetPicker } from './GoalBudgetPicker';
@@ -187,9 +188,11 @@ export function Composer(props: ComposerProps) {
   } = props;
   const modelState = sessionModelState(runtime, selected, state.settings);
   const goal = ownRuntime ? runtime.goal : null;
+  const ask = ownRuntime ? runtime.dialogs.find((dialog) => dialog.ask) : undefined;
   const editingGoal = draftGoal?.kind === 'edit';
-  const goalPreview = editingGoal ? undefined : goalCommandPreview(draft);
+  const goalPreview = editingGoal || ask ? undefined : goalCommandPreview(draft);
   const goalMode = Boolean(draftGoal || goalPreview);
+  const answering = Boolean(ask && !goalMode);
   const goalObjective = goalPreview?.objective ?? draft;
   const goalBudget =
     goalPreview?.tokenBudget ?? (draftGoal?.kind === 'start' ? draftGoal.tokenBudget : undefined);
@@ -305,6 +308,10 @@ export function Composer(props: ComposerProps) {
       runtime.status === 'stopping'
     )
       return;
+    if (answering) {
+      void send();
+      return;
+    }
     if (fileQuery !== null) {
       if (fileResults[fileIndex]) selectFile(fileResults[fileIndex]);
       return;
@@ -362,7 +369,16 @@ export function Composer(props: ComposerProps) {
           replace={() => openGoalComposer(true)}
         />
       )}
-      {!goalView.visible && ownRuntime && runtime.plan && (
+      {ask && selected && (
+        <AskPanel
+          key={`${selected.id}:${ask.id}`}
+          sessionId={selected.id}
+          dialog={ask}
+          disabled={pending || selectionChanging || !storage.writable || runtime.status === 'stopping'}
+          respond={(values) => api.invoke('respond', selected.id, ask.id, values)}
+        />
+      )}
+      {!ask && !goalView.visible && ownRuntime && runtime.plan && (
         <PlanCard
           key={`${selected?.id}:${runtime.plan.turnId}`}
           plan={runtime.plan}
@@ -509,7 +525,7 @@ export function Composer(props: ComposerProps) {
             ))}
           </div>
         )}
-        {activeCommand?.source === 'prompt' && activeCommand.argumentHint && (
+        {!answering && activeCommand?.source === 'prompt' && activeCommand.argumentHint && (
           <PromptArguments
             key={selected?.id + activeCommand.name}
             command={activeCommand.prefix + activeCommand.name}
@@ -524,7 +540,7 @@ export function Composer(props: ComposerProps) {
             onFileKeyDown={fileKey}
           />
         )}
-        {parameterError && (
+        {!answering && parameterError && (
           <div className="inline-error" role="alert">
             {parameterError}
           </div>
@@ -533,7 +549,13 @@ export function Composer(props: ComposerProps) {
           ref={input}
           aria-label="任务输入"
           placeholder={
-            goalMode ? '描述你想达成的目标…' : project ? '描述你想完成的任务，@ 引用文件…' : '给 Pi 发消息…'
+            answering
+              ? '也可以直接输入回答…'
+              : goalMode
+                ? '描述你想达成的目标…'
+                : project
+                  ? '描述你想完成的任务，@ 引用文件…'
+                  : '给 Pi 发消息…'
           }
           value={draft}
           disabled={!selected || !storage.writable}
@@ -563,6 +585,13 @@ export function Composer(props: ComposerProps) {
           }}
           onKeyDown={(e) => {
             if (topLayer()) return;
+            if (answering) {
+              if (e.key === 'Enter' && !e.shiftKey && !e.nativeEvent.isComposing) {
+                e.preventDefault();
+                sendComposer();
+              }
+              return;
+            }
             if (fileKey(e)) return;
             if (commandOptions.length) {
               if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
@@ -629,7 +658,7 @@ export function Composer(props: ComposerProps) {
             }
           }}
         />
-        {!!commandOptions.length && (
+        {!answering && !!commandOptions.length && (
           <div className="command-picker" role="listbox" aria-label="Pi 命令" ref={commandList}>
             {commandOptions.map((c, i) => (
               <div key={c.prefix + c.name} role="presentation">
@@ -668,7 +697,7 @@ export function Composer(props: ComposerProps) {
             <span>{activeCommand.description}</span>
           </div>
         )}
-        {fileQuery !== null && (
+        {!answering && fileQuery !== null && (
           <div className="file-picker" role="listbox" aria-label="项目文件" ref={fileList}>
             <div className="file-picker-header">
               <Search size={13} />
@@ -790,7 +819,7 @@ export function Composer(props: ComposerProps) {
                 {attachmentBytes > 1024 * 1024 && <small>占用最多：{largest.name}；请移除或按行引用</small>}
               </span>
             )}
-            {ownRunning && !connecting && !goalMode ? (
+            {ownRunning && !connecting && !goalMode && !ask ? (
               <select
                 aria-label="运行中发送方式"
                 value={sendMode}
@@ -821,14 +850,30 @@ export function Composer(props: ComposerProps) {
             )}
             <button
               className={'send-button' + (goalMode && !localGoalCommand ? ' goal-send-button' : '')}
-              aria-label={editingGoal ? '保存修改' : goalMode && !localGoalCommand ? '开始 Goal' : '发送任务'}
-              title={editingGoal ? '保存修改' : goalMode && !localGoalCommand ? '开始 Goal' : '发送任务'}
+              aria-label={
+                answering
+                  ? '发送回答'
+                  : editingGoal
+                    ? '保存修改'
+                    : goalMode && !localGoalCommand
+                      ? '开始 Goal'
+                      : '发送任务'
+              }
+              title={
+                answering
+                  ? '发送回答'
+                  : editingGoal
+                    ? '保存修改'
+                    : goalMode && !localGoalCommand
+                      ? '开始 Goal'
+                      : '发送任务'
+              }
               disabled={
                 (!draft.trim() && !images.length && !snippets.length && !draftQuotes.length) ||
                 (!editingGoal && attachmentBytes > 1024 * 1024) ||
                 goalEmpty ||
                 Boolean(goalError) ||
-                Boolean(parameterError) ||
+                (!answering && Boolean(parameterError)) ||
                 !selected ||
                 pending ||
                 props.attachmentsPending ||

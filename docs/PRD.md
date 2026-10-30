@@ -2,6 +2,162 @@
 
 首版功能 页面与交互设计
 
+## 模型反问（已实现，v0.14.61）
+
+### Q1 模型向用户提问：结构化问题与回答面板
+
+基线为 v0.14.59。参照 OpenAI Codex 的 `request_user_input` 和 Claude Code 的 `AskUserQuestion`：模型遇到无法自行决定的分歧时，可以暂停当前回合，向用户提 1–3 个带选项的问题，拿到回答后在同一回合继续工作。Codex 的做法依据其 app-server 协议文档和 openai/codex issue #11536、#30150、#44833，核对日期 2026-10-30。
+
+**背景与问题。**
+
+1. **模型提问只能结束回合。** 桥接扩展只注册了 Goal 工具（`electron/pi-goal.ts:318-380`）和 `desktop_plan`（`electron/pi-plan.ts`），没有提问工具。模型需要用户做决定时，只能在回复里写一段问题然后结束回合。用户回答后会作为新的一轮发送：上下文要重新组装，P1 的计划会被清空（`pi-plan.ts:30-37`，新的用户消息会清空计划），Goal 也会把这次结束当作一次续跑边界。
+2. **问题和普通回复混在一起。** 这类问题在对话流里只是一段 Markdown，既没有选项，也不会触发“等待你的回复”状态（`src/lib/status.ts:5`）、侧栏的待确认标记（`src/components/Sidebar.tsx:168`）和系统通知（`electron/main.ts:291`）。用户切到别的会话后不会知道这里在等自己。
+3. **现有对话框不适合用来提问。** `ExtensionPrompt`（`src/components/ExtensionPrompt.tsx`）是给扩展用的通用模态框，每次只显示一个 `select`/`confirm`/`input`/`editor`。它有以下问题：
+   - 模态框会遮住对话，用户回答前看不到模型给出的上下文。
+   - 单选和自定义输入不能同时出现。
+   - 不支持多选，选项也没有说明文字。
+   - 多个问题只能逐个弹出（“之后还有 N 个问题”）。
+   - 没有推荐项。
+4. **Goal 无人值守时没有降级。** G2 的 Goal 是持续自动执行的。如果模型在 Goal 中停下来等回答，而用户不在电脑前，Goal 会一直停住。需要一条规则：Goal 中允许提问，但限时等待，超时按推荐项继续。
+
+**目标。**
+
+- 模型有一个专用的提问工具。调用后当前回合暂停，回答作为工具结果返回，同一回合继续，不新增一轮用户消息。
+- 问题显示在输入框上方的回答面板中，不使用模态框，回答时可以继续滚动查看对话。
+- 支持单选、多选、补充文字、推荐项和每个选项的说明。
+- 提问期间会话处于“等待你的回复”状态，侧栏有标记，并发送系统通知。
+- 问答以紧凑卡片的形式留在对话历史中，可以搜索、复制，重新读取历史后仍能看到。
+
+**不做。**
+
+- 改造 `ExtensionPrompt`。第三方扩展的 `ctx.ui.select/input/confirm/editor` 仍用原有模态框，本节只新增模型提问通道。
+- 规划模式或只读模式下的强制提问流程。
+- 模型主动提问以外的“澄清”功能，例如发送前由桌面端分析草稿并追问。
+- 在问题中附带图片、文件选择器、日期等富输入控件。
+- 跨会话的问题汇总列表。
+
+**交互。**
+
+- **回答面板位置**：显示在输入框上方，与 Goal 状态卡、计划卡的位置相同（`src/components/Composer.tsx:352-375`）。有问题时，面板替换计划卡显示；Goal 状态卡仍在面板上方。会话切走再切回来，面板恢复，已选的选项和已填的文字保留。
+- **面板结构**（1–3 个问题，自上而下排列，不翻页）
+  - 标题行：`Pi 需要你决定`，右侧为“跳过”。多于一题时，每题前显示题号。
+  - 每个问题依次是：
+    - 短标签 `header`（例如“数据库”），用小号标签样式显示。
+    - 问题正文 `question`，按 Markdown 渲染，代码和路径可读。
+    - 选项列表，每项为标签 `label` 加一行说明 `description`，作为可点击的整行显示。单选用单选按钮，多选用复选框。推荐项排在第一位，标签后显示“推荐”。
+    - 最后一项固定为“其他…”，选中后展开单行输入框（长度上限 2000 字）。
+  - 底部：可选的“补充说明”输入框（默认收起，点“添加说明”展开），以及主按钮“提交回答”。所有问题都有答案后，主按钮才可用。
+  - 面板最大高度为对话区高度的 50%，超出部分在面板内滚动，提交按钮所在的底部固定可见。
+- **快捷操作**
+  - 只有一个单选问题时，点击选项就直接提交，不需要再点“提交回答”。选“其他…”的情况除外。
+  - 键盘：面板出现时，如果焦点不在输入框里，就移到第一个问题的第一个选项，不抢走正在输入的焦点。`↑`/`↓` 在选项间移动，`Space` 选中，数字键 `1`–`9` 直接选中对应选项，`Tab` 跳到下一个问题，`Ctrl/⌘+Enter` 提交。
+  - `Esc`：焦点在面板内时，先收起展开的输入框；再按一次 `Esc` 等于“跳过”，跳过前需要确认。焦点不在面板内时，`Esc` 仍按原规则处理，连按两次停止任务（`src/hooks/useShortcuts.ts:119-135`）。
+- **跳过**：用户点击“跳过”，模型收到“用户跳过了这些问题，请按你推荐的方案继续，并在最终回复中说明你做的假设”，然后继续工作。
+- **停止任务**：问题自动关闭，面板消失，工具返回“已取消”，然后按现有的停止流程处理。
+- **用输入框直接回答**：提问期间，输入框仍可使用。
+  - 如果用户在输入框中输入内容并发送，这段文字作为“其他”回答提交给第一个问题，其余问题按跳过处理，并在面板中提示“已用输入框的内容回答”。这样比转为补充消息（steer）更可预期。
+  - 输入框的占位文字改为“也可以直接输入回答…”。
+  - 带附件、图片、片段或引用时不能用于回答，提示“回答问题时只能发送文字，附件请在问题回答后再发送”。草稿保留，不清空。
+- **超时**
+  - 普通任务不设超时，一直等待。
+  - Goal 处于 `active` 时，等待上限为 10 分钟。面板标题显示倒计时：`9:41 后按推荐继续`。到时按每题的推荐项回答；没有推荐项的题按第一个选项回答。工具结果注明“用户未在 10 分钟内回答，已按推荐项继续”，Goal 不暂停。
+- **对话历史**
+  - 回答提交后，面板收起。对话流中这次工具调用显示为问答卡：“Pi 提问”，每题一行 `header：所选答案`，展开后可以看到问题全文、所有选项（所选项高亮）和补充说明。
+  - 跳过、超时、取消分别用标签“已跳过”“超时按推荐”“已取消”区分。
+  - 问答卡参与会话内查找（W2），在轮次目录中不算作失败。
+- **状态与通知**
+  - 提问期间，运行状态为 `waiting`，底部显示“等待你的回复”，侧栏显示待确认标记。
+  - 窗口不在前台或用户在看别的会话时，发送系统通知：标题“Pi 需要你决定 · 会话名”，内容为第一题的 `header` 和问题正文的前 80 个字。复用 `notifyOnApproval` 设置项，该项的文字已经是“审批或等待回复时发送系统通知”。
+
+**模型侧约定。**
+
+- 新增工具 `desktop_ask_user`，`exposure: 'model-only'`，`executionMode: 'sequential'`。参数：
+  ```
+  questions: 1–3 项，每项：
+    id: string（1–64，问题内唯一）
+    header: string（1–24 字）
+    question: string（1–2000 字）
+    multiSelect: boolean（默认 false）
+    options: 2–6 项，每项 { label: 1–60 字, description?: 0–200 字, recommended?: boolean }
+  ```
+  - 每题最多一个 `recommended`。
+  - 选项的 `label` 在同一题内不可重复，也不能是“其他”。“其他…”由桌面端追加，模型不需要提供。
+- **返回给模型的工具结果**（文本，同时写入 `details`）：
+  - 回答：`{ status: 'answered', answers: { [id]: { selected: string[], other?: string } }, note?: string }`。
+  - 跳过：`{ status: 'skipped' }`。
+  - Goal 超时：`{ status: 'timeout_recommended', answers }`。
+  - 停止任务：`{ status: 'cancelled' }`。
+  - `selected` 使用选项的 `label` 原文。
+  - `details` 同时保存原始问题，问答卡和查找都从 `details` 读取，不依赖运行时状态。
+- **`promptGuidelines`**：
+  - 只在存在多种合理做法，且选错会造成明显返工时才提问，例如目标不明确、需要在几种方案之间取舍、操作不可逆。
+  - 能通过阅读代码、运行命令或查文档得到答案的，不要提问。
+  - 每个问题给出 2–4 个互斥的选项，并标出推荐项。
+  - 一次最多 3 个问题。不要在同一个回合里连续多次提问。
+  - 用户跳过或超时后，按推荐方案继续，在最终回复中写明做了什么假设。
+  - 不要用这个工具确认是否执行操作。审批由桌面端负责。
+- **审批**：`shared/approval.ts:42-50` 的放行列表加入 `desktop_ask_user`。提问不会修改文件，任何审批模式下都不需要额外批准，只读模式也可以使用。
+- **调用频率**：同一个用户回合最多提问 3 次，超过后工具报错“本轮提问次数已达上限，请按推荐方案继续并说明假设”。新的用户消息会重置计数，Goal 的每次自动续跑也会重置。
+- **Goal**：`desktop_ask_user` 加入 Goal 的 `goalTools` 豁免列表（`electron/pi-goal.ts:28`），本身不算作“有进展”，也不重置无进展计数。用户的回答属于外部输入，回答后的那一轮按正常规则判断有没有进展。
+
+**技术方案。**
+
+- **桥接**（新建 `electron/pi-ask.ts`，在 `electron/pi-bridge.ts:172` 旁边注册）
+  - 工具执行时，通过 `ctx.ui.input(DESKTOP_ASK_PREFIX + JSON.stringify(request), '', { signal, timeout })` 发起请求，模式与检查点请求相同（`pi-bridge.ts:47`）。
+  - `signal` 用工具执行的 `AbortSignal`：停止任务时，Pi 会自动以默认值结束这个对话框（Pi 1.4.0 `dist/modes/rpc/rpc-mode.js` 的 `createDialogPromise`）。返回 `undefined` 视为取消。
+  - Goal `active` 时传 `timeout: 600000`。Pi 在超时后返回 `undefined`，扩展用 `signal.aborted` 和计时区分“取消”和“超时”，超时时按推荐项生成回答。
+  - 回答由桌面端序列化为 JSON 字符串传回。扩展端用与参数相同的校验函数检查：`selected` 必须都是该题的选项，单选题恰好选一项，`other` 不超过 2000 字。校验失败按取消处理并记录诊断信息，不把非法数据交给模型。
+  - `shared/pi-bridge.ts` 新增 `DESKTOP_ASK_PREFIX = '__PI_DESKTOP_ASK__'`，`DESKTOP_BRIDGE_PROTOCOL` 从 3 升到 4。
+- **共享类型与校验**（新建 `shared/ask.ts`）
+  - 定义 `AskRequest`、`AskAnswer`、`validateAskRequest`、`validateAskAnswer`、`recommendedAnswers`，以及把回答整理成工具结果文本的 `formatAskResult`。
+  - 扩展端、主进程和界面共用这一份，规则与参数 schema 保持一致。
+- **主进程**（`electron/agent.ts`）
+  - 在 `extension()`（`agent.ts:743`）中识别 `DESKTOP_ASK_PREFIX`：解析并校验后，在 `r.dialogs` 中加入 `{ id, method: 'input', title: 'Pi 需要你决定', ask: AskRequest, expiresAt }`，状态切为 `waiting`。复用现有的对话框计时、清理（`clearDialogs`）、停止时取消（`agent.ts:2282`）和通知判断。解析失败时直接回复取消。
+  - `ExtensionDialog`（`shared/types.ts:153`）增加 `ask?: AskRequest`，与 `approval` 并列。
+  - `respond()`（`agent.ts:826`）对 `ask` 类对话框用 `validateAskAnswer` 校验后，写回 `extension_ui_response`。`respond` 的 IPC 参数（`shared/types.ts:538`）新增 `{ ask: AskAnswer } | { skipped: true }`，与现有的 `value/confirmed/cancelled` 并存。
+  - 通知（`electron/main.ts:291`）：对话框带 `ask` 时，按“交互”中的规则生成标题和内容。
+- **界面**
+  - `src/hooks/useWorkbench.ts:192-193` 把对话框分成三类：`approvals`、`asks`、其余的 `prompts`。`ExtensionPrompt` 只接收 `prompts`。
+  - 新建 `src/components/conversation/AskPanel.tsx`，挂在 `Composer.tsx:364` 计划卡的位置；有 `asks[0]` 时不渲染 `PlanCard`。面板的草稿（已选项、其他文字、补充说明）存在组件之外，按 `dialog.id` 保存在内存中，切换会话后恢复；问题结束后清除，不写盘。
+  - **面板不注册到 `useLayer`。** `useLayer.ts:15-18` 会让栈顶层级拦截所有 `Esc`，`panel` 层级也一样，注册后会导致连按两次 `Esc` 停止任务彻底失效。面板只在自身根元素上监听 `keydown`，处理完后调用 `stopPropagation()`，这样焦点在面板外时全局快捷键不受影响。
+  - 输入框在 `asks[0]` 存在时，发送改为提交“其他”回答（见“交互”），占位文字随之变化。
+  - 新建 `src/components/conversation/AskCard.tsx`：对 `toolName === 'desktop_ask_user'` 的工具结果渲染问答卡，替代通用 `ToolCard`，在 `ChatMessage.tsx:105` 的分支中选择。运行中尚无结果的这次调用不在对话流中单独显示（同 `desktop_plan` 在 `src/lib/conversation-layout.ts:21` 的处理），由回答面板表示。
+  - 新建 `src/styles/ask.css`，只用主题变量，经典、Codex、Claude 各模式通用。选项行最小高度 36px，推荐标签用 `--accent`，说明文字用 `--muted`。
+- **轮次目录与查找**：`src/lib/conversation-layout.ts` 的轮次统计中，问答卡不算失败。W2 的查找索引包含 `header`、`question`、所选 `label` 和补充说明。
+
+**验收标准。**
+
+1. 模型调用 `desktop_ask_user` 后，会话状态变为“等待你的回复”，侧栏显示待确认标记，输入框上方出现回答面板，对话区仍可滚动。窗口不在前台时收到系统通知。
+2. 回答后，同一回合继续：会话中不出现新的用户消息，P1 计划不被清空，模型收到的工具结果与所选内容一致。
+3. 单选、多选、“其他…”、补充说明、推荐项都能正确显示，并原样回传。单选题回传多项、选项不在列表中、超长等非法回答被主进程拒绝，界面显示错误并保留已填内容。
+4. 只有一个单选问题时，点击选项立即提交；有多个问题或多选题时，全部作答前“提交回答”不可用。
+5. 键盘可以完成全部操作（方向键、数字键、`Tab`、`Space`、`Ctrl/⌘+Enter`）。焦点在面板内时，连按两次 `Esc` 不会停止任务；焦点在面板外时，连按两次 `Esc` 仍能停止任务。
+6. 跳过、停止任务、Goal 超时三种情况下，面板关闭，对话流中的问答卡分别显示“已跳过”“已取消”“超时按推荐”，模型收到对应的 `status`。
+7. Goal 中提问：10 分钟内未回答时按推荐项继续，Goal 保持 `active`；提问本身不计入进展，也不让 Goal 被判定为受阻。
+8. 切换会话再回来时，面板恢复，已选内容保留；Pi 进程退出或会话被停止时，面板消失，不残留。
+9. 重新读取历史后，问答卡仍按卡片显示；会话内查找能找到问题正文和所选答案。
+10. 同一回合第 4 次调用提问工具时返回错误，不显示面板。
+11. 第三方扩展的 `ctx.ui.select/input/confirm/editor` 仍用原有模态框，行为不变。
+12. 只读模式下，提问工具不需要审批，能正常使用。
+
+**测试。**
+
+- 新建 `tests/ask.test.ts`：覆盖 `validateAskRequest`、`validateAskAnswer` 的边界（题数、选项数、重复的 `label`、多个推荐项、单选题回传多项、超长的“其他”）、`recommendedAnswers` 和 `formatAskResult` 的四种状态，以及每回合 3 次的上限。
+- `tests/support/` 新增 `ask-provider.ts`（参照 `plan-provider.ts`），用本地模型桩依次发出提问、读取工具结果、继续回复。覆盖：回答后同一回合继续、跳过、停止任务时取消、Goal 超时按推荐（用缩短的超时配置注入）。
+- 新增 `scripts/test-ask-ui.mjs`（加入 `npm run test:chat-ui`）。
+  - 覆盖面板显示、单选立即提交、多题全部作答、多选、“其他…”、补充说明、键盘操作、面板内外双击 `Esc` 的不同行为、跳过确认、用输入框回答（含带附件时被拒绝）、会话切换后恢复、问答卡显示与查找、系统通知内容。
+  - 截图 `test-results/ask-{single,multi,history}-{classic,codex,claude}.png`。
+- `tests/approval.test.ts`：`decide` 在三种模式下对 `desktop_ask_user` 都返回 `allow`。
+- `scripts/test-features-ui.mjs` 中第三方扩展对话框的现有用例保持通过。
+- 同步双语 README（功能列表加一条“模型反问”）、`docs/architecture.md` 的桥接工具说明，以及截图 `docs/assets/screenshots/ask-panel.png`。
+
+**实现与验证（2026-10-30）。**
+
+- 已实现上述 Q1。v0.14.60 已拆出弹窗管理，因此解析、回答校验、失效及停止清理放在 `AgentDialogs`，没有重新塞回 `AgentService`。
+- 输入框只在普通回答模式下代答；显式编辑 Goal 仍保存目标。以 `/`、`@` 开头的回答保留原文，不执行命令或添加文件。输入框回答只包含第一题，其余题按跳过显示。
+- 停止时传回明确的 `cancelled` 结果，避免 Pi 尚未处理停止信号时，把同时到达的超时误当成按推荐继续。面板关闭文字输入框时仍保持内部焦点，后续 Esc 不会误触停止任务。
+- 单元测试、真实 Pi 集成和界面验收覆盖问题与回答校验、同回合继续、计划保留、普通等待、Goal 超时、次数上限、草稿保留、历史查找、通知设置和三套外观。具体记录及本机剪贴板验证限制见 [模型反问验收](testing/model-questions.md)。
+
 ## 更新下载进度详情（已实现）
 
 ### U2 下载更新时显示大小、进度、速度与剩余时间

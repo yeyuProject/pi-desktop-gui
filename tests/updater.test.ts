@@ -176,7 +176,7 @@ test('timer ticks between slightly delayed byte events do not understate a stead
   const mb = 1024 ** 2,
     sample = new UpdateProgress(100 * mb, () => now);
   const events: { time: number; bytes?: number }[] = [];
-  for (let tick = 1; tick <= 40; tick++) {
+  for (let tick = 1; tick <= 100; tick++) {
     events.push({ time: tick * 1000 });
     events.push({ time: tick * 1090, bytes: tick * 1.09 * mb });
   }
@@ -185,13 +185,16 @@ test('timer ticks between slightly delayed byte events do not understate a stead
     now = event.time;
     if (event.bytes !== undefined) sample.progress(event.bytes, 100 * mb);
     const progress = sample.read();
-    if (now < 10000) continue;
+    if (now < 10000 || now >= 95000) continue;
     assert.ok(
       progress.bytesPerSecond! >= 0.95 * mb && progress.bytesPerSecond! <= 1.05 * mb,
       `steady byte events measured as ${progress.bytesPerSecond! / mb} MB/s at ${now} ms`,
     );
     const actualRemaining = 100000 - now;
-    assert.ok(Math.abs(progress.remainingMs! - actualRemaining) / actualRemaining <= 0.2);
+    assert.ok(
+      Math.abs(progress.remainingMs! - actualRemaining) / actualRemaining <= 0.2,
+      `ETA ${progress.remainingMs} vs actual remaining ${actualRemaining} at ${now} ms`,
+    );
   }
 });
 

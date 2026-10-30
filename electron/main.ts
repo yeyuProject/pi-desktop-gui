@@ -262,8 +262,12 @@ function notifyAttention(runtime: Runtime) {
   let title: string, body: string;
   if (runtime.dialogs.length > previous.dialogs) {
     if (store.state.settings.notifyOnApproval === false) return;
-    title = 'Pi 需要你的回复';
-    body = runtime.dialogs.at(-1)?.title || session.title;
+    const dialog = runtime.dialogs.at(-1);
+    const question = dialog?.ask?.questions[0];
+    title = question ? 'Pi 需要你决定 · ' + session.title : 'Pi 需要你的回复';
+    body = question
+      ? `${question.header}：${redact(question.question).replace(/\s+/g, ' ').slice(0, 80)}`
+      : dialog?.title || session.title;
   } else if (finished && goalOutcome) {
     if (!store.state.settings.notifyOnFinish) return;
     title = goalOutcome.title + ' · ' + session.title;

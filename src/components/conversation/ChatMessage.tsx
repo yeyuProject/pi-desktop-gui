@@ -15,6 +15,8 @@ import { time } from '../../lib/format';
 import { IconButton } from '../IconButton';
 import { RichText, MessageImages, UserMessage } from './Markdown';
 import { ToolCard } from './ToolCard';
+import { AskCard } from './AskCard';
+import { DESKTOP_ASK_TOOL, readAskDetails } from '../../../shared/ask';
 import { ReplyMeta, ReplySpeed } from './Usage';
 import type { SessionMatch } from '../../lib/session-search';
 import { ThinkingBlock } from './ThinkingBlock';
@@ -105,6 +107,17 @@ export const ChatMessage = memo(
     if (m.role === 'toolResult') {
       const observed = ctx.toolFor(m);
       const tool = match ? { ...observed, output: messageText(m) } : observed;
+      const ask = tool.name === DESKTOP_ASK_TOOL ? readAskDetails(m.details) : undefined;
+      if (ask)
+        return (
+          <AskCard
+            details={ask}
+            expanded={ctx.expanded.includes(tool.id)}
+            toggle={(open) => ctx.toggleTool(tool.id, open)}
+            copy={ctx.copy}
+            match={match}
+          />
+        );
       return (
         <div>
           <ToolCard
@@ -267,6 +280,7 @@ export const ChatMessage = memo(
               .filter(
                 (b) =>
                   b.type === 'toolCall' &&
+                  b.name !== DESKTOP_ASK_TOOL &&
                   typeof b.partialJson === 'string' &&
                   !ctx.liveToolIds.has(String(b.id)),
               )

@@ -1,4 +1,5 @@
 import { applyRuntimePatch, busy, emptyRuntime, type Runtime, type RuntimePatch } from '../../shared/types';
+import { retainAskDrafts } from './ask-drafts';
 
 export interface SessionActivity {
   status: Runtime['status'];
@@ -36,6 +37,7 @@ export class RuntimeStore {
   set(runtime: Runtime) {
     const id = runtime.sessionId;
     if (!id) return;
+    if (this.runtimes.get(id)?.dialogs !== runtime.dialogs) retainAskDrafts(id, runtime.dialogs);
     this.runtimes.set(id, runtime);
     for (const listener of this.listeners.get(id) ?? []) listener();
     const before = this.activities[id];
@@ -51,6 +53,7 @@ export class RuntimeStore {
     if (patch.sessionId) this.set(applyRuntimePatch(this.get(patch.sessionId), patch));
   }
   remove(id: string) {
+    retainAskDrafts(id, []);
     this.runtimes.delete(id);
     const { [id]: _removed, ...activities } = this.activities;
     this.activities = activities;

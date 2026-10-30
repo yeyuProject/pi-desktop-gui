@@ -1,5 +1,6 @@
 import { parseGoalCommand, type GoalStartInput } from '../../shared/goal-input';
 import { validateGoalObjective } from '../../shared/goal';
+import { answerAskWithText } from '../../shared/ask';
 import { useRuntime } from './useRuntime';
 import { useHistory } from './useHistory';
 import { useStableCallbacks } from './useStableCallbacks';
@@ -190,7 +191,8 @@ export function useWorkbench() {
   }, [checkpoints]);
   const { history, messages } = useHistory(selected, runtime, thread, autoScroll, setNewContent, setError);
   const approvals = useMemo(() => runtime.dialogs.filter((d) => d.approval), [runtime.dialogs]);
-  const prompts = useMemo(() => runtime.dialogs.filter((d) => !d.approval), [runtime.dialogs]);
+  const asks = useMemo(() => runtime.dialogs.filter((d) => d.ask), [runtime.dialogs]);
+  const prompts = useMemo(() => runtime.dialogs.filter((d) => !d.approval && !d.ask), [runtime.dialogs]);
   const lastAssistant = messages.findLast((m) => m.role === 'assistant');
   const actionsLocked = pending || running || !sessionEnabled;
   const visibleMessages = useMemo(() => messages.slice(-messageLimit), [messages, messageLimit]);
@@ -311,6 +313,36 @@ export function useWorkbench() {
       renderedSelectionRequest !== selectionRequest.current
     )
       return;
+    const question = runtime.sessionId === target ? asks[0] : undefined;
+    if (question && !draftGoal) {
+      if (pending) return;
+      if (
+        attachments.length ||
+        images.length ||
+        draftState.snippets.length ||
+        draftState.draftQuotes.length
+      ) {
+        setError('回答问题时只能发送文字，附件请在问题回答后再发送。');
+        return;
+      }
+      setPending(true);
+      setError('');
+      await attempt(async () => {
+        const reply = answerAskWithText(question.ask!, draft);
+        await flushDraft();
+        if (getDraftRevision() !== draftRevision) throw new Error('草稿已变化，请确认后重新提交回答。');
+        if (
+          target !== stateRef.current?.selectedSessionId ||
+          target !== receivedState.current.state?.selectedSessionId
+        )
+          return;
+        await api.invoke('respond', target, question.id, { ask: reply });
+        await api.invoke('consumeDraft', target, draft, [], []);
+        if (target === stateRef.current?.selectedSessionId) setNotice('已用输入框的内容回答');
+      });
+      setPending(false);
+      return;
+    }
     const rawCommand = draftGoal?.kind !== 'edit' && /^\s*\/goal(?:\s|$)/.test(draft);
     // Opening the composer is local, including when Pi is unavailable.
     if (rawCommand && /^\s*\/goal\s*$/.test(draft)) {
