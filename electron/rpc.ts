@@ -1,6 +1,5 @@
 import { spawn, type ChildProcessWithoutNullStreams } from 'node:child_process';
 import { EventEmitter } from 'node:events';
-import { StringDecoder } from 'node:string_decoder';
 import { randomUUID } from 'node:crypto';
 import { isWindows, terminateProcessTree, WindowsProcessNotFoundError } from './platform';
 import { incompatible, validateRpcResult, validateBridgeResult, type RpcResult } from './pi/protocol';
@@ -12,25 +11,41 @@ export interface CommandSpec {
   env?: NodeJS.ProcessEnv;
 }
 export class LfJsonDecoder {
-  private decoder = new StringDecoder('utf8');
-  private fragments: string[] = [];
+  private fragments: Buffer[] = [];
   private length = 0;
+  private discarding = false;
   constructor(
     private emit: (value: any) => void,
     private invalid: (error: Error) => void,
+    private readonly maxRecordBytes = 128 * 1024 * 1024,
   ) {}
   push(chunk: Buffer) {
-    const text = this.decoder.write(chunk);
-    let start = 0,
-      index: number;
+    let start = 0;
     // A large get_messages response spans many stdout chunks. Scan each chunk
-    // once and join only complete records, instead of copying the growing prefix.
-    while ((index = text.indexOf('\n', start)) >= 0) {
-      this.fragments.push(text.slice(start, index));
-      const line = this.fragments.join('').replace(/\r$/, '');
+    // once. Count wire bytes before joining/decoding, including the final fragment.
+    // LF cannot occur inside a UTF-8 multibyte character.
+    while (start < chunk.length) {
+      const newline = chunk.indexOf(10, start);
+      const end = newline === -1 ? chunk.length : newline;
+      if (!this.discarding) {
+        this.length += end - start;
+        if (this.length > this.maxRecordBytes) {
+          this.fragments = [];
+          this.length = 0;
+          this.discarding = true;
+          this.invalid(new Error('Pi 一次返回的内容过大。请在终端导出会话，再重新连接。'));
+        } else if (end > start) this.fragments.push(chunk.subarray(start, end));
+      }
+      if (newline === -1) return;
+      start = newline + 1;
+      if (this.discarding) {
+        // Reject the whole record, not just its prefix. Resume only after its LF.
+        this.discarding = false;
+        continue;
+      }
+      const line = Buffer.concat(this.fragments, this.length).toString('utf8').replace(/\r$/, '');
       this.fragments = [];
       this.length = 0;
-      start = index + 1;
       if (!line.trim()) continue;
       try {
         const record = JSON.parse(line);
@@ -44,16 +59,6 @@ export class LfJsonDecoder {
           }),
         );
       }
-    }
-    if (start < text.length) {
-      const remainder = text.slice(start);
-      this.fragments.push(remainder);
-      this.length += remainder.length;
-    }
-    if (this.length > 128 * 1024 * 1024) {
-      this.fragments = [];
-      this.length = 0;
-      this.invalid(new Error('Pi 一次返回的内容过大。请在终端导出会话，再重新连接。'));
     }
   }
 }

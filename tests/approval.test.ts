@@ -1,14 +1,12 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import desktopBridge from '../electron/pi-bridge';
+import { installDesktopBridge } from './support/bridge-fixture';
 import { APPROVAL_ALWAYS, APPROVAL_DENY, alwaysKey, decide, describe } from '../shared/approval';
 
 function bridge(mode: 'confirm' | 'readonly') {
   const handlers = new Map<string, (...args: any[]) => any>();
-  const previous = process.env.PI_DESKTOP_APPROVAL;
-  process.env.PI_DESKTOP_APPROVAL = mode;
-  try {
-    desktopBridge({
+  installDesktopBridge(
+    {
       on: (name: string, handler: (...args: any[]) => any) => {
         const previous = handlers.get(name);
         handlers.set(name, async (...args: any[]) => {
@@ -21,11 +19,9 @@ function bridge(mode: 'confirm' | 'readonly') {
       getActiveTools: () => ['desktop_plan'],
       setActiveTools: () => {},
       getAllTools: () => [{ name: 'external_writer', annotations: { readOnlyHint: true } }],
-    } as never);
-  } finally {
-    if (previous === undefined) delete process.env.PI_DESKTOP_APPROVAL;
-    else process.env.PI_DESKTOP_APPROVAL = previous;
-  }
+    } as never,
+    { PI_DESKTOP_APPROVAL: mode },
+  );
   return handlers;
 }
 

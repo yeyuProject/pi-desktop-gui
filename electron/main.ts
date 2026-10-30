@@ -1,97 +1,69 @@
-import { readGoalDraft, validateGoalStartInput } from '../shared/goal-input';
 import {
   app,
   BrowserWindow,
-  dialog,
-  ipcMain,
-  shell,
   clipboard,
   ClipboardItem,
+  dialog,
+  session as electronSession,
+  ipcMain,
+  Menu,
   nativeImage,
   nativeTheme,
-  Menu,
   Notification,
-  screen,
-  session as electronSession,
   powerMonitor,
+  screen,
+  shell,
   type Rectangle,
 } from 'electron';
-import { AppDialogRequests, type DialogOptions } from './app-dialogs';
-import {
-  nativeThemeSource,
-  THEMES,
-  UI_STYLES,
-  STYLE_META,
-  styleTheme,
-  windowTheme,
-} from '../shared/window-theme';
+import { execFile } from 'node:child_process';
+import { randomUUID } from 'node:crypto';
 import fs from 'node:fs/promises';
 import path from 'node:path';
-import { randomUUID } from 'node:crypto';
-import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
-import { Store, readSessionFile } from './store';
-import { redact } from './agent';
-import { SessionAgents } from './session-agents';
-import { Workspace } from './workspace';
-import { createWorkspaceHandlers, type WorkspaceHandlerName } from './ipc/workspace-handlers';
-import { WorkspaceWatcher } from './workspace-watch';
-import { isEmptySession, hasSessionData, fillSessionUsage } from './session-maintenance';
-import { aggregateUsage } from '../shared/usage';
-import { validateGoalAction, goalNotificationTitle } from '../shared/goal';
-import { composeDraftText } from '../shared/draft';
-import { isDraftQuote } from '../shared/message-content';
-import { splitMessageQuotes } from '../shared/message-content';
-import { SideChats } from './side-chats';
+import { classifyModelError } from '../shared/errors';
+import { goalNotificationTitle } from '../shared/goal';
+import { isDraftQuote, splitMessageQuotes } from '../shared/message-content';
 import {
   sideChatContext,
   sideChatPrompt,
   type SideChat,
-  type SideChatRequest,
   type SideChatInput,
+  type SideChatRequest,
 } from '../shared/side-chat';
-import { classifyModelError } from '../shared/errors';
-import { validatePromptTemplate } from '../shared/prompts';
-import {
-  readPromptTemplate,
-  savePromptTemplate,
-  deletePromptTemplate,
-  describeResource,
-  type PromptTemplateContext,
-} from './prompts';
-import type { ResourceCatalog } from '../shared/types';
-import { detectEnvironment, requireSupportedPi, resolvePi, agentDirectory } from './environment';
-import { Configuration } from './configuration';
-import { toggleResourceSetting } from './resources-config';
-import { canonicalWritePath, isWithinDirectory } from './approval-paths';
-import { UpdateService, updateInstallation } from './updater';
-import { createNativeUpdateDriver, release as updateRelease } from './update-driver';
-import { updateFeed, updateProxy } from './update-network';
-import { readSignedUpdate } from './signed-update-provider';
-import { UpdateAttemptFile } from './update-attempt';
-import { acknowledgeUpdateHealth } from './update-health';
-import { removeSessionScratch, clearDesktopRecords } from './local-data';
-import { readImageAttachment, validateImages } from './images';
-import { listPiSessions, searchSessionContents } from './history';
-import {
-  isMac,
-  loadLoginShellPath,
-  openTerminal,
-  openTextEditor,
-  openWithApp,
-  pathKey,
-  samePath,
-  terminalOpen,
-} from './platform';
 import {
   busy,
   messageText,
-  type AppEvent,
   type ApiMap,
+  type AppEvent,
   type Runtime,
-  type StateSnapshot,
   type Settings,
+  type StateSnapshot,
 } from '../shared/types';
+import { nativeThemeSource, windowTheme } from '../shared/window-theme';
+import { redact } from './agent';
+import { AppDialogRequests, type DialogOptions } from './app-dialogs';
+import { canonicalWritePath, isWithinDirectory } from './approval-paths';
+import { agentDirectory, detectEnvironment } from './environment';
+import { validateImages } from './images';
+import { createAgentHandlers, type AgentHandlerName } from './ipc/agent-handlers';
+import { createDraftHandlers, type DraftHandlerName } from './ipc/draft-handlers';
+import { invocationPolicy } from './ipc/policy';
+import { createSessionHandlers, type SessionHandlerName } from './ipc/session-handlers';
+import { createSettingsHandlers, type SettingsHandlerName } from './ipc/settings-handlers';
+import { createWorkspaceHandlers, type WorkspaceHandlerName } from './ipc/workspace-handlers';
+import { clearDesktopRecords } from './local-data';
+import { isMac, loadLoginShellPath, pathKey, samePath, terminalOpen } from './platform';
+import { SessionAgents } from './session-agents';
+import { SideChats } from './side-chats';
+import { readSignedUpdate } from './signed-update-provider';
+import { readSessionFile, Store } from './store';
+import { UpdateAttemptFile } from './update-attempt';
+import { createNativeUpdateDriver, release as updateRelease } from './update-driver';
+import { acknowledgeUpdateHealth } from './update-health';
+import { updateFeed, updateProxy } from './update-network';
+import { updateInstallation, UpdateService } from './updater';
+import { Workspace } from './workspace';
+import { WorkspaceWatcher } from './workspace-watch';
 
 let window: BrowserWindow | undefined, store: Store, service: SessionAgents, workspace: Workspace;
 let sideChats: SideChats;
@@ -153,7 +125,7 @@ async function refreshEnvironment(): Promise<Awaited<ReturnType<typeof detectEnv
   }
   return environment;
 }
-let searchController: AbortController | undefined;
+
 // Broadcasts, bootstrap and completion reads share one non-persistent sequence.
 const stateSnapshot = (state = store.state): StateSnapshot => ({
   state: structuredClone(store.visibleState(state)),
@@ -475,20 +447,6 @@ let diagnosticPreview = '';
 const exec = promisify(execFile);
 let configurationWrites = Promise.resolve();
 let updatingConfiguration = false;
-const sessionResourcePaths = new Map<string, string[]>();
-async function promptContext(id: string): Promise<PromptTemplateContext> {
-  const session = store.session(id);
-  const catalog = (await service.get(id).admin(id, 'resources')) as ResourceCatalog;
-  sessionResourcePaths.set(
-    id,
-    catalog.resources.map((item) => item.path),
-  );
-  return {
-    agentDir: agentDirectory(store.state.settings),
-    cwd: session.projectId ? store.project(session.projectId).path : undefined,
-    resources: catalog.resources,
-  };
-}
 const terminalLock = (id: string) => path.join(store.dir, 'terminal-' + encodeURIComponent(id) + '.lock');
 async function assertTerminalClosed(id: string) {
   if (await terminalOpen(terminalLock(id)))
@@ -575,7 +533,13 @@ async function saveText(title: string, contents: string, defaultName: string) {
   await fs.writeFile(picked.filePath, contents, 'utf8');
   return picked.filePath;
 }
-const handlers: Record<Exclude<keyof ApiMap, WorkspaceHandlerName>, (...args: any[]) => any> = {
+const handlers: Record<
+  Exclude<
+    keyof ApiMap,
+    WorkspaceHandlerName | SessionHandlerName | DraftHandlerName | AgentHandlerName | SettingsHandlerName
+  >,
+  (...args: any[]) => any
+> = {
   sideChatRead: async (id) => {
     text(id, 100);
     store.session(id);
@@ -777,545 +741,6 @@ const handlers: Record<Exclude<keyof ApiMap, WorkspaceHandlerName>, (...args: an
   checkUpdate: () => updates.check(),
   downloadUpdate: () => updates.download(),
   installUpdate: () => updates.install(),
-  addProject: async () => {
-    const chosen = await dialog.showOpenDialog(window!, {
-      title: '添加本地项目',
-      properties: ['openDirectory'],
-    });
-    if (chosen.canceled) return null;
-    const folder = await fs.realpath(chosen.filePaths[0]);
-    const existing = store.state.projects.find((p) => samePath(p.path, folder));
-    if (existing) {
-      const session =
-        store.durableSessions().find((s) => s.projectId === existing.id) ??
-        store.createPlaceholder(existing.id, (id) => service.connected(id));
-      store.selectSession(session.id);
-      await save();
-      return existing;
-    }
-    const p = {
-      id: randomUUID(),
-      name: path.basename(folder),
-      path: folder,
-      trusted: false,
-      createdAt: Date.now(),
-    };
-    store.state.projects.push(p);
-    await newSession(p.id);
-    return p;
-  },
-  renameProject: async (id, name) => {
-    text(id, 100);
-    text(name, 120);
-    if (!name.trim()) return;
-    store.project(id).name = name.trim();
-    await save();
-  },
-  removeProject: async (id) => {
-    text(id, 100);
-    if (service.projectBusy(id)) throw new Error('请先停止该项目的任务');
-    const p = store.project(id);
-    await assertWorkspaceTerminalsClosed(p.path);
-    const result = await showAppDialog({
-      type: 'question',
-      message: `从列表移除 ${p.name}？`,
-      detail: '磁盘项目和 Pi 会话文件将保留。',
-      buttons: ['取消', '移除入口'],
-      defaultId: 0,
-      cancelId: 0,
-    });
-    if (result.response !== 1) return;
-    if (service.projectBusy(id)) throw new Error('请先停止该项目的任务');
-    await assertWorkspaceTerminalsClosed(p.path);
-    await Promise.all(
-      store.state.sessions.filter((s) => s.projectId === id).map((s) => service.release(s.id)),
-    );
-    store.state.projects = store.state.projects.filter((p) => p.id !== id);
-    store.removeSessions(store.state.sessions.filter((s) => s.projectId === id).map((s) => s.id));
-    if (store.state.selectedProjectId === id) {
-      const next = store.durableSessions()[0] ?? store.createPlaceholder();
-      store.selectSession(next.id);
-    }
-    await save();
-  },
-  trustProject: async (id) => {
-    text(id, 100);
-    const p = store.project(id);
-    if (p.trusted) return;
-    const result = await showAppDialog({
-      type: 'question',
-      message: `启用项目 ${p.name}`,
-      detail: `Pi 将使用当前用户权限读取、修改文件、执行命令，并加载项目配置、Skills 和扩展。项目扩展可以直接执行代码，请只启用可信项目。\n\n${p.path}`,
-      buttons: ['取消', '信任并启用'],
-      defaultId: 0,
-      cancelId: 0,
-    });
-    if (result.response === 1) {
-      p.trusted = true;
-      await save();
-    }
-  },
-  newSession: async (id) => {
-    if (id !== undefined) text(id, 100);
-    return newSession(id);
-  },
-  importSession: async (projectId) => {
-    if (projectId !== undefined) text(projectId, 100);
-    const p = projectId ? store.project(projectId) : undefined;
-    const file = await chooseFile('导入 Pi 会话', [{ name: 'Pi 会话', extensions: ['jsonl'] }]);
-    if (!file) return null;
-    return adoptSessionFile(file, p?.id);
-  },
-  selectSession: async (id) => {
-    text(id, 100);
-    const s = store.session(id);
-    store.selectSession(s.id);
-    if (store.storage.writable) {
-      // Browsing only selects and reads history. Sending or an explicit connection
-      // starts Pi; existing background tasks keep their own process and runtime.
-      const saving = store.save();
-      try {
-        send({ type: 'state', state: store.state });
-      } finally {
-        await saving;
-      }
-    } else send({ type: 'state', state: store.state });
-  },
-  renameSession: async (id, name) => {
-    text(id, 100);
-    text(name, 120);
-    if (!name.trim()) return;
-    store.promoteSession(id).title = name.trim();
-    await save();
-    await service.get(id).rename(id, name.trim());
-  },
-  deleteSession: async (id) => {
-    text(id, 100);
-    await assertTerminalClosed(id);
-    const s = store.session(id);
-    if (service.active(id)) throw new Error('请先停止这个会话的任务');
-    if (sideFlight?.sessionId === id) {
-      const flight = sideFlight;
-      flight.cancelled = true;
-      await service.get(id).stopSideChat();
-      await flight.done;
-    }
-    const result = await showAppDialog({
-      type: 'warning',
-      message: `删除会话“${s.title}”？`,
-      detail:
-        (s.file ? 'Pi 会话文件会移到回收站，可从回收站恢复。' : '会话将从列表移除。') +
-        '此会话的检查点、临时草稿和备份草稿将永久清理。',
-      buttons: ['取消', '删除'],
-      defaultId: 0,
-      cancelId: 0,
-    });
-    if (result.response !== 1) return false;
-    if (!store.state.sessions.includes(s)) return false;
-    let removedFile = false;
-    if (service.active(id)) throw new Error('请先停止这个会话的任务');
-    await service.release(id);
-    await assertTerminalClosed(id);
-    if (s.file) {
-      const exists = await fs.lstat(s.file).then(
-        () => true,
-        (error: NodeJS.ErrnoException) => {
-          if (error.code === 'ENOENT') return false;
-          throw error;
-        },
-      );
-      if (exists) {
-        await shell.trashItem(s.file);
-        removedFile = true;
-      }
-    }
-    await workspace.removeSession(id);
-    await sideChats.remove(id);
-    await removeSessionScratch(store.dir, id);
-    store.removeSessions([id]);
-    if (store.state.selectedSessionId === id) {
-      const next =
-        store.durableSessions().find((x) => x.projectId === s.projectId) ??
-        store.durableSessions().find((x) => !x.projectId) ??
-        store.createPlaceholder(s.projectId);
-      store.selectSession(next.id);
-    }
-    await save();
-    await store.purgeDeletedSession(id);
-    return { trashed: removedFile };
-  },
-  pinSession: async (id, pinned) => {
-    text(id, 100);
-    store.promoteSession(id).pinned = pinned === true;
-    await save();
-  },
-  cleanupEmptySessions: async () => {
-    const candidates = (
-      await Promise.all(
-        store
-          .durableSessions()
-          .map(async (session) =>
-            (await isEmptySession(
-              session,
-              service.connected(session.id) || (await service.inTerminal(session.id))
-                ? session.id
-                : undefined,
-            ))
-              ? session.id
-              : undefined,
-          ),
-      )
-    ).filter((id): id is string => !!id);
-    if (!candidates.length) return 0;
-    const result = await showAppDialog({
-      type: 'question',
-      message: `清理 ${candidates.length} 个空会话？`,
-      detail:
-        '只移除未置顶、没有消息或未发送内容的会话入口。草稿、附件、图片、自定义名称、模型与审批设置和已连接会话会保留；磁盘文件不会删除。',
-      buttons: ['取消', '清理空会话'],
-      defaultId: 0,
-      cancelId: 0,
-    });
-    if (result.response !== 1) return 0;
-    const removable = new Set<string>();
-    for (const id of candidates) {
-      const session = store.state.sessions.find((item) => item.id === id);
-      if (
-        session &&
-        (await isEmptySession(
-          session,
-          service.connected(id) || (await service.inTerminal(id)) ? id : undefined,
-        ))
-      )
-        removable.add(id);
-    }
-    await Promise.all([...removable].map((id) => service.release(id)));
-    // Draft saves can arrive while the file checks above await I/O; inspect current fields once more.
-    const before = store.state.sessions.length;
-    store.removeSessions(
-      store.state.sessions
-        .filter(
-          (session) =>
-            removable.has(session.id) && !service.connected(session.id) && !hasSessionData(session),
-        )
-        .map((session) => session.id),
-    );
-    const removed = before - store.state.sessions.length;
-    if (!store.state.sessions.some((session) => session.id === store.state.selectedSessionId)) {
-      const next = store.durableSessions()[0] ?? store.createPlaceholder(store.state.selectedProjectId);
-      store.selectSession(next.id);
-    }
-    await save();
-    return removed;
-  },
-  searchSessions: async (query) => {
-    text(query, 200);
-    searchController?.abort();
-    const controller = new AbortController();
-    searchController = controller;
-    try {
-      return await searchSessionContents(store.durableSessions(), query, controller.signal);
-    } catch (error) {
-      if (controller.signal.aborted) return [];
-      throw error;
-    }
-  },
-  piSessions: async () => {
-    const known = new Set(store.state.sessions.filter((s) => s.file).map((s) => pathKey(s.file!)));
-    return listPiSessions(sessionRoots(), known);
-  },
-  openPiSession: async (file) => {
-    text(file, 4096);
-    const resolved = path.resolve(file);
-    const inside = sessionRoots().some((root) => {
-      const relative = path.relative(root, resolved);
-      return relative && !relative.startsWith('..') && !path.isAbsolute(relative);
-    });
-    if (!inside || !resolved.endsWith('.jsonl')) throw new Error('只能打开 Pi 会话目录中的会话');
-    return adoptSessionFile(resolved);
-  },
-  setSessionModel: async (id, provider, modelId) => {
-    text(id, 100);
-    text(provider, 200);
-    text(modelId, 400);
-    await service.get(id).setModel(id, provider, modelId);
-  },
-  setSessionThinking: async (id, level) => {
-    text(id, 100);
-    text(level, 40);
-    await service.setThinking(id, level);
-  },
-  messageAction: async (id, action, role, timestamp) => {
-    text(id, 100);
-    if (!['edit', 'regenerate', 'fork'].includes(action)) throw new Error('消息操作无效');
-    if (!['user', 'assistant'].includes(role) || !Number.isFinite(timestamp)) throw new Error('消息无效');
-    await service.get(id).messageAction(id, action, role, timestamp);
-  },
-  abortRetry: (id) => {
-    text(id, 100);
-    return service.get(id).abortRetry();
-  },
-  setApprovalMode: async (id, mode) => {
-    text(id, 100);
-    if (mode !== 'auto' && mode !== 'confirm' && mode !== 'readonly') throw new Error('审批模式无效');
-    await service.get(id).setApprovalMode(id, mode);
-  },
-  revokeApproval: async (id, grantId) => {
-    text(id, 100);
-    if (grantId !== undefined) text(grantId);
-    await service.get(id).revokeApproval(id, grantId);
-  },
-  setEntryLabel: async (id, entryId, label) => {
-    text(id, 100);
-    text(entryId, 100);
-    text(label, 200);
-    await service.get(id).admin(id, 'set_label', { entryId, label });
-  },
-  saveDraft: async (id, draft, attachments, images, snippets, quotes) => {
-    text(id, 100);
-    text(draft);
-    strings(attachments);
-    if (snippets !== undefined) {
-      if (!Array.isArray(snippets) || snippets.length > 1000) throw new Error('粘贴片段格式无效');
-      const ids = new Set<string>();
-      for (const snippet of snippets) {
-        text(snippet?.id, 100);
-        text(snippet?.text);
-        if (!snippet.id || ids.has(snippet.id)) throw new Error('粘贴片段标识重复，请展开后重新编辑');
-        ids.add(snippet.id);
-        if (!Number.isSafeInteger(snippet.offset) || snippet.offset < 0 || snippet.offset > draft.length)
-          throw new Error('粘贴片段的位置无效，请展开后重新编辑');
-      }
-    }
-    if (images !== undefined) validateImages(images);
-    if (quotes !== undefined && (!Array.isArray(quotes) || !quotes.every(isDraftQuote)))
-      throw new Error('引用内容无效，请移除后重新引用');
-    const s = store.session(id);
-    if (draft || attachments.length || images?.length || snippets?.length || quotes?.length)
-      store.promoteSession(id);
-    s.draft = draft;
-    s.attachments = attachments;
-    if (snippets !== undefined) s.draftSnippets = snippets;
-    if (quotes !== undefined) s.draftQuotes = quotes;
-    if (images !== undefined) s.images = images;
-    await store.scheduleSave();
-  },
-  saveDraftGoal: async (id, value) => {
-    text(id, 100);
-    const draft = readGoalDraft(value);
-    if (value !== null && !draft) throw new Error('Goal 草稿格式无效');
-    const session = store.session(id);
-    if (draft) store.promoteSession(id);
-    session.draftGoal = draft;
-    await store.scheduleSave();
-  },
-  flushDraft: () => store.flush(),
-  consumeDraft: async (id, expected, attachments, images) => {
-    text(id, 100);
-    text(expected);
-    strings(attachments);
-    validateImages(images);
-    const s = store.session(id);
-    if (store.matchesDraft(s, expected, attachments, images)) {
-      if (
-        s.draft ||
-        s.attachments.length ||
-        s.images?.length ||
-        s.draftSnippets?.length ||
-        s.draftQuotes?.length
-      )
-        store.promoteSession(id);
-      s.draft = '';
-      s.attachments = [];
-      s.images = [];
-      s.draftSnippets = [];
-      s.draftQuotes = [];
-      await save();
-    }
-  },
-  saveView: async (id, scrollTop, expanded) => {
-    text(id, 100);
-    strings(expanded);
-    if (!Number.isFinite(scrollTop)) return;
-    const s = store.session(id);
-    s.scrollTop = Math.max(0, scrollTop);
-    s.expandedTools = expanded.slice(-1000);
-    await store.save();
-  },
-  readHistory: async (id) => {
-    text(id, 100);
-    return service.get(id).history(id);
-  },
-  readDraftImages: (id) => {
-    text(id, 100);
-    return store.draftImages(id);
-  },
-  detect: refreshEnvironment,
-  choosePath: async (kind) => {
-    if (kind === 'agent') {
-      const p = await dialog.showOpenDialog(window!, {
-        title: '选择 Pi 配置目录',
-        properties: ['openDirectory'],
-      });
-      return p.canceled ? null : p.filePaths[0];
-    }
-    if (!['pi', 'node', 'editor'].includes(kind)) throw new Error('无效路径类型');
-    return chooseFile(
-      kind === 'pi'
-        ? '选择 Pi 入口 cli.js 或可执行文件'
-        : kind === 'node'
-          ? '选择 node.exe'
-          : '选择代码编辑器可执行文件',
-    );
-  },
-  saveSettings: async (value) => {
-    if (!value || typeof value !== 'object' || Array.isArray(value)) throw new Error('设置格式无效');
-    const next = { ...store.state.settings };
-    for (const key of [
-      'piPath',
-      'nodePath',
-      'agentDir',
-      'editorPath',
-      'provider',
-      'modelId',
-      'thinking',
-      'updateProxy',
-      'updateMirror',
-    ] as const)
-      if (key in value) {
-        text(value[key], 4096);
-        next[key] = value[key];
-      }
-    if (value.theme !== undefined) {
-      if (!(THEMES as readonly unknown[]).includes(value.theme)) throw new Error('主题无效');
-      next.theme = value.theme;
-    }
-    if (value.uiStyle !== undefined) {
-      if (!(UI_STYLES as readonly unknown[]).includes(value.uiStyle)) {
-        const labels = UI_STYLES.map((style) => STYLE_META[style].label);
-        throw new Error(`请选择 ${labels.slice(0, -1).join('、')} 或 ${labels.at(-1)} 界面风格。`);
-      }
-      next.uiStyle = value.uiStyle;
-    }
-    next.theme = styleTheme(next.theme, next.uiStyle);
-    for (const [key, min, max] of [
-      ['fontScale', 1, 2],
-      ['sidebarWidth', 180, 360],
-      ['inspectorWidth', 300, 720],
-      ['sideChatWidth', 300, 560],
-      ['inspectorSplit', 15, 70],
-    ] as const)
-      if (value[key] !== undefined) {
-        if (!Number.isFinite(value[key])) throw new Error('尺寸无效');
-        next[key] = Math.max(min, Math.min(max, value[key]));
-      }
-    if (typeof value.onboardingDone === 'boolean') next.onboardingDone = value.onboardingDone;
-    if (typeof value.expandThinking === 'boolean') next.expandThinking = value.expandThinking;
-    if (typeof value.notifyOnFinish === 'boolean') next.notifyOnFinish = value.notifyOnFinish;
-    if (typeof value.notifyOnApproval === 'boolean') next.notifyOnApproval = value.notifyOnApproval;
-    if (typeof value.notifyOnError === 'boolean') next.notifyOnError = value.notifyOnError;
-    updateFeed(next.updateMirror);
-    updateProxy(next.updateProxy, {});
-    if (value.autoDownloadUpdates !== undefined) {
-      if (typeof value.autoDownloadUpdates !== 'boolean') throw new Error('自动下载更新设置无效');
-      next.autoDownloadUpdates = value.autoDownloadUpdates;
-    }
-    const modelsChanged = (
-      ['piPath', 'nodePath', 'agentDir', 'provider', 'modelId', 'thinking'] as const
-    ).some((key) => next[key] !== store.state.settings[key]);
-    store.state.settings = next;
-    await save();
-    if (modelsChanged) service.invalidateModels();
-    nativeTheme.themeSource = nativeThemeSource(next.theme);
-    updateWindowTheme();
-    updates.configure(next.autoDownloadUpdates);
-  },
-  connect: async (id) => {
-    text(id, 100);
-    await service.get(id).connect(id);
-  },
-  readModels: async (id) => {
-    text(id, 100);
-    await service.get(id).readModels(id, (read) => inSessionWorkspace(id, read));
-  },
-  recover: async (id, prompt) => {
-    text(id, 100);
-    if (prompt !== undefined) text(prompt);
-    await service.get(id).recover(id, prompt);
-  },
-  testConnection: async (id) => {
-    text(id, 100);
-    return service.get(id).testConnection(id);
-  },
-  send: async (id, prompt, attachments, mode, images = [], goalStart) => {
-    text(id, 100);
-    text(prompt);
-    strings(attachments);
-    if (mode !== 'steer' && mode !== 'followUp') throw new Error('发送模式无效');
-    validateImages(images);
-    if (goalStart !== undefined) validateGoalStartInput(goalStart);
-    await service.get(id).send(id, prompt, attachments, mode, images, goalStart);
-  },
-  openGoal: async (id) => {
-    text(id, 100);
-    await service.get(id).openGoal(id);
-  },
-  goalAction: async (id, action) => {
-    text(id, 100);
-    validateGoalAction(action);
-    const agent = service.get(id);
-    if (action.action === 'clear' && agent.runtime.goal?.status !== 'completed') {
-      const result = await showAppDialog({
-        type: 'question',
-        message: '清除 Goal？',
-        detail: '清除后不再自动继续，已完成的修改保留',
-        buttons: ['取消', '清除'],
-        defaultId: 0,
-        cancelId: 0,
-      });
-      if (result.response !== 1) return;
-    }
-    await agent.goalAction(id, action);
-  },
-  pickImages: async () => {
-    const picked = await dialog.showOpenDialog(window!, {
-      title: '添加图片',
-      properties: ['openFile', 'multiSelections'],
-      filters: [{ name: '图片', extensions: ['png', 'jpg', 'jpeg', 'webp', 'gif'] }],
-    });
-    if (picked.canceled) return [];
-    if (picked.filePaths.length > 8) throw new Error('最多选择 8 张图片');
-    const images = await Promise.all(
-      picked.filePaths.map(async (file) => {
-        const image = await readImageAttachment(file);
-        if (!image) throw new Error('支持 PNG、JPEG、WebP、GIF 图片');
-        return image;
-      }),
-    );
-    validateImages(images);
-    return images;
-  },
-  sessionTree: async (id) => {
-    text(id, 100);
-    return service.get(id).tree(id);
-  },
-  branchSession: async (id, kind, entryId, summarize, instructions) => {
-    text(id, 100);
-    if (!['fork', 'clone', 'navigate'].includes(kind)) throw new Error('会话操作无效');
-    if (kind !== 'clone') text(entryId, 100);
-    if (instructions !== undefined) text(instructions);
-    await service.get(id).branch(id, kind, entryId, summarize === true, instructions);
-  },
-  compact: async (id, instructions) => {
-    text(id, 100);
-    text(instructions);
-    return service.get(id).compact(id, instructions);
-  },
-  piOption: async (id, key, value) => {
-    text(id, 100);
-    text(key, 100);
-    await service.get(id).option(id, key, value);
-  },
   exportSession,
   shareSession: async (id) => {
     text(id, 100);
@@ -1347,286 +772,6 @@ const handlers: Record<Exclude<keyof ApiMap, WorkspaceHandlerName>, (...args: an
     } finally {
       await fs.rm(out, { force: true });
     }
-  },
-  reloadPi: async (id) => {
-    text(id, 100);
-    await service.get(id).scheduleReload();
-  },
-  resources: async (id) => {
-    text(id, 100);
-    const catalog = (await service.get(id).admin(id, 'resources')) as ResourceCatalog;
-    sessionResourcePaths.set(
-      id,
-      catalog.resources.map((item) => item.path),
-    );
-    const session = store.session(id);
-    const context: PromptTemplateContext = {
-      agentDir: agentDirectory(store.state.settings),
-      cwd: session.projectId ? store.project(session.projectId).path : undefined,
-      resources: catalog.resources,
-    };
-    return {
-      ...catalog,
-      resources: await Promise.all(catalog.resources.map((resource) => describeResource(context, resource))),
-    };
-  },
-  promptRead: async (id, file) => {
-    text(id, 100);
-    text(file, 4096);
-    return readPromptTemplate(await promptContext(id), file);
-  },
-  promptSave: async (id, input, original) => {
-    text(id, 100);
-    validatePromptTemplate(input);
-    if (original !== undefined) {
-      text(original?.path, 4096);
-      text(original?.revision, 100);
-    }
-    const document = await savePromptTemplate(await promptContext(id), input, original);
-    await service.reloadConfiguration(id, input.scope === 'project');
-    return document;
-  },
-  promptDelete: async (id, file, revision) => {
-    text(id, 100);
-    text(file, 4096);
-    text(revision, 100);
-    await deletePromptTemplate(await promptContext(id), file, revision);
-    const local = !samePath(path.dirname(file), path.join(agentDirectory(store.state.settings), 'prompts'));
-    await service.reloadConfiguration(id, local);
-  },
-  usageSummary: async () => {
-    await fillSessionUsage(store);
-    return aggregateUsage(store.durableSessions(), store.state.projects);
-  },
-  toggleResource: async (id, resource, enabled) => {
-    text(id, 100);
-    if (typeof enabled !== 'boolean') throw new Error('启用状态无效');
-    const catalog = await service.get(id).admin(id, 'resources');
-    const found = catalog.resources.find((r: any) => r.path === resource?.path && r.kind === resource?.kind);
-    if (!found) throw new Error('资源已变化，请刷新列表');
-    const local = found.metadata.scope === 'project';
-    const config = new Configuration(store);
-    const document = await config.read(id, 'settings', local);
-    if (document.error) throw new Error(`配置格式有误，请在完整 Pi 配置中修复：${document.path}`);
-    const values = toggleResourceSetting(JSON.parse(document.text), found, enabled);
-    await config.save(id, 'settings', local, { ...document, text: JSON.stringify(values) });
-    await service.reloadConfiguration(id, local);
-  },
-  packageAction: async (id, action, source, local) => {
-    text(id, 100);
-    text(source, 4096);
-    if (typeof local !== 'boolean') throw new Error('请选择资源包的作用范围');
-    source = source.trim();
-    if (!['install', 'remove', 'update'].includes(action)) throw new Error('包操作无效');
-    if (action !== 'update' && (!source.trim() || source.startsWith('-')))
-      throw new Error('请输入有效包来源');
-    if (source.startsWith('-')) throw new Error('包来源不能是命令参数');
-    const s = store.session(id);
-    if (local && (!s.projectId || !store.project(s.projectId).trusted)) throw new Error('请先启用项目');
-    const cwd = await store.sessionDirectory(id);
-    if (action === 'remove') {
-      const result = await showAppDialog({
-        type: 'warning',
-        message: `移除资源包“${source}”？`,
-        detail: '移除后，使用此范围配置的会话将无法继续使用其中的扩展、技能或模板。',
-        buttons: ['取消', '移除'],
-        defaultId: 0,
-        cancelId: 0,
-      });
-      if (result.response !== 1) return false;
-    } else {
-      // Pi updates configured packages in both scopes; --local applies only to install/remove.
-      const scope =
-        action === 'update'
-          ? `个人配置，以及工作目录（${cwd}）中 Pi 已信任的项目配置`
-          : local
-            ? `当前项目：${store.project(s.projectId!).path}`
-            : '个人配置（影响使用此配置的所有会话）';
-      const result = await showAppDialog({
-        type: 'warning',
-        message: action === 'install' ? '安装资源包并允许执行其代码？' : '更新资源包并允许执行其代码？',
-        detail: `来源：${source || '上述范围内所有已配置的资源包'}\n范围：${scope}\n\n安装和更新可能执行 npm 安装脚本，包内扩展也会以你的用户权限运行并访问文件和网络。请仅继续使用你信任的来源。`,
-        buttons: ['取消', action === 'install' ? '安装并允许执行' : '更新并允许执行'],
-        defaultId: 0,
-        cancelId: 0,
-      });
-      if (result.response !== 1) return false;
-    }
-    await requireSupportedPi(store.state.settings, developmentRoot);
-    const pi = await resolvePi(store.state.settings, developmentRoot);
-    const args = [
-      ...pi.spec.args,
-      action,
-      ...(action === 'update' ? ['--extensions'] : []),
-      ...(source ? [source] : []),
-      ...(local && action !== 'update' ? ['--local'] : []),
-    ];
-    await service.updatePackages(id, action === 'update' ? false : local, async () =>
-      exec(pi.spec.command, args, {
-        cwd,
-        windowsHide: true,
-        timeout: 300000,
-        maxBuffer: 4 * 1024 * 1024,
-        env: { ...process.env, PI_CODING_AGENT_DIR: agentDirectory(store.state.settings), PI_TELEMETRY: '0' },
-      }),
-    );
-    await service.get(id).connect(id);
-    return true;
-  },
-  providers: async (id) => {
-    text(id, 100);
-    return service.get(id).admin(id, 'providers');
-  },
-  login: async (id, provider, type) => {
-    text(id, 100);
-    text(provider, 200);
-    if (!['oauth', 'api_key'].includes(type)) throw new Error('登录方式无效');
-    await service.get(id).admin(id, 'login', { provider, type });
-  },
-  logout: async (id, provider) => {
-    text(id, 100);
-    text(provider, 200);
-    const result = await showAppDialog({
-      type: 'warning',
-      message: `退出供应商“${provider}”的登录？`,
-      detail: '将移除本机保存的登录凭据。之后使用此供应商时需要重新登录或配置密钥。',
-      buttons: ['取消', '退出登录'],
-      defaultId: 0,
-      cancelId: 0,
-    });
-    if (result.response !== 1) return false;
-    await service.get(id).admin(id, 'logout', { provider });
-    return true;
-  },
-  cancelLogin: (id) => {
-    text(id, 100);
-    return service.get(id).cancelLogin();
-  },
-  configRead: async (id, kind, local) => {
-    text(id, 100);
-    return new Configuration(store).read(id, kind, local);
-  },
-  configSave: async (id, kind, local, document) => {
-    text(id, 100);
-    text(document?.text);
-    text(document?.revision, 100);
-    return new Configuration(store).saveAndApply(id, kind, local, document, () =>
-      service.reloadConfiguration(id, local),
-    );
-  },
-  revealSessionDirectory: async (id) => {
-    text(id, 100);
-    const directory = await store.sessionDirectory(id);
-    if (!(await fs.stat(directory)).isDirectory())
-      throw new Error('工作目录已变成文件，请在项目设置中选择有效目录');
-    const error = await shell.openPath(directory);
-    if (error) throw new Error(`无法打开工作目录：${error}`);
-  },
-  openPiTerminal: async (id) => {
-    text(id, 100);
-    await requireSupportedPi(store.state.settings, developmentRoot);
-    const agent = service.get(id);
-    await agent.connect(id);
-    const spec = (await resolvePi(store.state.settings, developmentRoot)).spec;
-    const s = store.session(id);
-    const args = s.file ? ['--session', s.file] : ['--session-id', s.id];
-    await service.handoffToTerminal(id, async () =>
-      openTerminal(
-        [spec.command, ...spec.args, ...args],
-        await store.sessionDirectory(id),
-        { PI_CODING_AGENT_DIR: agentDirectory(store.state.settings) },
-        terminalLock(id),
-      ),
-    );
-  },
-  editDraft: async (id) => {
-    text(id, 100);
-    await protectSessionOperation('editDraft', [id]);
-    const s = store.session(id);
-    if (s.draftGoal?.kind === 'edit') throw new Error('请先保存或取消目标修改，再编辑普通草稿');
-    const original = JSON.stringify([s.draft, s.draftSnippets ?? []]);
-    const file = path.join(store.dir, 'draft-' + encodeURIComponent(id) + '.txt');
-    await fs.writeFile(file, composeDraftText(s.draft, s.draftSnippets ?? []), 'utf8');
-    await openTextEditor(file, store.state.settings.editorPath || undefined);
-    const result = await showAppDialog({
-      type: 'info',
-      message: '在外部编辑器中编辑草稿',
-      detail: '编辑并保存文件后，点击“导入已保存内容”。',
-      buttons: ['取消', '导入已保存内容'],
-      defaultId: 1,
-      cancelId: 0,
-    });
-    if (result.response !== 1) return;
-    const content = await fs.readFile(file, 'utf8');
-    text(content);
-    const current = store.session(id);
-    if (JSON.stringify([current.draft, current.draftSnippets ?? []]) !== original)
-      throw new Error('草稿在外部编辑期间已变化，未覆盖当前内容。外部编辑结果仍保存在：' + file);
-    current.draft = content;
-    current.draftSnippets = [];
-    await save();
-  },
-  stop: (id) => {
-    text(id, 100);
-    return service.get(id).stop();
-  },
-  stopAll: async () => {
-    const result = await showAppDialog({
-      type: 'warning',
-      message: '停止所有会话的任务？',
-      detail:
-        '所有正在运行的会话都将停止，未发送的队列内容会恢复到各自草稿。通过 nohup、后台运行等方式脱离 Pi 的服务可能继续运行，请到终端停止这些服务并释放端口。',
-      buttons: ['取消', '停止所有会话'],
-      defaultId: 0,
-      cancelId: 0,
-    });
-    if (result.response === 1) await service.stop();
-  },
-  clearQueue: (id) => {
-    text(id, 100);
-    return service.get(id).clearQueue();
-  },
-  forceStop: async (id) => {
-    text(id, 100);
-    const result = await showAppDialog({
-      type: 'warning',
-      message: '强制结束当前 Pi 会话进程？',
-      detail:
-        '会尝试终止 Pi 及其子进程，已写入的项目文件将保留。已脱离进程树的后台服务可能继续占用端口，请到终端停止。',
-      buttons: ['继续等待', '强制结束'],
-      defaultId: 0,
-      cancelId: 0,
-    });
-    if (result.response !== 1) return false;
-    await service.get(id).forceStop();
-    return true;
-  },
-  respond: async (sessionId, id, values) => {
-    text(sessionId, 100);
-    text(id, 200);
-    if (!values || typeof values !== 'object') throw new Error('回复格式无效');
-    if (values.value !== undefined) text(values.value);
-    return service.get(sessionId).respond(id, {
-      value: values.value,
-      confirmed: values.confirmed === true,
-      cancelled: values.cancelled === true,
-    });
-  },
-  openResource: async (id, target) => {
-    text(id, 100);
-    text(target, 4096);
-    store.session(id);
-    let known = sessionResourcePaths.get(id) ?? [];
-    if (!known.some((item) => samePath(item, target))) {
-      const catalog = (await service.get(id).admin(id, 'resources')) as ResourceCatalog;
-      known = catalog.resources.map((item) => item.path);
-      sessionResourcePaths.set(id, known);
-    }
-    const matched = known.find((item) => samePath(item, target));
-    if (!matched) throw new Error('找不到该资源文件，请刷新资源列表后重试');
-    const editor = store.state.settings.editorPath;
-    if (editor) await openWithApp(editor, matched);
-    else shell.showItemInFolder(matched);
   },
   openLink: async (url) => {
     text(url, 4096);
@@ -1912,9 +1057,54 @@ else {
         send,
         showAppDialog,
       });
+      const handlerContext = {
+        store,
+        service,
+        workspace,
+        text,
+        strings,
+        save,
+        send,
+        showAppDialog,
+        developmentRoot,
+      };
       const ipcHandlers: Record<keyof ApiMap, (...args: any[]) => any> = {
         ...handlers,
         ...workspaceHandlers.handlers,
+        ...createSessionHandlers({
+          ...handlerContext,
+          get window() {
+            return window;
+          },
+          sideChats,
+          getSideFlight: () => sideFlight,
+          newSession,
+          chooseFile,
+          adoptSessionFile,
+          sessionRoots,
+          assertTerminalClosed,
+          assertWorkspaceTerminalsClosed,
+        }),
+        ...createDraftHandlers({
+          ...handlerContext,
+          get window() {
+            return window;
+          },
+          protectSessionOperation,
+        }),
+        ...createAgentHandlers({ ...handlerContext, inSessionWorkspace, terminalLock }),
+        ...createSettingsHandlers({
+          ...handlerContext,
+          get window() {
+            return window;
+          },
+          get updates() {
+            return updates;
+          },
+          refreshEnvironment,
+          updateWindowTheme,
+          chooseFile,
+        }),
       };
       await watchSelectedProject();
       service.on('runtimePatch', (patch) => {
@@ -2015,189 +1205,21 @@ else {
           if (quitting) throw new Error('应用正在关闭，请稍后重新打开');
           // Late layout cleanup must not create writes after the update's persistence barrier.
           if (updates.state.installing && method === 'saveView') return;
-          if (
-            updates.state.installing &&
-            ![
-              'bootstrap',
-              'navigationState',
-              'diagnostics',
-              'copy',
-              'respondAppDialog',
-              'appDialogsReady',
-            ].includes(method)
-          )
-            throw new Error('正在准备重启更新，请稍候');
-          const readOnlyMethods: (keyof ApiMap)[] = [
-            'clearLocalData',
-            'rendererReady',
-            'retryStorage',
-            'appDialogsReady',
-            'respondAppDialog',
-            'showAppMenu',
-            'bootstrap',
-            'navigationState',
-            'checkUpdate',
-            'downloadUpdate',
-            'installUpdate',
-            'selectSession',
-            'readHistory',
-            'sideChatRead',
-            'sideChatStop',
-            'readDraftImages',
-            'searchSessions',
-            'piSessions',
-            'detect',
-            'choosePath',
-            'files',
-            'searchFiles',
-            'preview',
-            'attachmentInfo',
-            'projectImage',
-            'projectRules',
-            'editProjectRules',
-            'checkpoints',
-            'checkpointPreview',
-            'usageSummary',
-            'diff',
-            'cancelDiff',
-            'changes',
-            'configRead',
-            'sessionTree',
-            'resources',
-            'providers',
-            'promptRead',
-            'exportSession',
-            'copy',
-            'copyImage',
-            'diagnostics',
-            'exportDiagnostics',
-            'exportOutput',
-            'revealData',
-            'openLink',
-            'openFile',
-            'openResource',
-            'stop',
-            'stopAll',
-            'abortRetry',
-            'clearQueue',
-            'respond',
-            'forceStop',
-            'quit',
-          ];
-          if (!store.storage.writable && !readOnlyMethods.includes(method as keyof ApiMap))
-            store.assertWritable();
-          // A renderer modal must block the same application commands as a native modal.
-          // Autosaves already scheduled before it opened may still finish safely.
-          if (
-            appDialogs.size &&
-            ![
-              'appDialogsReady',
-              'respondAppDialog',
-              'bootstrap',
-              'navigationState',
-              'diagnostics',
-              'copy',
-              'copyImage',
-              'saveDraft',
-              'saveDraftGoal',
-              'flushDraft',
-              'saveView',
-              'readHistory',
-              'readDraftImages',
-              'cancelDiff',
-              'stop',
-              'stopAll',
-              'forceStop',
-              'abortRetry',
-              'clearQueue',
-              'respond',
-              'quit',
-            ].includes(method)
-          )
-            throw new Error('请先完成当前确认');
-          const settingPatch =
-            method === 'saveSettings' && args[0] && typeof args[0] === 'object'
-              ? (args[0] as Record<string, unknown>)
-              : undefined;
-          const changesEngineSettings =
-            !!settingPatch &&
-            ['piPath', 'nodePath', 'agentDir', 'provider', 'modelId', 'thinking'].some(
-              (key) =>
-                key in settingPatch &&
-                settingPatch[key] !== store.state.settings[key as keyof typeof store.state.settings],
-            );
-          const engineOperation =
-            changesEngineSettings ||
-            [
-              'clearLocalData',
-              'connect',
-              'readModels',
-              'recover',
-              'send',
-              'openGoal',
-              'goalAction',
-              'selectSession',
-              'sessionTree',
-              'branchSession',
-              'compact',
-              'piOption',
-              'exportSession',
-              'shareSession',
-              'reloadPi',
-              'resources',
-              'promptRead',
-              'promptSave',
-              'promptDelete',
-              'toggleResource',
-              'packageAction',
-              'providers',
-              'login',
-              'logout',
-              'configSave',
-              'openPiTerminal',
-              'deleteSession',
-              'openPiSession',
-              'setSessionModel',
-              'setSessionThinking',
-              'messageAction',
-              'setEntryLabel',
-              'cleanupEmptySessions',
-              'revertChanges',
-              'revertCheckpoint',
-              'createAgentRules',
-              'testConnection',
-            ].includes(method);
-          const configOperation =
-            changesEngineSettings ||
-            [
-              'configSave',
-              'packageAction',
-              'promptSave',
-              'promptDelete',
-              'toggleResource',
-              'reloadPi',
-            ].includes(method);
-          trackedOperation =
-            engineOperation ||
-            [
-              'usageSummary',
-              'respond',
-              'stop',
-              'stopAll',
-              'forceStop',
-              'abortRetry',
-              'clearQueue',
-              'cancelLogin',
-            ].includes(method) ||
-            !readOnlyMethods.includes(method as keyof ApiMap);
+          const policy = invocationPolicy(method as keyof ApiMap, args, store.state.settings);
+          if (updates.state.installing && !policy.duringUpdate) throw new Error('正在准备重启更新，请稍候');
+          if (!store.storage.writable && policy.access === 'write') store.assertWritable();
+          // Autosaves already scheduled before a dialog opened may still finish safely.
+          if (appDialogs.size && !policy.duringDialog) throw new Error('请先完成当前确认');
+          trackedOperation = policy.tracked;
           if (trackedOperation) activeOperations++;
           const invoke = () => ipcHandlers[method as keyof ApiMap](...args);
           const execute = async () => {
-            const projectId = ['revertChanges', 'createAgentRules'].includes(method)
-              ? (args[0] as string)
-              : method === 'revertCheckpoint'
-                ? store.session(args[0] as string).projectId
-                : undefined;
+            const projectId =
+              policy.workspace === 'project'
+                ? (args[0] as string)
+                : policy.workspace === 'checkpoint'
+                  ? store.session(args[0] as string).projectId
+                  : undefined;
             if (projectId) {
               const root = store.project(projectId).path;
               return service.inWorkspace(root, true, async () => {
@@ -2205,27 +1227,14 @@ else {
                 return invoke();
               });
             }
-            const sessionOperation =
-              [
-                'connect',
-                'send',
-                'recover',
-                'compact',
-                'openPiTerminal',
-                'testConnection',
-                'login',
-                'logout',
-              ].includes(method) ||
-              (method === 'branchSession' && args[1] === 'navigate') ||
-              (method === 'messageAction' && args[1] !== 'fork');
-            if (sessionOperation) {
+            if (policy.workspace === 'session') {
               const id = args[0] as string;
               await protectSessionOperation(method, args);
               return inSessionWorkspace(id, invoke);
             }
             return invoke();
           };
-          if (configOperation) {
+          if (policy.configuration) {
             const operation = configurationWrites.then(async () => {
               updatingConfiguration = true;
               try {

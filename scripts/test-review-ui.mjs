@@ -1,5 +1,5 @@
 import { UI_STYLES, STYLE_META } from '../shared/window-theme.ts';
-import { _electron as electron } from 'playwright';
+import { launchApp, closeApp } from '../tests/support/desktop-app.mjs';
 import { expect } from 'playwright/test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs/promises';
@@ -22,13 +22,8 @@ let app, page;
 const errors = [],
   contrast = {};
 async function launch() {
-  app = await electron.launch({
-    args: [path.resolve('.')],
-    env: { ...process.env, PI_DESKTOP_DATA_DIR: dir, PI_OFFLINE: '1' },
-  });
-  page = await app.firstWindow();
-  page.setDefaultTimeout(20000);
-  page.on('pageerror', (e) => errors.push(e.message));
+  ({ app, page } = await launchApp({ dataDir: dir, pageTimeout: 20000, errors: errors }));
+
   await page.getByRole('textbox', { name: '任务输入' }).waitFor();
 }
 try {
@@ -114,6 +109,6 @@ try {
     'PASS command search, update network settings, separate notifications, clear-data cancellation, contrast and zoom persistence',
   );
 } finally {
-  await app?.close();
+  await closeApp(app);
   await fs.rm(dir, { recursive: true, force: true });
 }

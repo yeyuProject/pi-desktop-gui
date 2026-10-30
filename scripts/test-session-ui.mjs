@@ -1,4 +1,4 @@
-import { _electron as electron } from 'playwright';
+import { launchApp } from '../tests/support/desktop-app.mjs';
 import assert from 'node:assert/strict';
 import fs from 'node:fs/promises';
 import path from 'node:path';
@@ -236,16 +236,9 @@ const readMeasurement = async () => {
 const launch = async () => {
   // Keep this Node clock separate from all renderer navigation/click measurements.
   const nodeStarted = performance.now();
-  app = await electron.launch({
-    executablePath,
-    args: executablePath ? [] : [path.resolve('.')],
-    env: { ...process.env, PI_OFFLINE: '1', PI_DESKTOP_DATA_DIR: f.dataDir },
-    timeout: 60000,
-  });
-  page = await app.firstWindow();
+  ({ app, page } = await launchApp({ executablePath, dataDir: f.dataDir, errors: errors }));
   nodeLaunch.firstWindowMs = performance.now() - nodeStarted;
-  page.setDefaultTimeout(30000);
-  page.on('pageerror', (error) => errors.push(error.message));
+
   await page.waitForFunction(() => Boolean(window.desktop && document.querySelector('#root')));
   await app.evaluate(({ BrowserWindow }) => {
     const window = BrowserWindow.getAllWindows()[0];

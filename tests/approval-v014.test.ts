@@ -15,7 +15,7 @@ import {
   APPROVAL_DENY,
 } from '../shared/approval';
 import { classifyWriteTarget } from '../electron/approval-paths';
-import desktopBridge from '../electron/pi-bridge';
+import { installDesktopBridge } from './support/bridge-fixture';
 import { DESKTOP_BRIDGE_COMMAND } from '../shared/pi-bridge';
 
 test('tool path normalization follows Pi 1.1 native aliases before checking boundaries', () => {
@@ -206,25 +206,24 @@ test('bridge publishes scoped grants, revokes them and resets them on session st
   t.after(() => fs.rm(dir, { recursive: true, force: true }));
   const hooks = new Map<string, (...args: any[]) => any>();
   let handler: (...args: any[]) => Promise<any>;
-  const previous = process.env.PI_DESKTOP_APPROVAL;
-  process.env.PI_DESKTOP_APPROVAL = 'confirm';
-  desktopBridge({
-    on: (name: string, hook: any) => {
-      const previous = hooks.get(name);
-      hooks.set(name, async (...args: any[]) => {
-        const result = await previous?.(...args);
-        return result?.block ? result : ((await hook(...args)) ?? result);
-      });
-    },
-    registerCommand: (name: string, command: any) => {
-      if (name === DESKTOP_BRIDGE_COMMAND) handler = command.handler;
-    },
-    registerTool: () => {},
-    getActiveTools: () => ['desktop_plan'],
-    setActiveTools: () => {},
-  } as any);
-  if (previous === undefined) delete process.env.PI_DESKTOP_APPROVAL;
-  else process.env.PI_DESKTOP_APPROVAL = previous;
+  installDesktopBridge(
+    {
+      on: (name: string, hook: any) => {
+        const previous = hooks.get(name);
+        hooks.set(name, async (...args: any[]) => {
+          const result = await previous?.(...args);
+          return result?.block ? result : ((await hook(...args)) ?? result);
+        });
+      },
+      registerCommand: (name: string, command: any) => {
+        if (name === DESKTOP_BRIDGE_COMMAND) handler = command.handler;
+      },
+      registerTool: () => {},
+      getActiveTools: () => ['desktop_plan'],
+      setActiveTools: () => {},
+    } as any,
+    { PI_DESKTOP_APPROVAL: 'confirm' },
+  );
   const requests: any[] = [],
     events: any[] = [];
   let choice = APPROVAL_ALWAYS;

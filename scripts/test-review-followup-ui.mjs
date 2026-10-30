@@ -1,4 +1,4 @@
-import { _electron as electron } from 'playwright';
+import { launchApp, closeApp } from '../tests/support/desktop-app.mjs';
 import { expect } from 'playwright/test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs/promises';
@@ -56,13 +56,8 @@ const actions = async () =>
     .filter(Boolean)
     .map((line) => JSON.parse(line));
 try {
-  app = await electron.launch({
-    args: [path.resolve('.')],
-    env: { ...process.env, PI_DESKTOP_DATA_DIR: dir, PI_OFFLINE: '1' },
-  });
-  page = await app.firstWindow();
-  page.setDefaultTimeout(20000);
-  page.on('pageerror', (error) => errors.push(error.message));
+  ({ app, page } = await launchApp({ dataDir: dir, pageTimeout: 20000, errors: errors }));
+
   await page.getByRole('textbox', { name: '任务输入' }).waitFor();
   const request = (action, source, local) =>
     page.evaluate(
@@ -239,6 +234,6 @@ try {
     'PASS readiness remains incomplete when Bash is unavailable, even with Pi and a model connected',
   );
 } finally {
-  await app?.close();
+  await closeApp(app);
   await fs.rm(dir, { recursive: true, force: true });
 }

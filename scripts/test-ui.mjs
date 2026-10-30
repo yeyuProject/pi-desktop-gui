@@ -1,4 +1,4 @@
-import { _electron as electron } from 'playwright';
+import { launchApp, closeApp, DESKTOP_TIMEOUTS } from '../tests/support/desktop-app.mjs';
 import assert from 'node:assert/strict';
 import fs from 'node:fs/promises';
 import path from 'node:path';
@@ -12,14 +12,12 @@ let app;
 const errors = [];
 let page;
 const launch = async () => {
-  app = await electron.launch({
+  ({ app, page } = await launchApp({
     executablePath: process.env.PI_DESKTOP_EXE,
-    args: process.env.PI_DESKTOP_EXE ? [] : [path.resolve('.')],
-    env: { ...process.env, PI_DESKTOP_DATA_DIR: fixture.dataDir, PI_OFFLINE: '1' },
-    timeout: 30000,
-  });
-  page = await app.firstWindow();
-  page.on('pageerror', (e) => errors.push(e.message));
+    dataDir: fixture.dataDir,
+    errors: errors,
+  }));
+
   page.on('console', (m) => {
     if (m.type() === 'error') errors.push(m.text());
   });
@@ -27,7 +25,8 @@ const launch = async () => {
   await page.getByText('想一起完成什么？').or(page.locator('.message')).first().waitFor();
 };
 // A cold Pi process on Windows can take over 25 seconds to initialize.
-const waitStatus = async (s) => page.locator('.run-meta .status.' + s).waitFor({ timeout: 60000 });
+const waitStatus = async (s) =>
+  page.locator('.run-meta .status.' + s).waitFor({ timeout: DESKTOP_TIMEOUTS.pi });
 try {
   await launch();
   assert.equal(await page.locator('.inspector').count(), 0);
@@ -188,18 +187,6 @@ try {
   console.error('Renderer errors:', errors);
   throw e;
 } finally {
-  if (app) {
-    await app
-      .evaluate(({ BrowserWindow }) => {
-        return BrowserWindow.getAllWindows()[0]?.webContents.executeJavaScript(
-          `void window.desktop.onEvent(event => {
-            if (event.type === 'appDialog') void window.desktop.invoke('respondAppDialog', event.dialog.id,
-              event.dialog.message === 'Pi 仍在执行任务' ? 1 : event.dialog.cancelId);
-          })`,
-        );
-      })
-      .catch(() => {});
-    await app.close();
-  }
+  await closeApp(app);
   await provider.close();
 }

@@ -1,4 +1,5 @@
-import { _electron as electron, expect } from 'playwright/test';
+import { launchApp } from '../tests/support/desktop-app.mjs';
+import { expect } from 'playwright/test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs/promises';
 import path from 'node:path';
@@ -10,14 +11,8 @@ await fs.writeFile(path.join(fixture.projectDir, 'delayed.txt'), 'attachment fix
 let app, page;
 const errors = [];
 try {
-  app = await electron.launch({
-    args: [path.resolve('.')],
-    timeout: 30000,
-    env: { ...process.env, PI_DESKTOP_DATA_DIR: fixture.dataDir, PI_OFFLINE: '1' },
-  });
-  page = await app.firstWindow();
-  page.setDefaultTimeout(10000);
-  page.on('pageerror', (error) => errors.push(error.message));
+  ({ app, page } = await launchApp({ dataDir: fixture.dataDir, pageTimeout: 10000, errors: errors }));
+
   await app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows()[0].setSize(1440, 900));
   const input = page.getByRole('textbox', { name: '任务输入' });
   await input.waitFor();

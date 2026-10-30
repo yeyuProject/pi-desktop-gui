@@ -1,4 +1,4 @@
-import { _electron as electron } from 'playwright';
+import { launchApp, closeApp } from '../tests/support/desktop-app.mjs';
 import assert from 'node:assert/strict';
 import fs from 'node:fs/promises';
 import path from 'node:path';
@@ -57,14 +57,8 @@ const appendReply = async (marker) => {
   await publish(marker);
 };
 try {
-  app = await electron.launch({
-    args: [path.resolve('.')],
-    env: { ...process.env, PI_DESKTOP_DATA_DIR: fixture.dataDir, PI_OFFLINE: '1' },
-    timeout: 30000,
-  });
-  page = await app.firstWindow();
-  page.setDefaultTimeout(10000);
-  page.on('pageerror', (error) => errors.push(error.message));
+  ({ app, page } = await launchApp({ dataDir: fixture.dataDir, pageTimeout: 10000, errors: errors }));
+
   await page.getByRole('textbox', { name: '任务输入' }).waitFor();
   await app.evaluate(({ ipcMain }, runtime) => {
     globalThis.scrollRuntime = runtime;
@@ -203,6 +197,6 @@ try {
   await page?.screenshot({ path: path.join(output, 'failure.png') }).catch(() => {});
   throw error;
 } finally {
-  await app?.close().catch(() => {});
+  await closeApp(app).catch(() => {});
   await provider.close();
 }

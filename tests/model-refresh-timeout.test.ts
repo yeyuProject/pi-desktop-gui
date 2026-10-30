@@ -4,7 +4,7 @@ import fs from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import type { ExtensionAPI, ExtensionCommandContext } from '@earendil-works/pi-coding-agent';
-import desktopBridge from '../electron/pi-bridge';
+import { installDesktopBridge } from './support/bridge-fixture';
 import { AgentService } from '../electron/agent';
 import { Store } from '../electron/store';
 import { Workspace } from '../electron/workspace';
@@ -25,7 +25,7 @@ test('a slow model refresh aborts after 15 seconds, releases the session and can
     await fs.rm(directory, { recursive: true, force: true });
   });
   let handler!: (encoded: string, ctx: ExtensionCommandContext) => Promise<void>;
-  desktopBridge({
+  installDesktopBridge({
     on() {},
     registerCommand(name: string, command: { handler: typeof handler }) {
       if (name === DESKTOP_BRIDGE_COMMAND) handler = command.handler;

@@ -1,4 +1,4 @@
-import { _electron as electron } from 'playwright';
+import { launchApp } from '../tests/support/desktop-app.mjs';
 import assert from 'node:assert/strict';
 import fs from 'node:fs/promises';
 import path from 'node:path';
@@ -49,15 +49,13 @@ await fs.mkdir(output, { recursive: true });
 let app, page;
 const errors = [];
 const launch = async () => {
-  app = await electron.launch({
+  ({ app, page } = await launchApp({
     executablePath: executable,
-    args: executable ? [] : [path.resolve('.')],
-    env: { ...process.env, PI_DESKTOP_DATA_DIR: f.dataDir, PI_OFFLINE: '1' },
-    timeout: 30000,
-  });
-  page = await app.firstWindow();
-  page.setDefaultTimeout(25000);
-  page.on('pageerror', (error) => errors.push(error.message));
+    dataDir: f.dataDir,
+    pageTimeout: 25000,
+    errors: errors,
+  }));
+
   await page.getByRole('textbox', { name: '任务输入' }).waitFor();
 };
 const close = async () => {

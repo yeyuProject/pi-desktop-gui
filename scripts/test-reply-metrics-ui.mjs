@@ -1,4 +1,4 @@
-import { _electron as electron } from 'playwright';
+import { launchApp, closeApp } from '../tests/support/desktop-app.mjs';
 import assert from 'node:assert/strict';
 import fs from 'node:fs/promises';
 import path from 'node:path';
@@ -10,15 +10,11 @@ const output = path.resolve('test-results', 'reply-metrics');
 await fs.mkdir(output, { recursive: true });
 let app;
 try {
-  app = await electron.launch({
-    args: [path.resolve('.')],
-    env: { ...process.env, PI_DESKTOP_DATA_DIR: fixture.dataDir, PI_OFFLINE: '1' },
-    timeout: 60000,
-  });
-  const page = await app.firstWindow();
-  page.setDefaultTimeout(30000);
   const errors = [];
-  page.on('pageerror', (error) => errors.push(error.message));
+  const launched = await launchApp({ dataDir: fixture.dataDir, errors: errors });
+  app = launched.app;
+  const page = launched.page;
+
   await page.getByRole('textbox', { name: '任务输入' }).waitFor();
   await page.evaluate(async (id) => {
     await window.desktop.invoke('connect', id);
@@ -83,6 +79,6 @@ try {
     'PASS reply TPS from native usage/duration, history reload, and connected model refresh/selection',
   );
 } finally {
-  await app?.close();
+  await closeApp(app);
   await provider.close();
 }

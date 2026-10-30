@@ -1,4 +1,4 @@
-import { _electron as electron } from 'playwright';
+import { launchApp, closeApp } from '../tests/support/desktop-app.mjs';
 import assert from 'node:assert/strict';
 import fs from 'node:fs/promises';
 import path from 'node:path';
@@ -19,15 +19,12 @@ await fs.writeFile(path.join(fixture.dataDir, 'state.json'), '{ broken');
 let app, page;
 const errors = [];
 const launch = async (dataDir) => {
-  app = await electron.launch({
+  ({ app, page } = await launchApp({
     executablePath: process.env.PI_DESKTOP_EXE,
-    args: process.env.PI_DESKTOP_EXE ? [] : [path.resolve('.')],
-    env: { ...process.env, PI_DESKTOP_DATA_DIR: dataDir, PI_OFFLINE: '1' },
-    timeout: 30000,
-  });
-  page = await app.firstWindow();
-  page.setDefaultTimeout(30000);
-  page.on('pageerror', (error) => errors.push(error.message));
+    dataDir: dataDir,
+    errors: errors,
+  }));
+
   await page.getByRole('textbox', { name: '任务输入' }).waitFor();
 };
 const waitFile = async (file) => {
@@ -182,7 +179,7 @@ try {
           .click()
           .catch(() => {});
     }
-    await app.close();
+    await closeApp(app);
   }
   await provider.close();
 }

@@ -1,4 +1,4 @@
-import { _electron as electron } from 'playwright';
+import { launchApp, closeApp } from '../tests/support/desktop-app.mjs';
 import assert from 'node:assert/strict';
 import fs from 'node:fs/promises';
 import path from 'node:path';
@@ -90,15 +90,13 @@ const transfer = async (files, type, event = 'drop') => {
   );
 };
 try {
-  app = await electron.launch({
+  ({ app, page } = await launchApp({
     executablePath: executable,
-    args: executable ? [] : [path.resolve('.')],
-    env: { ...process.env, PI_DESKTOP_DATA_DIR: f.dataDir, PI_OFFLINE: '1' },
-    timeout: 30000,
-  });
-  page = await app.firstWindow();
-  page.setDefaultTimeout(25000);
-  page.on('pageerror', (error) => errors.push(error.message));
+    dataDir: f.dataDir,
+    pageTimeout: 25000,
+    errors: errors,
+  }));
+
   const input = page.getByRole('textbox', { name: '任务输入' });
   await input.waitFor();
   stage = 'drop and paste images';
@@ -291,7 +289,7 @@ try {
           5000,
           'Stopping the image test session',
         );
-      await within(app.close(), 15000, 'Closing the image test app');
+      await within(closeApp(app), 15000, 'Closing the image test app');
     }
   } catch (error) {
     cleanupFailure = error;

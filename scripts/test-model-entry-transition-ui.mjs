@@ -1,4 +1,4 @@
-import { _electron as electron } from 'playwright';
+import { launchApp, closeApp } from '../tests/support/desktop-app.mjs';
 import { expect } from 'playwright/test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs/promises';
@@ -64,13 +64,8 @@ const capture = async (label) => {
   evidence.push({ label, ...state, modelReadCalls: await modelReadCalls() });
 };
 try {
-  app = await electron.launch({
-    args: [path.resolve('.')],
-    env: { ...process.env, PI_DESKTOP_DATA_DIR: f.dataDir, PI_OFFLINE: '1' },
-  });
-  page = await app.firstWindow();
-  page.setDefaultTimeout(15000);
-  page.on('pageerror', (error) => errors.push(error.message));
+  ({ app, page } = await launchApp({ dataDir: f.dataDir, pageTimeout: 15000, errors: errors }));
+
   await page.getByRole('textbox', { name: '任务输入' }).waitFor();
   await page.evaluate(async () => {
     window.entryRuntimes = new Map();
@@ -726,6 +721,6 @@ try {
       globalThis.entryProbe?.restoreWrite?.();
     })
     .catch(() => {});
-  await app?.close();
+  await closeApp(app);
   await provider.close();
 }

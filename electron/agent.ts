@@ -1,3 +1,6 @@
+import { AgentOperations } from './agent-operations';
+import { RuntimePublisher } from './runtime-publisher';
+import { AgentDialogs } from './agent-dialogs';
 import {
   editGoalDraft,
   sameGoalDraft,
@@ -41,10 +44,7 @@ import {
   type MessageAction,
   type RuntimeNotification,
   type ApprovalMode,
-  type ApprovalRequest,
-  type ToolActivity,
 } from '../shared/types';
-import { APPROVAL_DENY, APPROVAL_PREFIX } from '../shared/approval';
 import { validateImages } from './images';
 import { piShellEnvironment, samePath } from './platform';
 import { sessionStats } from './pi/protocol';
@@ -120,18 +120,21 @@ interface QueuedDraft {
 
 export class AgentService extends EventEmitter {
   runtime: Runtime = emptyRuntime();
+  private readonly operations = new AgentOperations();
+  private readonly publisher = new RuntimePublisher(() => this.runtime, this);
+  private readonly dialogs = new AgentDialogs({
+    runtime: () => this.runtime,
+    rpc: () => this.modelReader ?? this.rpc,
+    resumeStatus: () => (this.connecting ? 'starting' : 'running'),
+    status: (status) => this.status(status),
+    publish: () => this.publish(true),
+  });
   private rpc?: PiRpc;
   private sideRequest?: { id: string; done: Promise<SideChatResult> };
   private modelReader?: PiRpc;
   private modelCatalogRevision = 0;
-  private publishing?: NodeJS.Timeout;
   private savingState?: Promise<void>;
-  private operation = Promise.resolve();
-  private settingsOperation = Promise.resolve();
-  private reading = 0;
-  private preferring = 0;
   private activeWriteTargets = new Map<string, string>();
-  private pendingOperations = 0;
   private stopRequested = false;
   private retryNotice?: number;
   private retryCancelled = false;
@@ -139,7 +142,6 @@ export class AgentService extends EventEmitter {
   private shutdown = false;
   private reloadSuspended = false;
   private fullOutput = '';
-  private dialogTimers = new Map<string, NodeJS.Timeout>();
   private probe?: PiRpc;
   private probing = false;
   private stopEpoch = 0;
@@ -161,7 +163,7 @@ export class AgentService extends EventEmitter {
   private errorCounts = new Map<string, { kind: ModelErrorKind; count: number }>();
   private checkpointRecorder: CheckpointRecorder;
   get hasPendingWork() {
-    return this.pendingOperations > 0 || this.requiresStopConfirmation;
+    return this.operations.pending > 0 || this.requiresStopConfirmation;
   }
   get sideChatRunning() {
     return Boolean(this.sideRequest);
@@ -179,7 +181,7 @@ export class AgentService extends EventEmitter {
   get workspaceInUse() {
     // Passive RPC reads and an isolated --no-tools connection probe do not modify the project.
     return (
-      this.pendingOperations > this.reading ||
+      this.operations.pending > this.operations.reading ||
       busy(this.runtime.status) ||
       this.connecting ||
       this.unsafeExit ||
@@ -200,7 +202,7 @@ export class AgentService extends EventEmitter {
       connecting: this.connecting,
       probing: this.probing,
       unsafeExit: this.unsafeExit,
-      pendingOperations: this.pendingOperations,
+      pendingOperations: this.operations.pending,
       dialogs: this.runtime.dialogs.map(({ id, title }) => ({ id, title })),
       crash: this.runtime.crash,
     };
@@ -221,100 +223,10 @@ export class AgentService extends EventEmitter {
     this.checkpointRecorder = new CheckpointRecorder(store, workspace);
   }
   publish(immediate = false) {
-    if (immediate) {
-      if (this.publishing) clearTimeout(this.publishing);
-      this.publishing = undefined;
-      this.flush();
-      return;
-    }
-    this.publishing ??= setTimeout(() => {
-      this.publishing = undefined;
-      this.flush();
-    }, 40);
+    this.publisher.publish(immediate);
   }
-  /** What the UI last received, as JSON strings per item, to send only what changed since. */
-  private sent = {
-    sessionId: undefined as string | undefined,
-    messages: [] as string[],
-    tools: [] as string[],
-  };
-  private serialized = new WeakMap<object, string>();
-  private sentFields = new Map<string, { value: unknown; json: string | undefined }>();
-  private flush() {
-    if (this.listenerCount('runtime')) this.emit('runtime', structuredClone(this.runtime));
-    if (!this.listenerCount('runtimePatch')) return;
-    const r = this.runtime;
-    const reset = this.sent.sessionId !== r.sessionId;
-    // Messages are only mutated in place at the end (streaming) and tools only while running;
-    // everything else is replaced wholesale, so settled objects reuse their cached serialization.
-    const changedFrom = (
-      items: object[],
-      previous: string[],
-      next: string[],
-      seen: WeakMap<object, string>,
-      mutable: (item: object, index: number) => boolean,
-    ) => {
-      let from = reset ? 0 : Math.min(previous.length, items.length);
-      for (let i = 0; i < items.length; i++) {
-        const changing = mutable(items[i], i);
-        const frozen = !changing && seen.get(items[i]);
-        next[i] = frozen || JSON.stringify(items[i]);
-        if (changing) seen.delete(items[i]);
-        else if (!frozen) seen.set(items[i], next[i]);
-        if (i < from && next[i] !== previous[i]) from = i;
-      }
-      return from;
-    };
-    const messages: string[] = [],
-      tools: string[] = [];
-    const messagesFrom = changedFrom(
-      r.messages,
-      this.sent.messages,
-      messages,
-      this.serialized,
-      (item, index) => index === r.messages.length - 1 && (item as Message).role === 'assistant',
-    );
-    // Preserve late updates to recent tools and the final transition of older
-    // concurrent tools, which must remain uncached while running.
-    const toolsFrom = changedFrom(
-      r.tools,
-      this.sent.tools,
-      tools,
-      this.serialized,
-      (item, index) => index >= r.tools.length - 8 || (item as ToolActivity).status === 'running',
-    );
-    const { messages: _m, tools: _t, ...rest } = r;
-    const fields: Record<string, unknown> = {};
-    const removed = [...this.sentFields.keys()].filter((key) => !(key in rest));
-    for (const key of removed) this.sentFields.delete(key);
-    for (const [key, value] of Object.entries(rest)) {
-      const before = this.sentFields.get(key);
-      // These collections are replaced when updated. Avoid scanning large diagnostics
-      // and model catalogs on every token; other (mutable) fields are compared by value.
-      const replaced = key === 'diagnostic' || key === 'models' || key === 'commands';
-      if (!reset && before && (replaced || typeof value !== 'object') && before.value === value) continue;
-      const json = JSON.stringify(value);
-      if (reset || !before || before.json !== json) fields[key] = structuredClone(value);
-      this.sentFields.set(key, { value, json });
-    }
-    this.sent = { sessionId: r.sessionId, messages, tools };
-    this.emit('runtimePatch', {
-      ...fields,
-      sessionId: r.sessionId,
-      ...(removed.length ? { removed } : {}),
-      messagesFrom,
-      messages: messages.slice(messagesFrom).map((s) => JSON.parse(s)),
-      messageCount: messages.length,
-      toolsFrom,
-      tools: tools.slice(toolsFrom).map((s) => JSON.parse(s)),
-      toolCount: tools.length,
-    });
-  }
-  /** Next patch carries the whole runtime, e.g. after the window reloads. */
   resync() {
-    this.sent = { sessionId: undefined, messages: [], tools: [] };
-    this.serialized = new WeakMap();
-    this.sentFields.clear();
+    this.publisher.resync();
   }
   private save(immediate = true) {
     const saving = immediate ? this.store.save() : this.store.scheduleSave();
@@ -362,32 +274,16 @@ export class AgentService extends EventEmitter {
     this.save(!busy(this.runtime.status));
   }
   private exclusive<T>(action: () => Promise<T>): Promise<T> {
-    this.pendingOperations++;
-    const result = this.operation.then(action, action);
-    this.operation = result.then(
-      () => {},
-      () => {},
-    );
-    return result.finally(() => {
-      this.pendingOperations--;
-    });
+    return this.operations.run(action);
   }
   private preference<T>(action: () => Promise<T>): Promise<T> {
-    this.preferring++;
-    this.pendingOperations++;
-    const result = this.settingsOperation.then(action, action);
-    this.settingsOperation = result.then(
-      () => {},
-      () => {},
-    );
-    return result.finally(() => {
-      this.pendingOperations--;
-      this.preferring--;
-      if (!this.preferring && this.runtime.configurationPending && !busy(this.runtime.status))
-        void this.exclusive(() => this.applyPendingConfiguration()).catch((error) =>
-          this.diagnostic(errorText(error)),
-        );
-    });
+    return this.operations.prefer(action, () => this.reloadAfterRead());
+  }
+  private reloadAfterRead() {
+    if (this.runtime.configurationPending && !busy(this.runtime.status))
+      void this.exclusive(() => this.applyPendingConfiguration()).catch((error) =>
+        this.diagnostic(errorText(error)),
+      );
   }
   private diagnostic(s: string) {
     this.runtime.diagnostic.push(redact(s).slice(-4000));
@@ -427,9 +323,7 @@ export class AgentService extends EventEmitter {
     r.notifications = [...(r.notifications ?? []), { id: ++this.notificationId, text, level }].slice(-5);
   }
   private clearDialogs() {
-    for (const timer of this.dialogTimers.values()) clearTimeout(timer);
-    this.dialogTimers.clear();
-    this.runtime.dialogs = [];
+    this.dialogs.clear();
   }
   private updateRetryNotice(text: string) {
     const notices = this.runtime.notices;
@@ -781,29 +675,7 @@ export class AgentService extends EventEmitter {
       return;
     }
     if (['select', 'confirm', 'input', 'editor'].includes(record.method)) {
-      const expiresAt = record.timeout ? Date.now() + record.timeout : undefined;
-      let approval: ApprovalRequest | undefined;
-      if (record.method === 'select' && String(record.title ?? '').startsWith(APPROVAL_PREFIX)) {
-        try {
-          approval = JSON.parse(String(record.title).slice(APPROVAL_PREFIX.length));
-        } catch {}
-      }
-      r.dialogs.push(
-        approval
-          ? { ...record, title: `允许 ${approval.toolName}？`, approval, expiresAt }
-          : { ...record, expiresAt },
-      );
-      if (!this.stopRequested && !this.modelReader) this.status('waiting');
-      if (record.timeout)
-        this.dialogTimers.set(
-          record.id,
-          setTimeout(() => {
-            r.dialogs = r.dialogs.filter((d) => d.id !== record.id);
-            this.dialogTimers.delete(record.id);
-            if (r.status === 'waiting') this.status(this.connecting ? 'starting' : 'running');
-            this.publish(true);
-          }, record.timeout),
-        );
+      this.dialogs.show(record, !this.stopRequested && !this.modelReader);
     } else if (record.method === 'notify')
       this.notify(
         String(record.message ?? ''),
@@ -823,26 +695,8 @@ export class AgentService extends EventEmitter {
     } else if (record.method === 'setTitle') r.title = String(record.title ?? 'Pi Desktop');
     else this.notify(`扩展界面能力 ${record.method} 暂不支持，请在终端使用该扩展。`, 'warning');
   }
-  async respond(id: string, values: { value?: string; confirmed?: boolean; cancelled?: boolean }) {
-    const d = this.runtime.dialogs.find((d) => d.id === id);
-    if (!d || (d.expiresAt && Date.now() >= d.expiresAt)) throw new Error('这个问题已失效');
-    const denyWithReason = d.approval && values.value?.startsWith(APPROVAL_DENY + '：');
-    if (
-      d.method === 'select' &&
-      !values.cancelled &&
-      !denyWithReason &&
-      !d.options?.includes(values.value ?? '')
-    )
-      throw new Error('请选择有效选项');
-    if (denyWithReason) values = { value: values.value!.slice(0, APPROVAL_DENY.length + 1 + 2000) };
-    await (this.modelReader ?? this.rpc)?.write({ type: 'extension_ui_response', id, ...values });
-    const timer = this.dialogTimers.get(id);
-    if (timer) clearTimeout(timer);
-    this.dialogTimers.delete(id);
-    this.runtime.dialogs = this.runtime.dialogs.filter((d) => d.id !== id);
-    if (this.runtime.status === 'waiting' && !this.runtime.dialogs.length)
-      this.status(this.connecting ? 'starting' : 'running');
-    this.publish(true);
+  respond(id: string, values: { value?: string; confirmed?: boolean; cancelled?: boolean }) {
+    return this.dialogs.respond(id, values);
   }
   private async refresh(reconcile = true) {
     const rpc = this.rpc;
@@ -2024,19 +1878,13 @@ export class AgentService extends EventEmitter {
   private async readTask<T>(id: string, action: (rpc: PiRpc) => Promise<T>): Promise<T> {
     this.protectSession(id);
     await this.beforeConnect?.('read');
-    this.reading++;
-    this.pendingOperations++;
-    try {
-      if (!this.rpc || this.rpc.closed || this.runtime.sessionId !== id) await this.connect(id);
-      return await action(this.rpc!);
-    } finally {
-      this.reading--;
-      this.pendingOperations--;
-      if (!this.reading && this.runtime.configurationPending && !busy(this.runtime.status))
-        void this.exclusive(() => this.applyPendingConfiguration()).catch((error) =>
-          this.diagnostic(errorText(error)),
-        );
-    }
+    return this.operations.read(
+      async () => {
+        if (!this.rpc || this.rpc.closed || this.runtime.sessionId !== id) await this.connect(id);
+        return action(this.rpc!);
+      },
+      () => this.reloadAfterRead(),
+    );
   }
   async scheduleReload() {
     if (!this.runtime.connected && !this.connecting) return true;
@@ -2047,8 +1895,8 @@ export class AgentService extends EventEmitter {
       busy(this.runtime.status) ||
       this.connecting ||
       this.probing ||
-      this.reading ||
-      this.preferring ||
+      this.operations.reading ||
+      this.operations.preferring ||
       this.runtime.dialogs.length ||
       this.unsafeExit
     )
@@ -2063,8 +1911,8 @@ export class AgentService extends EventEmitter {
       this.runtime.dialogs.length ||
       this.connecting ||
       this.probing ||
-      this.reading ||
-      this.preferring ||
+      this.operations.reading ||
+      this.operations.preferring ||
       this.unsafeExit
     )
       return false;
@@ -2393,7 +2241,7 @@ export class AgentService extends EventEmitter {
     await this.stopSideChat();
     await this.crashCleanup;
     this.assertCommandsStopped();
-    if (this.connecting || this.pendingOperations > 0)
+    if (this.connecting || this.operations.pending > 0)
       throw new Error('正在处理会话操作，请等待完成后再断开或修改运行环境。');
     if (busy(this.runtime.status) || this.probing) throw new Error('请先等待当前任务或连接测试结束');
     await this.closeRpc();
@@ -2404,7 +2252,7 @@ export class AgentService extends EventEmitter {
     if (this.hasPendingWork) return Promise.resolve(false);
     return this.exclusive(async () => {
       if (
-        this.pendingOperations > 1 ||
+        this.operations.pending > 1 ||
         this.requiresStopConfirmation ||
         this.runtime.configurationPending ||
         this.runtime.auth ||
@@ -2518,14 +2366,13 @@ export class AgentService extends EventEmitter {
     this.shutdown = true;
     this.stopEpoch++;
     this.stopRequested = true;
-    if (this.publishing) clearTimeout(this.publishing);
+    this.publisher.cancelPending();
     await this.modelReader?.close();
     await this.probe?.close();
     if (busy(this.runtime.status)) {
       await this.stop().catch(() => {});
     }
-    await this.settingsOperation;
-    await this.operation;
+    await this.operations.drain();
     this.clearDialogs();
     await this.rpc?.close();
     await this.store.flush().catch((e) => this.diagnostic(errorText(e)));

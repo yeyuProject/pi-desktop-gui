@@ -5,7 +5,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { createReadTool } from '@earendil-works/pi-coding-agent';
-import desktopBridge from '../electron/pi-bridge';
+import { installDesktopBridge } from './support/bridge-fixture';
 import { classifyReadTarget } from '../electron/approval-paths';
 import {
   APPROVAL_ALLOW,
@@ -37,10 +37,8 @@ async function fixture(t: TestContext) {
 function bridge(mode: ApprovalMode, cwd: string, choice = APPROVAL_ALLOW) {
   const handlers = new Map<string, (...args: any[]) => any>();
   const requests: { request: ApprovalRequest; options: string[] }[] = [];
-  const previous = process.env.PI_DESKTOP_APPROVAL;
-  process.env.PI_DESKTOP_APPROVAL = mode;
-  try {
-    desktopBridge({
+  installDesktopBridge(
+    {
       on: (name: string, handler: any) => {
         const previous = handlers.get(name);
         handlers.set(name, async (...args: any[]) => {
@@ -50,11 +48,9 @@ function bridge(mode: ApprovalMode, cwd: string, choice = APPROVAL_ALLOW) {
       },
       registerCommand: () => {},
       registerTool: () => {},
-    } as never);
-  } finally {
-    if (previous === undefined) delete process.env.PI_DESKTOP_APPROVAL;
-    else process.env.PI_DESKTOP_APPROVAL = previous;
-  }
+    } as never,
+    { PI_DESKTOP_APPROVAL: mode },
+  );
   const ctx = {
     cwd,
     ui: {

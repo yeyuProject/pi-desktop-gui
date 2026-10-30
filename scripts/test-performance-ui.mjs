@@ -1,8 +1,7 @@
-import { _electron as electron } from 'playwright';
+import { launchApp, closeApp } from '../tests/support/desktop-app.mjs';
 import { expect } from 'playwright/test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs/promises';
-import path from 'node:path';
 import { performance } from 'node:perf_hooks';
 import { emptyRuntime } from '../shared/types.ts';
 import { Workspace } from '../electron/workspace.ts';
@@ -31,13 +30,10 @@ const summary = (a) => {
 let app;
 try {
   const start = performance.now();
-  app = await electron.launch({
-    args: [path.resolve('.')],
-    env: { ...process.env, PI_DESKTOP_DATA_DIR: fixture.dataDir, PI_OFFLINE: '1' },
-    timeout: 60000,
-  });
-  const page = await app.firstWindow();
-  page.setDefaultTimeout(60000);
+  const launched = await launchApp({ dataDir: fixture.dataDir, pageTimeout: 60000 });
+  app = launched.app;
+  const page = launched.page;
+
   // Count actual component executions via React's DevTools commit hook, excluding memo bailouts.
   // Match the conversation's props because production function names are minified.
   await page.addInitScript(() => {
@@ -615,6 +611,6 @@ try {
   await fs.writeFile('test-results/performance-ui.json', JSON.stringify(result, null, 2));
   console.log(JSON.stringify({ firstLaunchToInputMs: result.firstLaunchToInputMs, errors }));
 } finally {
-  await app?.close();
+  await closeApp(app);
   await provider.close();
 }

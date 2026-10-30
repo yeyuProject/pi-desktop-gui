@@ -1,4 +1,4 @@
-import { _electron as electron } from 'playwright';
+import { launchApp, closeApp } from '../tests/support/desktop-app.mjs';
 import fs from 'node:fs/promises';
 import path from 'node:path';
 import assert from 'node:assert/strict';
@@ -40,15 +40,12 @@ await fixture.store.save();
 let app, page;
 const errors = [];
 try {
-  app = await electron.launch({
+  ({ app, page } = await launchApp({
     executablePath: process.env.PI_DESKTOP_EXE,
-    args: process.env.PI_DESKTOP_EXE ? [] : [path.resolve('.')],
-    env: { ...process.env, PI_DESKTOP_DATA_DIR: fixture.dataDir, PI_OFFLINE: '1' },
-    timeout: 30000,
-  });
-  page = await app.firstWindow();
-  page.setDefaultTimeout(30000);
-  page.on('pageerror', (error) => errors.push(error.message));
+    dataDir: fixture.dataDir,
+    errors: errors,
+  }));
+
   const input = page.getByRole('textbox', { name: '任务输入' });
   await input.waitFor();
   await page.evaluate(async (id) => {
@@ -179,6 +176,6 @@ try {
   if (page && !page.isClosed()) await page.screenshot({ path: path.join(output, 'coding-ui-failure.png') });
   throw error;
 } finally {
-  await app?.close();
+  await closeApp(app);
   await provider.close();
 }

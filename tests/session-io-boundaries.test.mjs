@@ -5,6 +5,14 @@ import os from 'node:os';
 import path from 'node:path';
 import { stripTypeScriptTypes } from 'node:module';
 import { formatMessageQuotes, splitMessageQuotes } from '../shared/message-content.ts';
+import { handlerSource } from './support/ipc-handler-source.ts';
+
+function handlerBoundary(name, dependencies) {
+  return new Function(
+    ...Object.keys(dependencies),
+    stripTypeScriptTypes(`function load() { return { ${handlerSource(name)} }; }`) + '\nreturn load();',
+  )(...Object.values(dependencies));
+}
 
 // Exercise the production boundaries with deterministic filesystem faults, without
 // starting Electron/Pi. Real-Pi and Store/selection coverage lives in the TS suites.
@@ -28,34 +36,28 @@ test('deleting a side-only session aborts and saves its answer before asking for
       finish = resolve;
     }),
   };
-  const handlers = await boundary(
-    '../electron/main.ts',
-    '  deleteSession: async (id)',
-    '  pinSession:',
-    (body) => `return { ${body} };`,
-    {
-      text() {},
-      assertTerminalClosed: async () => {},
-      sideFlight: flight,
-      store: { session: () => ({ id: 'chat', title: '侧边测试' }) },
-      service: {
-        active: () => false,
-        get: () => ({
-          stopSideChat: async () => {
-            calls.push('abort');
-            finish();
-            await flight.done;
-            calls.push('saved');
-          },
-        }),
-      },
-      showAppDialog: async () => {
-        assert.equal(flight.cancelled, true);
-        calls.push('confirm');
-        return { response: 0 };
-      },
+  const handlers = handlerBoundary('deleteSession', {
+    text() {},
+    assertTerminalClosed: async () => {},
+    getSideFlight: () => flight,
+    store: { session: () => ({ id: 'chat', title: '侧边测试' }) },
+    service: {
+      active: () => false,
+      get: () => ({
+        stopSideChat: async () => {
+          calls.push('abort');
+          finish();
+          await flight.done;
+          calls.push('saved');
+        },
+      }),
     },
-  );
+    showAppDialog: async () => {
+      assert.equal(flight.cancelled, true);
+      calls.push('confirm');
+      return { response: 0 };
+    },
+  });
   assert.equal(await handlers.deleteSession('chat'), false);
   assert.deepEqual(calls, ['abort', 'saved', 'confirm']);
 });
@@ -71,36 +73,30 @@ test('continuing a side answer inherits its project and recovers quoted text as 
   };
   const session = { id: 'new' };
   let selected;
-  const handlers = await boundary(
-    '../electron/main.ts',
-    '  sideChatContinue:',
-    '  rendererReady:',
-    (body) => `return { ${body} };`,
-    {
-      text() {},
-      splitMessageQuotes,
-      store: {
-        assertWritable() {},
-        session: () => ({ projectId: 'project' }),
-        createSession: (project) => {
-          session.projectId = project;
-          return session;
-        },
-        selectSession: (id) => {
-          selected = id;
-        },
+  const handlers = handlerBoundary('sideChatContinue', {
+    text() {},
+    splitMessageQuotes,
+    store: {
+      assertWritable() {},
+      session: () => ({ projectId: 'project' }),
+      createSession: (project) => {
+        session.projectId = project;
+        return session;
       },
-      sideChats: {
-        read: async () => ({
-          messages: [
-            { role: 'user', id: 'q', content: formatMessageQuotes([quote]) + '\n\n原问题' },
-            { role: 'assistant', id: 'a', content: '侧边答案' },
-          ],
-        }),
+      selectSession: (id) => {
+        selected = id;
       },
-      save: async () => {},
     },
-  );
+    sideChats: {
+      read: async () => ({
+        messages: [
+          { role: 'user', id: 'q', content: formatMessageQuotes([quote]) + '\n\n原问题' },
+          { role: 'assistant', id: 'a', content: '侧边答案' },
+        ],
+      }),
+    },
+    save: async () => {},
+  });
   await handlers.sideChatContinue('source', 'a');
   assert.equal(session.projectId, 'project');
   assert.equal(selected, 'new');
@@ -209,49 +205,43 @@ for (const scenario of [
     const failure = Object.assign(new Error(scenario), { code: scenario.split('-')[1] });
     const calls = [];
     const removedSideChats = [];
-    const handlers = await boundary(
-      '../electron/main.ts',
-      '  deleteSession: async (id)',
-      '  pinSession:',
-      (body) => `return { ${body} };`,
-      {
-        text() {},
-        assertTerminalClosed: async () => {},
-        store: {
-          dir: '/fixture',
-          purgeDeletedSession: async () => {},
-          state,
-          session: () => session,
-          removeSessions: () => {
-            state.sessions = [];
-          },
-          durableSessions: () => [{ id: 'other' }],
-          selectSession: (id) => {
-            state.selectedSessionId = id;
-          },
+    const handlers = handlerBoundary('deleteSession', {
+      text() {},
+      assertTerminalClosed: async () => {},
+      store: {
+        dir: '/fixture',
+        purgeDeletedSession: async () => {},
+        state,
+        session: () => session,
+        removeSessions: () => {
+          state.sessions = [];
         },
-        service: { active: () => false, release: async () => {} },
-        sideFlight: undefined,
-        sideChats: { remove: async (id) => removedSideChats.push(id) },
-        workspace: { removeSession: async () => {} },
-        removeSessionScratch: async () => {},
-        showAppDialog: async () => ({ response: scenario === 'cancel' ? 0 : 1 }),
-        save: async () => {},
-        fs: {
-          lstat: async () => {
-            calls.push('lstat');
-            if (scenario === 'missing') throw Object.assign(new Error('missing'), { code: 'ENOENT' });
-            if (scenario.startsWith('lstat-')) throw failure;
-          },
-        },
-        shell: {
-          trashItem: async () => {
-            calls.push('trash');
-            if (scenario.startsWith('trash-')) throw failure;
-          },
+        durableSessions: () => [{ id: 'other' }],
+        selectSession: (id) => {
+          state.selectedSessionId = id;
         },
       },
-    );
+      service: { active: () => false, release: async () => {} },
+      getSideFlight: () => undefined,
+      sideChats: { remove: async (id) => removedSideChats.push(id) },
+      workspace: { removeSession: async () => {} },
+      removeSessionScratch: async () => {},
+      showAppDialog: async () => ({ response: scenario === 'cancel' ? 0 : 1 }),
+      save: async () => {},
+      fs: {
+        lstat: async () => {
+          calls.push('lstat');
+          if (scenario === 'missing') throw Object.assign(new Error('missing'), { code: 'ENOENT' });
+          if (scenario.startsWith('lstat-')) throw failure;
+        },
+      },
+      shell: {
+        trashItem: async () => {
+          calls.push('trash');
+          if (scenario.startsWith('trash-')) throw failure;
+        },
+      },
+    });
     if (scenario.includes('-')) {
       await assert.rejects(handlers.deleteSession('current'), (error) => error === failure);
       assert.deepEqual(state.sessions, [session]);

@@ -1,4 +1,4 @@
-import { _electron as electron } from 'playwright';
+import { launchApp, closeApp } from '../tests/support/desktop-app.mjs';
 import { expect } from 'playwright/test';
 import { emptyRuntime } from '../shared/types.ts';
 import assert from 'node:assert/strict';
@@ -32,15 +32,13 @@ const wait = async (check) => {
   }
 };
 try {
-  app = await electron.launch({
+  ({ app, page } = await launchApp({
     executablePath: process.env.PI_DESKTOP_EXE,
-    args: process.env.PI_DESKTOP_EXE ? [] : [path.resolve('.')],
-    env: { ...process.env, PI_DESKTOP_DATA_DIR: fixture.dataDir, PI_OFFLINE: '1' },
-    timeout: 30000,
-  });
-  page = await app.firstWindow();
-  page.setDefaultTimeout(25000);
-  page.on('pageerror', (error) => errors.push(error.message));
+    dataDir: fixture.dataDir,
+    pageTimeout: 25000,
+    errors: errors,
+  }));
+
   const input = page.getByRole('textbox', { name: '任务输入' });
   await input.waitFor();
   const send = async (text) => {
@@ -332,6 +330,6 @@ try {
     .catch(() => {});
   throw error;
 } finally {
-  await app?.close();
+  await closeApp(app);
   await provider.close();
 }

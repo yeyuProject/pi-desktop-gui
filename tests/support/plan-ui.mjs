@@ -1,4 +1,4 @@
-import { _electron as electron } from 'playwright';
+import { launchApp, closeApp } from './desktop-app.mjs';
 import { expect } from 'playwright/test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs/promises';
@@ -16,15 +16,13 @@ export async function verifyPlanUI({ output = path.resolve('test-results') } = {
   let app, page;
   const errors = [];
   const launch = async () => {
-    app = await electron.launch({
+    ({ app, page } = await launchApp({
       executablePath: process.env.PI_DESKTOP_EXE,
-      args: process.env.PI_DESKTOP_EXE ? [] : [path.resolve('.')],
-      env: { ...process.env, PI_DESKTOP_DATA_DIR: fixture.dataDir, PI_OFFLINE: '1' },
-      timeout: 30000,
-    });
-    page = await app.firstWindow();
-    page.setDefaultTimeout(15000);
-    page.on('pageerror', (error) => errors.push(error.message));
+      dataDir: fixture.dataDir,
+      pageTimeout: 15000,
+      errors: errors,
+    }));
+
     await page.getByRole('textbox', { name: '任务输入' }).waitFor();
     await page.bringToFront();
   };
@@ -284,7 +282,7 @@ export async function verifyPlanUI({ output = path.resolve('test-results') } = {
     await page?.screenshot({ path: path.join(output, 'plan-ui-failure.png') }).catch(() => {});
     throw error;
   } finally {
-    await app?.close().catch(() => {});
+    await closeApp(app).catch(() => {});
     await provider.close();
   }
 }

@@ -4,34 +4,31 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import vm from 'node:vm';
+import { _electron as electron } from 'playwright';
+import { launchApp } from './support/desktop-app.mjs';
 
 const script = fs.readFileSync(new URL('../scripts/test-theme-ui.mjs', import.meta.url), 'utf8');
 const start = script.indexOf('async function launch() {');
 const end = script.indexOf('\nasync function checkTheme(', start);
 assert.ok(start >= 0 && end > start);
 
-test('every native appearance launch leaves color scheme to Electron, including restart and packaged mode', async () => {
+test('every native appearance launch leaves color scheme to Electron, including restart and packaged mode', async (t) => {
   for (const executablePath of [undefined, '/fixture/Pi Desktop']) {
     const calls = [];
     const stop = new Error('Launch options captured without starting Electron');
+    const mock = t.mock.method(electron, 'launch', async (options) => {
+      calls.push(options);
+      throw stop;
+    });
     // Execute the actual launch function only as far as the public Playwright call.
     const launch = new Function(
-      'electron',
+      'launchApp',
       'path',
       'process',
       'dir',
+      'errors',
       `let app, page; ${script.slice(start, end)}; return launch;`,
-    )(
-      {
-        launch: async (options) => {
-          calls.push(options);
-          throw stop;
-        },
-      },
-      path,
-      { env: { PI_DESKTOP_EXE: executablePath } },
-      '/isolated-theme-fixture',
-    );
+    )(launchApp, path, { env: { PI_DESKTOP_EXE: executablePath } }, '/isolated-theme-fixture', []);
     for (let attempt = 0; attempt < 2; attempt++) await assert.rejects(launch, (error) => error === stop);
     for (const options of calls) {
       assert.equal(options.colorScheme, null, 'Omitting this option silently emulates light');
@@ -42,11 +39,12 @@ test('every native appearance launch leaves color scheme to Electron, including 
       assert.equal(Object.hasOwn(options, 'viewport'), false);
       assert.equal(Object.hasOwn(options, 'headless'), false);
     }
+    mock.mock.restore();
   }
 });
 
 test('native appearance still checks actual media against nativeTheme without per-page color emulation', () => {
-  assert.equal((script.match(/electron\.launch\(/g) ?? []).length, 1);
+  assert.equal((script.match(/launchApp\(/g) ?? []).length, 1);
   // Suppressing entrance animations is safe; emulating the color scheme would hide native regressions.
   const motionOnly = /\.emulateMedia\(\{\s*reducedMotion: 'reduce'\s*\}\)/g;
   assert.doesNotMatch(script.replace(motionOnly, ''), /\.emulateMedia\(|setEmulatedMedia/);

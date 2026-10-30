@@ -1,4 +1,4 @@
-import { _electron as electron } from 'playwright';
+import { launchApp, closeApp } from '../tests/support/desktop-app.mjs';
 import assert from 'node:assert/strict';
 import fs from 'node:fs/promises';
 import path from 'node:path';
@@ -33,15 +33,11 @@ const output = path.resolve('test-results');
 await fs.mkdir(output, { recursive: true });
 let app;
 try {
-  app = await electron.launch({
-    args: [path.resolve('.')],
-    env: { ...process.env, PI_DESKTOP_DATA_DIR: fixture.dataDir, PI_OFFLINE: '1' },
-    timeout: 30000,
-  });
-  const page = await app.firstWindow();
-  page.setDefaultTimeout(15000);
   const errors = [];
-  page.on('pageerror', (error) => errors.push(error.message));
+  const launched = await launchApp({ dataDir: fixture.dataDir, pageTimeout: 15000, errors: errors });
+  app = launched.app;
+  const page = launched.page;
+
   const input = page.getByRole('textbox', { name: '任务输入' });
   await input.waitFor();
   await page.bringToFront();
@@ -200,6 +196,6 @@ try {
       ),
     )
     .catch(() => {});
-  await app?.close();
+  await closeApp(app);
   await provider.close();
 }
