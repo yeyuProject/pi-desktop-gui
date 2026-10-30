@@ -93,14 +93,17 @@ flowchart LR
 
 ## 桌面应用更新
 
-- `shared/app-update.ts` 定义独立更新状态、安装方式、稳定版版本比较和官方 Release 地址。更新状态通过 `update` 事件推送，不混入 Pi 的消息与工具状态。
-- `electron/updater.ts` 管理检查间隔、通知与自动下载模式、重试、安装前检查。它不依赖 Electron；`electron/update-driver.ts` 单独把 `electron-updater` 的事件和安装接口转换为桌面使用的接口。
+- `shared/app-update.ts` 定义独立更新状态、安装方式、稳定版版本比较和官方 Release 地址，并统一大小、剩余时间及侧栏摘要的格式。`size` 是签名清单中的本平台安装包大小；`download.total` 是本次实际传输的字节数，差分下载时可能更小。
+- `electron/updater.ts` 管理检查间隔、通知与自动下载模式、重试、安装前检查。它不依赖 Electron；`electron/update-driver.ts` 转发原生更新器的字节进度，并按 Windows `.exe`、Linux `.AppImage`、Mac 对应架构 `.zip` 选择清单中的文件。通知模式复用同一套大小选择规则。
+- `electron/update-progress.ts` 用可注入时钟计算最近 5 秒的速度和剩余时间，下载前 3 秒或窗口内不足 256 KB 时不显示估算数字。只把真实字节报告加入样本，并考虑库约 1 秒的报告间隔，避免定时器把尚未报告的下载量算成停顿。`UpdateService` 的 1 秒定时器负责发现 10 秒无新字节的停滞；总大小改变或字节数回退会清空样本。下载到 100% 后进入校验阶段，`ready`、`error`、`idle` 和 `dispose()` 会停止定时器，前三者同时清除下载详情。
 - `main.ts` 提供具体安装方式、网络请求、忙碌判断和安装前保存步骤。已接收但尚未切换运行状态的 IPC 与 Agent 操作同样阻止安装，避免“刚点击发送，更新先关闭了应用”。开始准备安装后禁止新操作，先保存草稿、断开空闲 Pi 并等待写盘，再交给安装器；系统关机不触发安装。
-- `Updates.tsx` 组合侧栏提示、更新说明和“关于与更新”，展示失败原因及重试入口。Windows NSIS、macOS 和 Linux AppImage 支持应用内安装；便携版和 deb 提示手动下载安装。各平台均从发布文件或配置的 HTTPS 镜像读取已签名的清单，不依赖 GitHub API。默认手动下载，仅显式点击重启才安装。
+- 更新状态通过独立 `update` 事件写入 `src/lib/update-store.ts`；只有 `UpdateBadge`、`AboutUpdates` 和 `UpdateDialog` 使用 `useSyncExternalStore` 订阅，进度刷新不会重绘 App、输入框、对话区或侧栏会话列表。`Updates.tsx` 的共享 `DownloadProgress` 展示大小、速度、预计时间与校验阶段，单个播报节点只在阶段变化时通知读屏。
+- Windows NSIS、macOS 和 Linux AppImage 支持应用内安装；便携版和 deb 提示手动下载安装。各平台均从发布文件或配置的 HTTPS 镜像读取已签名的清单，不依赖 GitHub API。默认手动下载，仅显式点击重启才安装。
 - `Store` 记录最后写入的 `appVersion`。升级前保存原始索引并保留三份；未知的较新格式直接只读打开，不按损坏文件重命名，也不投影后写回旧格式。已知格式允许降级使用。
 - `electron-updater` 由 esbuild 一起打入主进程。发布依旧只包含 `build.files` 白名单，CI 校验更新清单中的版本、文件与 SHA-512 后上传草稿 Release；维护者在 CI 之外核验产物、签署三份清单，再公开发布。详见 [更新签名](update-signing.md)。
 - Windows 更新以当前运行的 `exe` 所在目录作为安装目标。运行目录与注册安装目录不同时，`build/installer.nsh` 先校验全部解压文件，再覆盖当前目录的程序文件，保留另一份程序的文件、版本、安装登记和快捷方式；注册目录内的更新仍走正常安装流程。`after-sign.mjs` 为最终文件生成 SHA-512 校验清单；当前只允许用户级安装，不打包提权工具。更新后直接启动本次更新的程序，正常安装流程同时修正仍存在的快捷方式，并保留用户主动删除快捷方式的选择。
 - `test:update` 验证旧快捷方式及两个程序目录同时存在的情况，其中目录更新使用含空格的路径。本机验收直接运行验收目录中的程序，正式开始菜单和任务栏保留安装版入口。未包含此修复的旧版不会传递运行目录，首次自动更新仍可能使用注册目录；需要先将包含修复的完整程序放入预期目录，后续自动更新才能按该目录进行。
+- `PI_UPDATE_PROGRESS_AUDIT=1` 为 Windows/Linux 的真实安装包测试开启 1 MB/s 限速和 12 秒暂停，检查速度、剩余时间、停滞恢复、校验及下载状态清理；CI 的 `update-roundtrip` 已启用，结果写入 `test-results/update-progress-real-<platform>.json`。限速仅存在于测试服务器。
 
 - mac 更新交换完成后启动新进程，等待索引加载和工作界面就绪的随机挑战回执。进程提前退出或 60 秒内未就绪时，先停止本次启动的进程，再原子交换回旧版本并重开；无法确认进程已停止时保留备份并记录失败，不替换仍在运行的应用。
 

@@ -13,7 +13,9 @@ import {
   type UpdateDriverEvent,
   type UpdateOptions,
 } from '../electron/updater';
-import { nativeUpdateDriver } from '../electron/update-driver';
+import { nativeUpdateDriver, release } from '../electron/update-driver';
+import { UpdateProgress } from '../electron/update-progress';
+import { EventEmitter } from 'node:events';
 import { compareAppVersions, stableVersion, releaseUrl, updateInstallNotice } from '../shared/app-update';
 import { AgentService } from '../electron/agent';
 
@@ -69,6 +71,238 @@ test('installation policy distinguishes automatic and notification-only targets'
   for (const value of ['0.9.1-beta.1', '09.0.0', 'next', '../other'])
     assert.equal(stableVersion(value), undefined);
   assert.match(releaseUrl('0.10.0'), /\/tag\/v0\.10\.0$/);
+});
+
+test('release metadata selects the signed platform package, including the exact Mac architecture', () => {
+  const info = {
+    version: '0.14.59',
+    files: [
+      { url: 'Pi-Desktop-mac-arm64.dmg', size: 111 },
+      { url: 'Pi-Desktop-mac-x64.zip', size: 222 },
+      { url: 'Pi-Desktop-linux.deb', size: 333 },
+      { url: 'Pi-Desktop-win-setup.exe', size: 444 },
+      { url: 'Pi-Desktop-mac-arm64.zip', size: 555 },
+      { url: 'Pi-Desktop-linux.AppImage', size: 666 },
+    ],
+  };
+  assert.equal(release(info, 'win32').size, 444);
+  assert.equal(release(info, 'linux').size, 666);
+  assert.equal(release(info, 'darwin', 'x64').size, 222);
+  assert.equal(release(info, 'darwin', 'arm64').size, 555);
+  assert.equal(release(info, 'darwin', 'ia32').size, undefined);
+  assert.equal(release({ version: info.version }, 'win32').size, undefined);
+  assert.equal(release({ ...info, files: [{ url: 'unknown.zip', size: 10 }] }, 'win32').size, undefined);
+  for (const size of [0, -1, NaN, Infinity, 1.5])
+    assert.equal(release({ ...info, files: [{ url: 'app.exe', size }] }, 'win32').size, undefined);
+});
+
+test('native progress forwards byte counts and discards the library lifetime average', () => {
+  const updater = new EventEmitter();
+  const driver = nativeUpdateDriver(updater as Parameters<typeof nativeUpdateDriver>[0]);
+  const events: UpdateDriverEvent[] = [];
+  const unsubscribe = driver.subscribe((event) => events.push(event));
+  updater.emit('download-progress', { percent: 25, transferred: 256, total: 1024, bytesPerSecond: 9999999 });
+  assert.deepEqual(events, [{ type: 'progress', percent: 25, transferred: 256, total: 1024 }]);
+  unsubscribe();
+  updater.emit('download-progress', { percent: 50, transferred: 512, total: 1024 });
+  assert.equal(events.length, 1);
+});
+
+test('progress measures the trailing five seconds, warms up and limits displayed estimates to once a second', () => {
+  let now = 0;
+  const mb = 1024 ** 2,
+    sample = new UpdateProgress(100 * mb, () => now);
+  assert.equal(sample.read().phase, 'connecting');
+  for (let second = 1; second <= 8; second++) {
+    now = second * 1000;
+    sample.progress(second * mb, 100 * mb);
+    const state = sample.read();
+    if (second < 3) assert.equal(state.bytesPerSecond, undefined);
+    else assert.equal(state.bytesPerSecond, mb);
+  }
+  now = 9000;
+  sample.progress(10 * mb, 100 * mb);
+  assert.equal(sample.read().bytesPerSecond, 1.2 * mb);
+  const estimate = sample.read().remainingMs;
+  now = 9500;
+  sample.progress(11 * mb, 100 * mb);
+  assert.equal(sample.read().remainingMs, estimate, 'sub-second byte events must not change the estimate');
+  now = 10000;
+  sample.progress(12 * mb, 100 * mb);
+  assert.equal(sample.read().bytesPerSecond, 1.4 * mb);
+  assert.equal(sample.read().remainingMs, (88 / 1.4) * 1000);
+  const small = new UpdateProgress(1024 ** 2, () => now);
+  now += 4000;
+  small.progress(255 * 1024, mb);
+  assert.equal(small.read().bytesPerSecond, undefined, 'less than 256 KB in the window remains an estimate');
+});
+
+test('differential progress resets cleanly when falling back to the full package or restarting its byte count', () => {
+  let now = 0;
+  const mb = 1024 ** 2,
+    sample = new UpdateProgress(100 * mb, () => now);
+  now = 4000;
+  sample.progress(0.4 * mb, mb);
+  assert.equal(sample.read().differential, true);
+  now = 5000;
+  sample.progress(0, 100 * mb);
+  assert.deepEqual(sample.read(), {
+    transferred: 0,
+    total: 100 * mb,
+    differential: false,
+    phase: 'transferring',
+    stalled: false,
+    bytesPerSecond: undefined,
+    remainingMs: undefined,
+  });
+  now = 8000;
+  sample.progress(3 * mb, 100 * mb);
+  assert.equal(sample.read().bytesPerSecond, mb);
+  now = 9000;
+  sample.progress(0, 100 * mb);
+  assert.equal(sample.read().bytesPerSecond, undefined);
+  assert.equal(new UpdateProgress(100 * mb, () => now).progress(NaN, 100 * mb), false);
+  sample.progress(120 * mb, 100 * mb);
+  assert.equal(sample.read().phase, 'verifying');
+  assert.equal(sample.read().transferred, 100 * mb);
+  assert.equal(sample.read().remainingMs, undefined);
+  const threshold = new UpdateProgress(100 * mb, () => now);
+  threshold.progress(0, 99 * mb);
+  assert.equal(threshold.read().differential, false, 'a one-percent difference is not differential');
+});
+
+test('timer ticks between slightly delayed byte events do not understate a steady transfer rate', () => {
+  let now = 0;
+  const mb = 1024 ** 2,
+    sample = new UpdateProgress(100 * mb, () => now);
+  const events: { time: number; bytes?: number }[] = [];
+  for (let tick = 1; tick <= 40; tick++) {
+    events.push({ time: tick * 1000 });
+    events.push({ time: tick * 1090, bytes: tick * 1.09 * mb });
+  }
+  events.sort((left, right) => left.time - right.time);
+  for (const event of events) {
+    now = event.time;
+    if (event.bytes !== undefined) sample.progress(event.bytes, 100 * mb);
+    const progress = sample.read();
+    if (now < 10000) continue;
+    assert.ok(
+      progress.bytesPerSecond! >= 0.95 * mb && progress.bytesPerSecond! <= 1.05 * mb,
+      `steady byte events measured as ${progress.bytesPerSecond! / mb} MB/s at ${now} ms`,
+    );
+    const actualRemaining = 100000 - now;
+    assert.ok(Math.abs(progress.remainingMs! - actualRemaining) / actualRemaining <= 0.2);
+  }
+});
+
+test('the main-process timer detects a silent network, recovers within two seconds and stops after completion or disposal', async (t) => {
+  t.mock.timers.enable({ apis: ['setInterval'] });
+  let now = 0,
+    publications = 0;
+  const mb = 1024 ** 2,
+    driver = new Driver();
+  driver.check = async () => {
+    driver.listener?.({ type: 'available', release: { version: '0.10.0', notes: '', size: 30 * mb } });
+  };
+  driver.download = async () => {};
+  const service = new UpdateService({ ...options(driver), now: () => now });
+  t.after(() => service.dispose());
+  service.on('update', () => publications++);
+  await service.check();
+  await service.download();
+  assert.equal(service.state.download?.phase, 'connecting');
+  for (let second = 1; second <= 5; second++) {
+    now += 1000;
+    driver.listener?.({ type: 'progress', transferred: second * mb, total: 30 * mb, percent: -500 });
+    t.mock.timers.tick(1000);
+  }
+  assert.equal(service.state.progress, (5 / 30) * 100);
+  assert.equal(service.state.download?.bytesPerSecond, mb);
+  now += 9999;
+  t.mock.timers.tick(9999);
+  assert.equal(service.state.download?.stalled, false);
+  now += 1;
+  t.mock.timers.tick(1);
+  assert.equal(service.state.download?.stalled, true);
+  assert.equal(service.state.download?.remainingMs, undefined);
+  now += 2000;
+  t.mock.timers.tick(2000);
+  driver.listener?.({ type: 'progress', transferred: 6 * mb, total: 30 * mb, percent: 20 });
+  assert.equal(service.state.download?.stalled, false);
+  now += 1000;
+  driver.listener?.({ type: 'progress', transferred: 7 * mb, total: 30 * mb, percent: 23 });
+  t.mock.timers.tick(1000);
+  assert.equal(service.state.download?.bytesPerSecond, mb);
+  driver.listener?.({ type: 'progress', transferred: 30 * mb, total: 30 * mb, percent: 100 });
+  assert.equal(service.state.download?.phase, 'verifying');
+  now += 12000;
+  t.mock.timers.tick(12000);
+  assert.equal(service.state.download?.stalled, false);
+  driver.listener?.({ type: 'downloaded', release: { version: '0.10.0', notes: '', size: 30 * mb } });
+  assert.equal(service.state.download, undefined);
+  const completed = publications;
+  now += 12000;
+  t.mock.timers.tick(12000);
+  assert.equal(publications, completed);
+  driver.listener?.({ type: 'error', error: new Error('retry fixture') });
+  await service.download();
+  assert.equal(structuredClone(service.state).download?.phase, 'connecting');
+  assert.equal(structuredClone(service.state).download?.bytesPerSecond, undefined);
+  service.dispose();
+  const disposed = publications;
+  now += 12000;
+  t.mock.timers.tick(12000);
+  assert.equal(publications, disposed);
+});
+
+test('a timer just before the second recovery report cannot postpone the first speed estimate', () => {
+  let now = 0;
+  const mb = 1024 ** 2,
+    sample = new UpdateProgress(100 * mb, () => now);
+  now = 4000;
+  sample.progress(4 * mb, 100 * mb);
+  assert.equal(sample.read().bytesPerSecond, mb);
+  now = 15000;
+  assert.equal(sample.read().stalled, true);
+  now = 15005;
+  sample.progress(5 * mb, 100 * mb);
+  assert.equal(sample.read().bytesPerSecond, undefined);
+  now = 16006;
+  assert.equal(sample.read().bytesPerSecond, undefined);
+  now = 16080;
+  sample.progress(6.075 * mb, 100 * mb);
+  assert.ok(sample.read().bytesPerSecond, 'speed must return on the second report within two seconds');
+});
+
+test('auto-download starts sampling before progress and errors clear all download estimates before retry', async (t) => {
+  t.mock.timers.enable({ apis: ['setInterval'] });
+  let now = 0,
+    publications = 0;
+  const driver = new Driver();
+  driver.download = async () => {};
+  const service = new UpdateService({ ...options(driver), autoDownload: true, now: () => now });
+  service.on('update', () => publications++);
+  t.after(() => service.dispose());
+  await service.check();
+  assert.equal(service.state.download?.phase, 'connecting');
+  now = 4000;
+  driver.listener?.({ type: 'progress', total: 1024 ** 2, transferred: 512 * 1024, percent: 50 });
+  assert.ok(service.state.download?.bytesPerSecond);
+  driver.listener?.({ type: 'error', error: new Error('network error') });
+  assert.equal(service.state.state, 'error');
+  assert.equal(service.state.download, undefined);
+  const failed = publications;
+  now += 12000;
+  t.mock.timers.tick(12000);
+  assert.equal(publications, failed, 'failed downloads stop the progress timer');
+  driver.listener?.({ type: 'progress', total: 1024 ** 2, transferred: 900 * 1024, percent: 90 });
+  assert.equal(service.state.state, 'error', 'late byte events cannot resurrect a failed download');
+  await service.download();
+  assert.equal(service.state.progress, 0);
+  assert.equal(structuredClone(service.state).download?.bytesPerSecond, undefined);
+  driver.listener?.({ type: 'not-available' });
+  assert.equal(service.state.download, undefined);
+  assert.equal(service.state.size, undefined);
 });
 test('disabled environments make no network requests even when called manually', async (t) => {
   let calls = 0;
@@ -177,7 +411,7 @@ test('startup waits ten seconds, periodic checks wait six hours, and manual chec
   assert.equal(calls, 3);
 });
 test('checking is quiet on failure, deduplicates requests and can be retried', async (t) => {
-  let resolve!: (value: { version: string; notes: string }) => void;
+  let resolve!: (value: { version: string; notes: string; size: number }) => void;
   let calls = 0;
   const service = new UpdateService({
     ...options(),
@@ -193,10 +427,11 @@ test('checking is quiet on failure, deduplicates requests and can be retried', a
     second = service.check();
   assert.equal(first, second);
   assert.equal(calls, 1);
-  resolve({ version: '0.10.0', notes: '新功能' });
+  resolve({ version: '0.10.0', notes: '新功能', size: 122183449 });
   await first;
   assert.equal(service.state.state, 'available');
   assert.equal(service.state.notes, '新功能');
+  assert.equal(service.state.size, 122183449, 'notification-only updates retain the signed package size');
   const offline = new UpdateService({
     ...options(),
     fetchRelease: async () => {

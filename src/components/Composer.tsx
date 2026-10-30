@@ -194,14 +194,13 @@ export function Composer(props: ComposerProps) {
   const goalBudget =
     goalPreview?.tokenBudget ?? (draftGoal?.kind === 'start' ? draftGoal.tokenBudget : undefined);
   const localGoalCommand = /^\s*\/goal(?:\s+edit)?\s*$/.test(draft) && !editingGoal;
+  const goalEmpty = goalMode && !localGoalCommand && !goalObjective.trim();
   const goalError =
     goalMode && !localGoalCommand
       ? goalPreview?.error ||
-        (!goalObjective.trim()
-          ? '请填写目标'
-          : goalObjective.length > MAX_GOAL_OBJECTIVE_LENGTH
-            ? '目标超过 4000 字，请把要求写进项目文件并引用它'
-            : '')
+        (goalObjective.length > MAX_GOAL_OBJECTIVE_LENGTH
+          ? '目标超过 4000 字，请把要求写进项目文件并引用它'
+          : '')
       : '';
   const goalView = useGoalCard(
     goal,
@@ -297,6 +296,7 @@ export function Composer(props: ComposerProps) {
   };
   const sendComposer = () => {
     if (
+      goalEmpty ||
       Boolean(goalError) ||
       props.attachmentsPending ||
       selectionChanging ||
@@ -533,11 +533,7 @@ export function Composer(props: ComposerProps) {
           ref={input}
           aria-label="任务输入"
           placeholder={
-            goalMode
-              ? '描述要完成的结果和验证方式，例如：修复登录校验，相关测试全部通过'
-              : project
-                ? '描述你想完成的任务，@ 引用文件…'
-                : '给 Pi 发消息…'
+            goalMode ? '描述你想达成的目标…' : project ? '描述你想完成的任务，@ 引用文件…' : '给 Pi 发消息…'
           }
           value={draft}
           disabled={!selected || !storage.writable}
@@ -830,6 +826,7 @@ export function Composer(props: ComposerProps) {
               disabled={
                 (!draft.trim() && !images.length && !snippets.length && !draftQuotes.length) ||
                 (!editingGoal && attachmentBytes > 1024 * 1024) ||
+                goalEmpty ||
                 Boolean(goalError) ||
                 Boolean(parameterError) ||
                 !selected ||

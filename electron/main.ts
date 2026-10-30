@@ -65,7 +65,7 @@ import { Configuration } from './configuration';
 import { toggleResourceSetting } from './resources-config';
 import { canonicalWritePath, isWithinDirectory } from './approval-paths';
 import { UpdateService, updateInstallation } from './updater';
-import { createNativeUpdateDriver } from './update-driver';
+import { createNativeUpdateDriver, release as updateRelease } from './update-driver';
 import { updateFeed, updateProxy } from './update-network';
 import { readSignedUpdate } from './signed-update-provider';
 import { UpdateAttemptFile } from './update-attempt';
@@ -1955,10 +1955,7 @@ else {
             process.platform,
             session.fetch.bind(session),
           );
-          return {
-            version: info.version,
-            notes: typeof info.releaseNotes === 'string' ? info.releaseNotes : '',
-          };
+          return updateRelease(info);
         },
         busy: () => service.hasPendingWork || updatingConfiguration || activeOperations > 0,
         beforeInstall: async () => {

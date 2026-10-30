@@ -1,6 +1,9 @@
 import assert from 'node:assert/strict';
 import fs from 'node:fs/promises';
 import { createReadStream } from 'node:fs';
+import { pipeline } from 'node:stream/promises';
+import { setTimeout as waitForDownload } from 'node:timers/promises';
+import type { UpdateState } from '../shared/app-update';
 import os from 'node:os';
 import path from 'node:path';
 import http from 'node:http';
@@ -40,6 +43,42 @@ const assets = new Map<string, string>();
 const fixtureKeys = generateKeyPairSync('ed25519');
 const fixturePublicKey = fixtureKeys.publicKey.export({ type: 'spki', format: 'pem' }).toString();
 let badChecksum = false;
+const progressAudit = process.env.PI_UPDATE_PROGRESS_AUDIT === '1' && process.platform !== 'darwin';
+let throttleDownload = false;
+interface TransferAudit {
+  total: number;
+  startedAt: number;
+  pausedAt?: number;
+  resumedAt?: number;
+  finishedAt?: number;
+}
+let transferAudit: TransferAudit | undefined;
+const readTransferAudit = (): TransferAudit | undefined => transferAudit;
+async function sendThrottled(file: string, size: number, response: http.ServerResponse) {
+  const audit: TransferAudit = { total: size, startedAt: Date.now() };
+  transferAudit = audit;
+  let transferred = 0,
+    pausedMs = 0;
+  await pipeline(
+    createReadStream(file, { highWaterMark: 64 * 1024 }),
+    async function* (source, { signal } = {}) {
+      for await (const chunk of source) {
+        if (transferred >= 8 * 1024 ** 2 && !audit.pausedAt) {
+          audit.pausedAt = Date.now();
+          await waitForDownload(12000, undefined, { signal });
+          audit.resumedAt = Date.now();
+          pausedMs = audit.resumedAt - audit.pausedAt;
+        }
+        const scheduled = audit.startedAt + (transferred / 1024 ** 2) * 1000 + pausedMs;
+        await waitForDownload(Math.max(0, scheduled - Date.now()), undefined, { signal });
+        yield chunk;
+        transferred += chunk.length;
+      }
+      audit.finishedAt = Date.now();
+    },
+    response,
+  );
+}
 const requests: string[] = [];
 const server = http.createServer(async (req, res) => {
   try {
@@ -72,6 +111,15 @@ const server = http.createServer(async (req, res) => {
       return;
     }
     const size = (await fs.stat(file)).size;
+    const auditedPackage =
+      throttleDownload &&
+      path.basename(file).includes(nextVersion) &&
+      (file.endsWith('-setup.exe') || file.endsWith('.AppImage'));
+    // This measurement deliberately exercises the full-download fallback. Production range handling is unchanged.
+    if (auditedPackage && req.headers.range) {
+      res.writeHead(501).end('Range requests disabled for the full-download timing fixture');
+      return;
+    }
     const range = /^bytes=(\d+)-(\d*)$/.exec(req.headers.range ?? '');
     if (range) {
       const start = Number(range[1]),
@@ -89,9 +137,15 @@ const server = http.createServer(async (req, res) => {
       createReadStream(file, { start, end }).pipe(res);
     } else {
       res.writeHead(200, { 'Content-Length': size, 'Accept-Ranges': 'bytes' });
-      createReadStream(file).pipe(res);
+      if (auditedPackage) await sendThrottled(file, size, res);
+      else createReadStream(file).pipe(res);
     }
   } catch (error) {
+    if (res.destroyed) return;
+    if (res.headersSent) {
+      res.destroy();
+      return;
+    }
     res.writeHead(500);
     res.end(String(error));
   }
@@ -378,6 +432,8 @@ try {
         ? ['restart', 'startup-failure', 'on-quit']
         : ['restart', 'on-quit'];
   for (const mode of modes) {
+    throttleDownload = progressAudit && mode === 'restart';
+    transferAudit = undefined;
     const portable = mode === 'portable-to-installer';
     const unpacked = mode === 'unpacked-restart';
     const restart = mode === 'restart' || mode === 'stale-shortcut' || mode === 'startup-failure' || unpacked;
@@ -497,9 +553,13 @@ try {
     await page.getByRole('textbox', { name: '任务输入' }).waitFor();
     await page.evaluate(() => {
       (window as any).updateStates = [];
+      (window as any).timedUpdateStates = [];
       (window as any).updateWorkspaceEvents = [];
       window.desktop.onEvent((event) => {
-        if (event.type === 'update') (window as any).updateStates.push(event.update);
+        if (event.type === 'update') {
+          (window as any).updateStates.push(event.update);
+          (window as any).timedUpdateStates.push({ at: Date.now(), update: event.update });
+        }
         if (event.type === 'workspaceChanged') (window as any).updateWorkspaceEvents.push(event);
       });
     });
@@ -516,7 +576,92 @@ try {
     await page.waitForFunction(
       (portable) => (window as any).updateStates.at(-1)?.state === (portable ? 'available' : 'ready'),
       portable,
+      { timeout: throttleDownload ? 240000 : 60000 },
     );
+    if (!portable) {
+      const records: { at: number; update: UpdateState }[] = await page.evaluate(
+        () => (window as any).timedUpdateStates,
+      );
+      await fs.writeFile(
+        path.join(root, mode + '-progress.json'),
+        JSON.stringify({ audit: readTransferAudit(), records }, null, 2),
+      );
+      const downloads = records
+        .map((record) => record.update.download)
+        .filter((download) => download && download.total > 0);
+      const ready = records.at(-1)!.update;
+      assert.equal(ready.state, 'ready');
+      assert.equal(ready.download, undefined);
+      // Later installation scenarios may reuse the verified installer cache without another transfer.
+      if (mode === 'restart') {
+        assert.ok(downloads.length, 'real update progress must carry transferred and total bytes');
+        assert.ok(
+          downloads.every(
+            (download) => Number.isFinite(download!.transferred) && Number.isFinite(download!.total),
+          ),
+        );
+        assert.ok(
+          downloads.some((download) => download!.phase === 'verifying'),
+          'the real download must enter verification before ready',
+        );
+        assert.equal(
+          downloads.at(-1)!.total,
+          ready.size,
+          'full-download byte count must equal the signed package size',
+        );
+      }
+      if (throttleDownload) {
+        const audit = readTransferAudit();
+        assert.ok(audit?.finishedAt && audit.pausedAt && audit.resumedAt);
+        const stable = records.filter(
+          (record) =>
+            record.update.download?.bytesPerSecond !== undefined &&
+            record.at >= audit.startedAt + 5000 &&
+            record.at < audit.finishedAt! - 5000 &&
+            (record.at <= audit.pausedAt! || record.at >= audit.resumedAt! + 5000),
+        );
+        assert.ok(stable.length >= 4, 'rate/ETA audit must include steady real transfers');
+        for (const record of stable) {
+          const download = record.update.download!;
+          const speed = download.bytesPerSecond! / 1024 ** 2;
+          assert.ok(speed >= 0.8 && speed <= 1.2, `1 MB/s server measured as ${speed} MB/s`);
+          const actualRemaining: number = audit.finishedAt! - record.at;
+          assert.ok(
+            Math.abs(download.remainingMs! - actualRemaining) / actualRemaining <= 0.2,
+            `ETA ${download.remainingMs} vs actual remaining ${actualRemaining}`,
+          );
+        }
+        const stalled = records.find((record) => record.update.download?.stalled);
+        assert.ok(stalled && stalled.at >= audit.pausedAt! + 9000 && stalled.at <= audit.pausedAt! + 11000);
+        assert.equal(stalled.update.download!.remainingMs, undefined);
+        const resumed = records.find(
+          (record) => record.at >= audit.resumedAt! && record.update.download?.bytesPerSecond !== undefined,
+        );
+        assert.ok(
+          resumed && resumed.at <= audit.resumedAt! + 2000,
+          'rate display must recover within two seconds',
+        );
+        await fs.mkdir('test-results', { recursive: true });
+        await fs.writeFile(
+          path.join('test-results', `update-progress-real-${process.platform}.json`),
+          JSON.stringify(
+            {
+              passed: true,
+              audit,
+              steadySamples: stable.length,
+              stalledAt: stalled.at,
+              resumedAt: resumed.at,
+              records,
+            },
+            null,
+            2,
+          ),
+        );
+        console.log(
+          'PASS real package byte counts, 1 MB/s window speed, ETA, 12-second pause/recovery and verification phase',
+        );
+      }
+    }
     if (!portable) {
       await page.evaluate((id) => window.desktop.invoke('send', id, 'hold', [], 'steer'), session.id);
       await assert.rejects(

@@ -80,8 +80,9 @@
   height: 4px;
   accent-color: var(--warning);
 }
-.goal-bar button,
-.goal-details button {
+.goal-bar > button,
+.goal-bar > .goal-budget-picker > button,
+.goal-details > button {
   border: 0;
   padding: 2px 4px;
   min-height: 24px;
@@ -89,7 +90,7 @@
   font-size: 11px;
   white-space: nowrap;
 }
-.goal-bar button {
+.goal-bar > button {
   display: flex;
   align-items: center;
 }
@@ -161,7 +162,8 @@
 .goal-mode-bar > button {
   margin-left: auto;
 }
-.goal-mode-bar button {
+.goal-mode-bar > button,
+.goal-mode-bar > .goal-budget-picker > button {
   min-height: 24px;
   padding: 2px 5px;
   font-size: 12px;
@@ -180,26 +182,72 @@
   bottom: calc(100% + 6px);
   right: 0;
   z-index: 80;
-  width: min(300px, 80vw);
-  padding: 12px;
+  display: grid;
+  gap: 12px;
+  width: min(300px, calc(100vw - 32px));
+  padding: 16px;
   border: 1px solid var(--line);
-  border-radius: 8px;
+  border-radius: 12px;
   background: var(--surface);
   color: var(--text);
   box-shadow: 0 8px 32px #0003;
   white-space: normal;
-}
-.goal-budget-popover label {
-  display: grid;
-  gap: 6px;
-  margin-bottom: 8px;
-}
-.goal-budget-popover p {
-  font-size: 12px;
+  font-size: calc(13px * var(--font-scale));
+  font-weight: 400;
   line-height: 1.5;
 }
-.goal-budget-popover button {
-  display: inline-block;
+.goal-budget-heading,
+.goal-budget-used,
+.goal-budget-estimate {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+.goal-budget-heading label {
+  font-weight: 600;
+}
+.goal-budget-help {
+  display: inline-flex;
+  color: var(--muted);
+  cursor: help;
+  border-radius: 4px;
+}
+.goal-budget-fields {
+  display: grid;
+  gap: 8px;
+}
+.goal-budget-fields .input {
+  width: 100%;
+  min-height: 36px;
+}
+.goal-budget-used,
+.goal-budget-estimate {
+  color: var(--muted);
+  font-size: calc(12px * var(--font-scale));
+}
+.goal-budget-estimate {
+  padding: 10px 12px;
+  border-radius: 8px;
+  background: var(--hover);
+}
+.goal-budget-used strong,
+.goal-budget-estimate strong {
+  color: var(--text);
+  font-weight: 500;
+  font-variant-numeric: tabular-nums;
+}
+.goal-budget-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  border-top: 1px solid var(--line);
+  padding-top: 12px;
+}
+.goal-budget-actions button {
+  min-height: 32px;
+  padding: 6px 12px;
+  font-size: calc(12px * var(--font-scale));
 }
 .goal-message-badge {
   color: var(--accent);

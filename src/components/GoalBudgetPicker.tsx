@@ -1,4 +1,5 @@
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useId, useRef, useState } from 'react';
+import { Info } from 'lucide-react';
 import { useLayer } from '../hooks/useLayer';
 import {
   compactGoalTokens,
@@ -23,6 +24,7 @@ export function GoalBudgetPicker({
   resume?: boolean;
   submit: (tokenBudget?: number) => void | Promise<void>;
 }) {
+  const budgetId = useId();
   const [open, setOpen] = useState(false);
   const wrapper = useRef<HTMLSpanElement>(null),
     popup = useRef<HTMLDivElement>(null);
@@ -46,6 +48,7 @@ export function GoalBudgetPicker({
   const average = usages.length
     ? Math.round(usages.reduce((sum, value) => sum + value, 0) / usages.length)
     : undefined;
+  const estimateHelp = `${average ? `当前会话平均每次请求约 ${compactGoalTokens(average)} tokens。` : ''}用量包含输入、输出和缓存写入，不含缓存命中。实际请求次数会随任务变化。`;
   let limit: number | undefined;
   try {
     limit = parseGoalBudget(budget === 'custom' ? custom : budget);
@@ -87,12 +90,24 @@ export function GoalBudgetPicker({
       </button>
       {open && (
         <div className="goal-budget-popover" role="group" aria-label="Goal 上限选择" ref={popup}>
-          {resume && <p>已用 {compactGoalTokens(used)} tokens</p>}
-          <label>
-            用量上限
+          <div className="goal-budget-heading">
+            <label htmlFor={budgetId}>用量上限</label>
+            <span className="goal-budget-help" role="img" title={estimateHelp} aria-label={estimateHelp}>
+              <Info size={14} aria-hidden="true" />
+            </span>
+          </div>
+          {resume && (
+            <div className="goal-budget-used">
+              <span>已用</span>
+              <strong>{compactGoalTokens(used)} tokens</strong>
+            </div>
+          )}
+          <div className="goal-budget-fields">
             <select
+              id={budgetId}
               className="input"
               aria-label="Goal 用量上限"
+              aria-description={estimateHelp}
               value={budget}
               onChange={(event) => setBudget(event.target.value)}
               disabled={pending}
@@ -104,33 +119,36 @@ export function GoalBudgetPicker({
               ))}
               <option value="custom">自定义</option>
             </select>
-          </label>
-          {budget === 'custom' && (
-            <input
-              className="input"
-              aria-label="自定义用量上限"
-              value={custom}
-              placeholder="例如 800k 或 3m"
-              onChange={(event) => setCustom(event.target.value)}
-              disabled={pending}
-            />
+            {budget === 'custom' && (
+              <input
+                className="input"
+                aria-label="自定义用量上限"
+                value={custom}
+                placeholder="例如 800k 或 3m"
+                onChange={(event) => setCustom(event.target.value)}
+                disabled={pending}
+              />
+            )}
+          </div>
+          {limit !== undefined && average !== undefined && (
+            <div className="goal-budget-estimate">
+              <span>预计可执行</span>
+              <strong>约 {Math.max(0, Math.floor((limit - used) / average)).toLocaleString()} 次请求</strong>
+            </div>
           )}
-          <p className="muted">
-            {average
-              ? `按当前会话平均每次请求约 ${compactGoalTokens(average)} tokens 估算，${limit === undefined ? '不限请求次数' : `约可执行 ${Math.max(0, Math.floor((limit - used) / average))} 次请求`}；不含缓存命中。`
-              : '上限按输入、输出和缓存写入计算，不含缓存命中。'}
-          </p>
           {error && (
             <p className="inline-error" role="alert">
               {error}
             </p>
           )}
-          <button disabled={pending} onClick={() => setOpen(false)}>
-            取消
-          </button>
-          <button className="primary" disabled={pending} onClick={() => void save()}>
-            {pending ? '正在提交…' : resume ? '调整并继续' : '确定上限'}
-          </button>
+          <div className="goal-budget-actions">
+            <button disabled={pending} onClick={() => setOpen(false)}>
+              取消
+            </button>
+            <button className="primary" disabled={pending} onClick={() => void save()}>
+              {pending ? '正在提交…' : resume ? '调整并继续' : '确定上限'}
+            </button>
+          </div>
         </div>
       )}
     </span>

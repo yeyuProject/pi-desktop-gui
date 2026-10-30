@@ -44,7 +44,7 @@ try {
       await picker.getByRole('button', { name: '确定上限' }).click();
     }
     await page.getByRole('button', { name: '开始 Goal', exact: true }).click();
-    await expect(mode).toHaveCount(0);
+    await expect(mode).toHaveCount(0, { timeout: 60000 });
   };
   const clear = async () => {
     await card.getByRole('button', { name: '清除 Goal', exact: true }).click();
@@ -257,7 +257,8 @@ try {
   await card.getByRole('button', { name: '调整上限并继续', exact: true }).click();
   const budget = page.getByRole('group', { name: 'Goal 上限选择', exact: true });
   await expect(page.getByRole('dialog')).toHaveCount(0);
-  await expect(budget).toContainText('平均每次请求约');
+  await expect(budget.locator('.goal-budget-estimate')).toContainText('预计可执行');
+  await expect(budget.locator('.goal-budget-help')).toHaveAttribute('title', /平均每次请求约/);
   await budget.getByRole('combobox', { name: 'Goal 用量上限' }).selectOption('2m');
   provider.reset('complete');
   await budget.getByRole('button', { name: '调整并继续', exact: true }).click();

@@ -6,6 +6,8 @@ import * as types from '../shared/types';
 import { defaultSettings } from '../electron/store-state';
 import { readableError } from '../src/lib/format';
 import { RuntimeStore } from '../src/lib/runtime-store';
+import { UpdateStore } from '../src/lib/update-store';
+import type { UpdateState } from '../shared/app-update';
 
 const { code } = transformSync(readFileSync('src/hooks/useRuntime.ts', 'utf8'), {
   loader: 'ts',
@@ -63,6 +65,7 @@ function fixture(initialPrefs?: types.Settings) {
     '../../shared/types': types,
     '../lib/format': { readableError },
     '../lib/runtime-store': { RuntimeStore },
+    '../lib/update-store': { UpdateStore },
   };
   const module = { exports: {} };
   const useRuntime = new Function(
@@ -107,12 +110,14 @@ function fixture(initialPrefs?: types.Settings) {
       return prefs;
     },
     emit: (id: string, revision: number) => listener?.({ type: 'state', state: state(id), revision }),
-    async bootstrap(id: string, revision: number) {
+    emitUpdate: (update: UpdateState) => listener?.({ type: 'update', update }),
+    async bootstrap(id: string, revision: number, update?: UpdateState) {
       resolve({
         state: state(id),
         revision,
         runtime: types.emptyRuntime(),
         storage: { writable: true },
+        update,
       } as types.Bootstrap);
       await new Promise<void>((done) => setImmediate(done));
     },
@@ -131,6 +136,42 @@ test('production useRuntime drops old state events and a late bootstrap from the
   assert.equal(f.render().stateRevision, 4);
   assert.equal(f.prefs?.provider, 'B');
   f.dispose();
+});
+
+test('live download progress survives a late bootstrap and only notifies update subscribers', async () => {
+  const initial: UpdateState = {
+    state: 'idle',
+    currentVersion: '0.14.58',
+    installation: 'nsis',
+    mode: 'auto',
+    enabled: true,
+    installing: false,
+  };
+  const f = fixture();
+  const store = f.render().updates;
+  let notifications = 0;
+  const unsubscribe = store.subscribe(() => notifications++);
+  const progress: UpdateState = {
+    ...initial,
+    state: 'downloading',
+    version: '0.14.59',
+    progress: 50,
+    download: { transferred: 512, total: 1024, differential: false, stalled: false, phase: 'transferring' },
+  };
+  f.emitUpdate(progress);
+  await f.bootstrap('A', 1, initial);
+  assert.equal(store.get(), progress, 'bootstrap cannot rewind live byte counts');
+  assert.equal(f.render().updates, store, 'workbench renders preserve the same subscription');
+  assert.equal(notifications, 1);
+  unsubscribe();
+  f.emitUpdate({ ...initial, state: 'ready' });
+  assert.equal(notifications, 1);
+  f.dispose();
+
+  const firstLaunch = fixture();
+  await firstLaunch.bootstrap('A', 1, initial);
+  assert.equal(firstLaunch.render().updates.get(), initial);
+  firstLaunch.dispose();
 });
 
 test('a late bootstrap cannot replace an already edited settings draft', async () => {
