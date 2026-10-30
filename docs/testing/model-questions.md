@@ -37,3 +37,5 @@ Windows、Node.js 22.23.1、仓库锁定的 Pi 1.4.0。
 ## 自动回归
 
 `scripts/test-ask.ts` 加入 `npm run test:integration`，三平台 CI 都会运行；`scripts/test-ask-ui.mjs` 加入 `npm run test:chat-ui`，随现有 Linux 桌面流程运行。更新了模拟 Pi 的协议版本和工作台测试的依赖声明，保持协议不匹配时明确失败的检查。
+
+CI 的 Linux 真实更新测试还发现了已有的 ETA 偏大问题：下载计时器与字节上报错开时，估算没有扣除自上次上报后已经过去的时间。扩展 `tests/updater.test.ts` 的固定时钟检查到下载最后五秒前，旧实现稳定复现 6260 毫秒与实际 5170 毫秒的偏差；修正计算后通过，并保留原有每秒刷新、20% 精度和断流恢复要求。
