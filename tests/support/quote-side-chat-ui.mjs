@@ -162,7 +162,11 @@ export async function verifyQuoteSideChatUI({ app, page, fixture, provider, outp
   await panel.getByRole('button', { name: '引用到主输入框', exact: true }).last().click();
   await expect(input).toHaveValue('主会话保留草稿');
   await expect(page.locator('.draft-quotes')).toContainText('侧边对话');
+  // Quoting schedules focus on the main composer in the next animation frame.
+  await expect(input).toBeFocused();
   await question.fill('E2E_SIDE_HOLD 仅停止侧边回答');
+  await expect(question).toHaveValue('E2E_SIDE_HOLD 仅停止侧边回答');
+  await expect(input).toHaveValue('主会话保留草稿');
   await panel.getByRole('button', { name: '发送侧边问题', exact: true }).click();
   await expect(panel.locator('.side-message.assistant').last()).toContainText('开始流式回复');
   const stopping = Date.now();
