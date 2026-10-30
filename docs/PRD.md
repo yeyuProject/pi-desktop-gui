@@ -2,6 +2,128 @@
 
 首版功能 页面与交互设计
 
+## 更新下载进度详情（待实现）
+
+### U2 下载更新时显示大小、进度、速度与剩余时间
+
+基线为 v0.14.58。U1 的检查、下载、签名校验、安装与重启规则全部沿用，本节只改下载阶段向用户展示的信息。
+
+**背景与问题。**
+
+1. **只显示百分比。** 侧栏提示为“正在下载更新 42%”（`src/components/Updates.tsx:30`），设置页为 200px 进度条加“正在下载 42%”（`Updates.tsx:52-56`）。安装包大小、已下载量、速度、预计剩余时间都看不到。安装包超过 100 MB（v0.14.58：Windows 116.5 MiB、Linux AppImage 121.7 MiB、Mac arm64 127.7 MiB），网络慢时用户无法判断下载是在进行还是卡住了，也不知道要等多久。
+2. **数据已有但被丢弃。** electron-updater 的 `download-progress` 事件提供 `total`、`transferred`、`bytesPerSecond`、`percent`，`electron/update-driver.ts:34` 只转发了 `percent`。`UpdateDriverEvent`（`electron/updater.ts:20`）和 `UpdateState.progress`（`shared/app-update.ts:16`）也只有百分比。
+3. **下载前看不到大小。** 有新版本时，界面只显示“v0.14.58 可用”和“下载更新”按钮（`Updates.tsx:87`、`:200`）。已签名的更新清单中有每个安装包的 `size`（`electron/signed-update-provider.ts:65` 已校验其为正整数），但没有传给界面。用户在按流量计费或网络较慢时，下载前无法判断。
+4. **库提供的速度是平均速度。** `bytesPerSecond = transferred / 自下载开始的秒数`（`node_modules/builder-util-runtime/out/ProgressCallbackTransform.js:31`），网络变化时反应很慢，下载中途断流后这个值也不会归零。进度事件最多每秒一次，单靠这个事件无法发现下载停滞。
+5. **差分下载时 `total` 不是安装包大小。** Windows 安装版和 AppImage 会先尝试差分下载，只下载与已安装版本不同的块（`node_modules/electron-updater/out/NsisUpdater.js:49`）。这时进度事件的 `total` 是本次需要下载的字节数，从本地旧文件复制的部分不计入进度。比如 v0.14.57 → v0.14.58 只需下载 1.11 MiB，约为安装包的 1%（用两版发布的 `.blockmap` 计算）。如果直接把 `total` 显示为“总大小”，同一版本会出现 1.1 MB 和 116.5 MB 两种说法。
+6. **（相关现状，本节不修）差分下载目前在默认更新源上总是失败。** `SignedUpdateProvider` 没有设置 `isUseMultipleRangeRequest`，按 electron-updater 的默认值，会把多个下载区间合并成一个请求（`node_modules/electron-updater/out/AppUpdater.js:395`）。GitHub 发布文件对多区间请求返回 `501 Unsupported client range`（2026-10-30 实测；单区间请求返回 206）。所以 Windows 安装版和 AppImage 每次更新都会先请求两个 `.blockmap`，失败后静默改为完整下载（`AppUpdater.js:705`、`AppImageUpdater.js:67`）。本节的进度显示必须在两种模式下都正确；要不要修这个问题由“不做”中单列的后续需求决定。
+7. **下载后的处理阶段没有提示。** 下载到 100% 后还有 SHA-512 校验；Mac 还要解压，并对暂存的应用包做 `codesign` 校验（`electron/mac-update.ts:154` 起，`ditto` 的超时设置为 120 秒）。这段时间界面停在“正在下载 100%”，看起来像卡住了。
+
+**目标。**
+
+- 下载前能看到安装包大小。
+- 下载中能看到进度百分比、已下载/总大小、当前速度和预计剩余时间，网络停滞时明确提示。
+- 差分下载时，“实际需下载”和“安装包大小”分开说明，大小不会前后矛盾。
+- 下载完成到可以安装之间的处理阶段有状态提示。
+
+**不做。**
+
+- **修复差分下载（背景第 6 条）。** 修复需要关闭多区间请求，或兼容 GitHub 的区间响应，改的是下载协议本身，验证面是 `scripts/test-update.ts` 的真实安装包流程。之后作为独立需求处理。本节只要求不论走差分还是完整下载，显示都正确。
+- 暂停、继续、取消下载。electron-updater 没有暂停能力；取消需要处理临时文件和差分缓存，另行评估。
+- 限速、选择下载线路、断点续传。
+- 系统任务栏或 Dock 上的进度（`BrowserWindow.setProgressBar`）。
+- 便携版和 deb 的“前往下载”流程。这两种由浏览器下载，应用拿不到进度。
+- 修改 U1 的检查间隔、自动下载默认值和安装确认规则。
+
+**交互。**
+
+- **有新版本、未下载**
+  - 设置 → 关于与更新：“新版本 v0.14.58”下方显示“安装包 116.5 MB”。
+  - 更新说明弹窗：在操作按钮上方显示同样的文字。
+  - 下载按钮文字不变，大小不写进按钮，以免改变按钮的可访问名称。
+  - 读不到大小（旧版清单或测试桩）时不显示这一行，不显示“未知”。
+- **下载中，设置页和弹窗共用同一个组件**
+  - 第一行：进度条，右侧为百分比。
+  - 第二行：`38.2 MB / 116.5 MB · 4.3 MB/s · 剩余约 18 秒`。
+  - 差分下载时第二行为 `0.4 MB / 1.1 MB · 1.2 MB/s · 剩余约 1 秒`，第三行加小字 `增量更新：安装包 116.5 MB，只需下载变化部分`。
+  - 开始下载后、还没有收到第一次进度时，显示“正在连接…”，进度条为不确定状态。
+- **速度与剩余时间**
+  - 速度为最近 5 秒的滑动窗口均值，不使用库给的全程平均值。
+  - 剩余时间 = 剩余字节 ÷ 窗口速度。不到 1 分钟按 5 秒取整，显示“剩余约 N 秒”，最小为“剩余不到 5 秒”；1 小时以内显示“剩余约 N 分钟”；更长显示“剩余约 N 小时 M 分”。显示值每秒最多变化一次。
+  - 下载开始的前 3 秒或窗口内字节数不足 256 KB 时，速度和剩余时间显示为“正在估算…”，避免开头几秒出现失真的大数字。
+  - 超过 10 秒没有新进度时，速度改为“等待网络响应…”，同时隐藏剩余时间。收到新进度后恢复。这个检查由主进程定时完成，不依赖下一次进度事件，因为数据停止时不会再有进度事件。
+- **处理阶段**：进度到 100% 后、状态变为 `ready` 之前，显示“正在校验更新…”，进度条为不确定状态；Mac 显示“正在校验并准备更新…”。处理阶段没有速度和剩余时间。
+- **侧栏提示**（`UpdateBadge`）
+  - 保持一行：`正在下载更新 42% · 剩余约 18 秒`，剩余时间未知时省略后半部分。
+  - 处理阶段显示“正在校验更新…”。
+  - 侧栏较窄时允许按现有样式换行（`src/styles/updates.css:1-7`）。
+- **失败**：保留 U1 的错误文字和“重试下载”。重试后进度从头计算，不沿用上一次的速度窗口。
+- **单位**
+  - 统一用 1024 进制，标为 `KB`、`MB`、`GB`，与 Windows 资源管理器一致。小于 1 MB 用 KB 显示。
+  - 数值保留一位小数，`≥ 100` 时取整。速度单位为 `/s`。
+  - 总大小与已下载量使用同一单位，不出现 `980 KB / 1.1 MB`。
+  - 数字用等宽数字（`tabular-nums`），避免每秒跳动造成文字抖动。
+- **无障碍**
+  - `progress` 保留 `aria-label="更新下载进度"`，增加 `aria-valuetext`，例如“已下载 38.2 MB，共 116.5 MB，剩余约 18 秒”。
+  - 文字行不设置 `aria-live`，避免读屏每秒播报。只有阶段变化（开始、等待网络、校验、完成、失败）通过一个 `role="status"` 节点播报一次。
+
+**技术方案。**
+
+- **状态**（`shared/app-update.ts`）
+  - `UpdateState` 增加：
+    - `size?: number`：安装包大小，来自签名清单。
+    - `download?: { transferred: number; total: number; differential: boolean; bytesPerSecond?: number; remainingMs?: number; stalled: boolean; phase: 'connecting' | 'transferring' | 'verifying' }`。
+  - 保留 `progress`，供现有调用方和测试使用，值等于 `transferred / total * 100`。
+  - `download` 只在 `state === 'downloading'` 时有值；进入 `ready`、`error`、`idle` 时清除。
+  - 新增纯函数 `formatBytes(bytes, unitOf?)`、`formatRemaining(ms)` 和 `downloadSummary(update)`，界面三处共用，单元测试直接覆盖。
+- **驱动层**
+  - `UpdateDriverEvent`（`electron/updater.ts:20`）：`progress` 改为 `{ type: 'progress'; transferred: number; total: number; percent: number }`；`available` 和 `downloaded` 的 `release` 增加 `size?: number`。
+  - `electron/update-driver.ts:34` 转发 `transferred` 和 `total`，不转发库的 `bytesPerSecond`，速度在策略层计算。
+  - `release()`（`update-driver.ts:10`）从 `info.files` 中找出本平台实际下载的安装包，读取 `size`：
+    - NSIS 为 `.exe`。
+    - AppImage 为 `.AppImage`。
+    - Mac 为 `-mac-${process.arch}.zip`，与 `electron/mac-update-driver.ts:20` 的选择规则相同。
+    - 匹配不到时不填，不猜测。
+  - 通知模式（`fetchRelease`，`electron/main.ts:1949`）按同样规则读取大小，“前往下载”的场景也显示安装包大小。
+- **策略层**（`UpdateService`，`electron/updater.ts`）
+  - 每次 `download()` 新建一个进度采样器，保存最近 5 秒的 `(时间, transferred)` 样本。速度、剩余时间和停滞状态都在这里计算。
+  - **判断差分下载**：`total` 明显小于 `size`（差值超过 1%）时视为差分，`differential = true`。如果先走差分、失败后改为完整下载，`transferred` 会从 0 重新开始、`total` 变大；检测到这种变化时清空速度窗口，`differential` 改为 false，界面不显示负的进度或速度。
+  - **推送频率**：进度事件到达时立即推送。另有一个 1 秒定时器，只在 `downloading` 期间运行，用于判断停滞（10 秒无新字节）和刷新剩余时间。下载结束、出错或调用 `dispose()` 时停止定时器，计时器使用 `unref()`。
+  - **处理阶段**：收到 `transferred === total` 的进度后进入 `verifying`，直到 `downloaded` 事件把状态变为 `ready`。
+  - 采样器使用可注入的时钟（默认 `Date.now`），便于单元测试。
+- **界面**（`src/components/Updates.tsx`）
+  - 新增 `DownloadProgress` 组件，替换 `Updates.tsx:52-56` 现有的进度块。
+  - `UpdateBadge` 改用 `downloadSummary`。
+  - 每秒的进度推送只能让更新相关组件重新渲染，不能触发对话区和输入框重渲染。验收用 `scripts/test-performance-ui.mjs` 已有的提交计数探针检查。如果现在 `update` 状态挂在 `useWorkbench` 返回值上会带动 `App` 重渲染，就把 `update` 改为与 `RuntimeStore` 相同的外部订阅（`useSyncExternalStore`），只在 `UpdateBadge`、`AboutUpdates` 和 `UpdateDialog` 中订阅。
+- **样式**（`src/styles/updates.css`）
+  - 进度条宽度改为 `min(100%, 360px)`。
+  - 详情文字用 `--muted`，数字 `font-variant-numeric: tabular-nums`。
+  - 不确定状态使用原生 `progress` 不设 `value` 的效果，`prefers-reduced-motion` 下保持静态。
+  - 只使用主题变量，在经典、Codex、Claude 各模式下自动适配。
+
+**验收标准。**
+
+1. 有新版本未下载时，设置页和更新说明弹窗显示安装包大小，与签名清单中本平台安装包的 `size` 换算一致，例如 122,183,449 字节显示为“116.5 MB”。清单没有对应文件时不显示这一行。
+2. 完整下载时，界面依次显示：“正在连接…”；前 3 秒“正在估算…”；之后显示“已下载 / 总大小 · 速度 · 剩余约 N”，其中总大小等于安装包大小；最后显示“正在校验更新…”，然后变为可重启。
+3. 差分下载时，“已下载 / 总大小”使用本次需下载的字节数，同时显示“增量更新：安装包 X，只需下载变化部分”。差分失败改为完整下载后，进度允许回到 0 重新开始，但不出现负速度、超过 100% 的进度或负的剩余时间。
+4. 用回环服务限速为 1 MB/s 时，显示速度在 0.8–1.2 MB/s 之间，剩余时间与实际剩余时间相差不超过 20%（下载开始 5 秒以后）。
+5. 服务端暂停发送数据 12 秒：10 秒后显示“等待网络响应…”，剩余时间隐藏；恢复发送后 2 秒内恢复速度显示。
+6. 下载中、出错、完成三种状态切换后，不残留旧的速度或剩余时间；重试下载从头计算。
+7. 读屏只在阶段变化时播报，每秒刷新时不播报。进度条的 `aria-valuetext` 包含已下载量、总大小和剩余时间。
+8. 下载过程中，对话区、输入框和侧栏会话列表的提交计数不因进度推送而增加。
+9. 侧栏提示在 180px 宽的侧栏中完整显示，不溢出。
+
+**测试。**
+
+- `tests/updater.test.ts`
+  - 用假时钟驱动采样器，覆盖：窗口速度、开始阶段的估算期、剩余时间取整、10 秒停滞与恢复、差分判定、差分改完整下载时的重置、`verifying` 阶段，以及 `ready`、`error` 后清除 `download`。
+  - 断言 `dispose()` 后定时器已停止。
+- 新建 `tests/app-update.test.ts`：`formatBytes` 的边界（1023 B、1 KB、0.99 MB、100 MB、1 GB）和同单位输出；`formatRemaining` 各档位；`downloadSummary` 的文字。
+- `tests/updater.test.ts` 另外覆盖驱动层：`release()` 在 Windows、AppImage、Mac x64、Mac arm64 下选中正确文件并读取 `size`；匹配不到时不填。
+- `scripts/test-update-ui.mjs`：注入 `available`（带 `size`）、`downloading` 各阶段、`stalled`、`verifying`、差分、`error` 状态，断言设置页、弹窗、侧栏的文字、`aria-valuetext` 和 180px 侧栏下不溢出；截图 `test-results/update-progress-{available,downloading,differential,stalled,verifying}.png`。
+- `scripts/test-update.ts`：给回环服务增加可选限速和暂停，在 Windows 和 Linux 的真实安装包流程中断言：真实进度事件带 `transferred`/`total`、`total` 等于安装包大小、出现过 `verifying`、最终 `ready`。原有升级、校验失败和退出不安装的断言保持通过。
+- `scripts/test-performance-ui.mjs`：增加一段每秒推送更新进度的用例，断言 `auditAppRenders`、`auditComposerRenders` 和对话区的计数不变。
+- 同步双语 README 的“应用内更新”说明，以及 `docs/architecture.md` 第 96–99 行的更新模块描述。
+
 ## v0.14.58：任务计划进度（已实现）
 
 ### P1 普通任务的计划步骤与运行中进度
