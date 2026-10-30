@@ -175,3 +175,22 @@ test('plan scalar patches update, clear, resync and cannot leak across sessions'
   assert.equal(view().plan, undefined);
   assert.equal(view().planUpdateRequest, undefined);
 });
+
+test('live usage patches update and clear without leaking into another session', () => {
+  const { s, view } = service();
+  s.runtime.sessionId = 'streaming';
+  s.runtime.liveUsage = { outputTokens: 4, inputTokens: 100 };
+  s.publish(true);
+  assert.deepEqual(view().liveUsage, { outputTokens: 4, inputTokens: 100 });
+  s.runtime.liveUsage = { outputTokens: 9, inputTokens: 100 };
+  s.publish(true);
+  assert.equal(view().liveUsage?.outputTokens, 9);
+  delete s.runtime.liveUsage;
+  s.publish(true);
+  assert.equal(view().liveUsage, undefined);
+  s.runtime.liveUsage = { outputTokens: 12 };
+  s.publish(true);
+  s.runtime = { ...emptyRuntime(), sessionId: 'other' };
+  s.publish(true);
+  assert.equal(view().liveUsage, undefined);
+});

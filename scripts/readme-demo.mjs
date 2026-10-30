@@ -154,15 +154,17 @@ const mock = () => {
   };
   let changed = [];
   let checkpoint;
-  const pushRuntime = (tokens) => {
-    if (tokens)
+  const pushRuntime = (tokens, contextTokens, outputEstimate) => {
+    if (tokens !== undefined)
       runtime.stats = {
         ...runtime.stats,
         tokens,
-        contextTokens: tokens,
+        contextTokens,
         cost: tokens * 3.3e-6,
-        contextPercent: Math.round(tokens / 2000),
+        contextPercent: (contextTokens / 200000) * 100,
       };
+    if (outputEstimate === undefined) delete runtime.liveUsage;
+    else runtime.liveUsage = { outputTokens: outputEstimate };
     emit({ type: 'runtime', runtime });
   };
   const touch = (file) => {
@@ -214,7 +216,7 @@ const mock = () => {
       available: true,
       includesCommitted: false,
     };
-    pushRuntime(2100);
+    pushRuntime(0, 2100, 0);
     await sleep(900);
     runtime.messages.push({
       role: 'assistant',
@@ -227,17 +229,17 @@ const mock = () => {
         },
       ],
     });
-    pushRuntime(5200);
+    pushRuntime(5200, 5200);
     await sleep(900);
     startTool('t1', 'edit', { path: 'src/auth/validate.ts' });
-    pushRuntime(7400);
+    pushRuntime(10600, 5400);
     await sleep(700);
     finishTool('t1', 'Successfully replaced text in src/auth/validate.ts.', patches['src/auth/validate.ts']);
     touch('src/auth/validate.ts');
-    pushRuntime(8100);
+    pushRuntime(10600, 5600);
     await sleep(700);
     startTool('t2', 'edit', { path: 'tests/validate.test.ts' });
-    pushRuntime(10300);
+    pushRuntime(16600, 6000);
     await sleep(700);
     finishTool(
       't2',
@@ -245,23 +247,23 @@ const mock = () => {
       patches['tests/validate.test.ts'],
     );
     touch('tests/validate.test.ts');
-    pushRuntime(11200);
+    pushRuntime(16600, 6200);
     await sleep(600);
     startTool('t3', 'bash', { command: 'npm test -- validate' });
-    pushRuntime(12900);
+    pushRuntime(23300, 6700);
     await sleep(1600);
     finishTool('t3', testOutput);
-    pushRuntime(15600);
+    pushRuntime(23300, 7000);
     await sleep(400);
     runtime.messages.push({ role: 'assistant', content: '', timestamp: Date.now() });
     for (let i = 4; i < reply.length + 4; i += 4) {
       runtime.messages.at(-1).content = reply.slice(0, i);
-      pushRuntime(15600 + i * 20);
+      pushRuntime(undefined, undefined, Math.ceil(i / 3));
       await sleep(45);
     }
     runtime.status = 'completed';
     session.lastStatus = 'completed';
-    pushRuntime(18420);
+    pushRuntime(30500, 7200);
     emit({ type: 'state', state });
   }
 
@@ -446,9 +448,15 @@ try {
   await clickOn(composer);
   await page.keyboard.type('修复空格邮箱也能通过登录校验的问题，并补上测试 ', { delay: 70 });
   await page.keyboard.type('@valid', { delay: 35 });
-  await page.locator('.file-picker [role=option]', { hasText: 'src/auth/validate.ts' }).waitFor();
+  const fileOption = page.locator('.file-picker [role=option]', { hasText: 'src/auth/validate.ts' });
+  await fileOption.waitFor();
   await pause(600);
-  await page.keyboard.press('Enter');
+  await clickOn(fileOption);
+  await page
+    .locator('.composer .attachments')
+    .getByRole('button', { name: 'src/auth/validate.ts', exact: true })
+    .waitFor();
+  if ((await composer.inputValue()).includes('@valid')) throw new Error('文件引用未从草稿中展开');
   await pause(900);
   await clickOn(page.getByRole('button', { name: '发送任务' }));
   await page.getByText('本轮已结束').waitFor({ timeout: 30000 });

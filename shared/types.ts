@@ -286,6 +286,8 @@ export interface Runtime {
     contextTokens?: number;
     contextWindow?: number;
   };
+  /** Transient estimate for the in-flight assistant response; never persisted as session usage. */
+  liveUsage?: { outputTokens: number; inputTokens?: number };
   notifications?: RuntimeNotification[];
   historyNotice?: string;
   retry?: {

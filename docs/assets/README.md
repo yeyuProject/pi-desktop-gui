@@ -4,7 +4,7 @@ README 使用两类素材：`screenshots/` 中的真实界面截图，以及 202
 
 | 文件 | 用途 | 构图 |
 | --- | --- | --- |
-| [screenshots/demo.gif](screenshots/demo.gif) | README 首屏演示：@ 引用文件 → 发送 → 工具调用与 Diff → 撤销本轮 | 1280 × 800，15 fps，约 27 秒 |
+| [screenshots/demo.gif](screenshots/demo.gif) | README 首屏演示：@ 引用文件 → 发送 → 工具调用与 Diff → 撤销本轮 | 1280 × 800，15 fps，约 29 秒 |
 | [screenshots/workspace-light.png](screenshots/workspace-light.png) | 对话、工具调用与内联 Diff（静态） | 1440 × 900 @2x |
 | [screenshots/workspace-dark.png](screenshots/workspace-dark.png) | 深色主题 | 1440 × 900 @2x |
 | [screenshots/workspace-codex-light.png](screenshots/workspace-codex-light.png) | Codex 白天风格 | 1440 × 900 @2x |
@@ -21,7 +21,7 @@ README 使用两类素材：`screenshots/` 中的真实界面截图，以及 202
 
 - 首次生成素材前运行 `npx playwright install chromium --only-shell` 安装无头浏览器；Linux 可加 `--with-deps` 安装系统依赖。两个脚本只在 `127.0.0.1` 提供 `dist` 内的构建文件。
 - 截图由 `npm run screenshots`（`scripts/readme-screenshots.mjs`）生成：用模拟的 `window.desktop` 渲染构建后的真实界面，数据为虚构的示例项目，不含真实会话、路径或凭据。界面改动后先 `npm run build` 再重新生成。
-- 演示 GIF 由 `npm run demo-gif`（`scripts/readme-demo.mjs`）录制：同样使用模拟数据，脚本按时间线推送运行事件，并用 Playwright 驱动真实的输入、点击和滚动；无头浏览器不绘制鼠标，脚本在页面内画了一个跟随指针。需要本机安装 `ffmpeg`。
+- 演示 GIF 由 `npm run demo-gif`（`scripts/readme-demo.mjs`）录制：同样使用模拟数据，脚本按时间线推送运行事件，并用 Playwright 驱动真实的输入、点击和滚动；流式阶段的 Token 显示为估算，结束后显示模拟的上报值，不代表真实账单。无头浏览器不绘制鼠标，脚本在页面内画了一个跟随指针。需要本机安装 `ffmpeg`。
 - 海报、架构图与能力概览为 AI 生成的概念插图，海报中的界面是示意。README 目前只使用其中的架构图。
 - E2E 验收截图由测试脚本写入 Git 忽略的 `test-results/`。README 展示素材单独维护，避免混入测试会话、临时路径和验收模型名称。
 - 架构图省略了 Electron 内部 IPC 和桌面适配扩展，重点表示 GUI 通过本机 stdio 上的 Pi RPC（JSONL）驱动 CLI。它不表示标准 JSON-RPC 2.0。

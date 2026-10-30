@@ -49,6 +49,7 @@ import {
 import { validateImages } from './images';
 import { piShellEnvironment, samePath } from './platform';
 import { sessionStats } from './pi/protocol';
+import { LiveUsage } from './live-usage';
 import { normalizePiToolPath } from './pi/tool-path';
 import { DESKTOP_BRIDGE_COMMAND, DESKTOP_WORKSPACE_PREFIX } from '../shared/pi-bridge';
 import { classifyModelError, redact, redactMessageError, type ModelErrorKind } from '../shared/errors';
@@ -132,6 +133,10 @@ export class AgentService extends EventEmitter {
     diagnostic: (message) => this.diagnostic(message),
   });
   private rpc?: PiRpc;
+  private liveUsage?: LiveUsage;
+  private statsReadSequence = 0;
+  private statsAppliedSequence = 0;
+  private liveStatsRefresh?: { rpc: PiRpc; runtime: Runtime; dirty: boolean };
   private sideRequest?: { id: string; done: Promise<SideChatResult> };
   private modelReader?: PiRpc;
   private modelCatalogRevision = 0;
@@ -256,10 +261,13 @@ export class AgentService extends EventEmitter {
     return session;
   }
   private status(status: RunStatus) {
-    if (!busy(status))
+    if (!busy(status)) {
       this.finishRetry(
         status === 'completed' ? 'recovered' : status === 'stopped' ? 'cancelled' : 'interrupted',
       );
+      this.liveUsage = undefined;
+      delete this.runtime.liveUsage;
+    }
     this.runtime.status = status;
     if (this.runtime.sessionId) {
       const s = this.store.session(this.runtime.sessionId);
@@ -303,7 +311,52 @@ export class AgentService extends EventEmitter {
     const session = this.store.session(this.runtime.sessionId);
     if (session.stats?.tokens === stats.tokens && session.stats?.cost === stats.cost) return;
     session.stats = { tokens: stats.tokens, cost: stats.cost };
-    this.save();
+    this.save(!busy(this.runtime.status));
+  }
+  private async readStats(rpc: PiRpc, runtime: Runtime) {
+    const sequence = ++this.statsReadSequence;
+    const stats = sessionStats(await rpc.request('get_session_stats'));
+    if (
+      this.rpc !== rpc ||
+      this.runtime !== runtime ||
+      this.switchEvents ||
+      sequence < this.statsAppliedSequence
+    )
+      return;
+    this.statsAppliedSequence = sequence;
+    this.updateStats(stats);
+  }
+  /** Refresh at persisted message boundaries, coalescing bursts rather than querying on each delta. */
+  private refreshLiveStats() {
+    const rpc = this.rpc;
+    const runtime = this.runtime;
+    if (!rpc || rpc.closed || this.connecting || this.switchEvents) return;
+    const existing = this.liveStatsRefresh;
+    if (existing?.rpc === rpc && existing.runtime === runtime) {
+      existing.dirty = true;
+      return;
+    }
+    const refresh = { rpc, runtime, dirty: true };
+    this.liveStatsRefresh = refresh;
+    void (async () => {
+      try {
+        do {
+          refresh.dirty = false;
+          try {
+            await this.readStats(rpc, runtime);
+            if (this.rpc === rpc && this.runtime === runtime && !this.switchEvents) this.publish();
+          } catch {}
+        } while (
+          refresh.dirty &&
+          this.rpc === rpc &&
+          this.runtime === runtime &&
+          !rpc.closed &&
+          !this.switchEvents
+        );
+      } finally {
+        if (this.liveStatsRefresh === refresh) this.liveStatsRefresh = undefined;
+      }
+    })();
   }
   private modelError(error: string, settled: boolean) {
     const kind = classifyModelError(error).kind;
@@ -431,6 +484,10 @@ export class AgentService extends EventEmitter {
         break;
       case 'message_start':
         r.messages.push(redactMessageError(record.message));
+        if (record.message?.role === 'assistant') {
+          this.liveUsage = new LiveUsage();
+          r.liveUsage = this.liveUsage.update(undefined, record.message.usage);
+        }
         break;
       case 'message_update': {
         let m = r.messages.at(-1);
@@ -443,6 +500,8 @@ export class AgentService extends EventEmitter {
         const e = record.assistantMessageEvent,
           i = e?.contentIndex ?? 0;
         if (!e) break;
+        this.liveUsage ??= new LiveUsage();
+        r.liveUsage = this.liveUsage.update(e, record.usage ?? record.message?.usage ?? e.partial?.usage);
         if (e.type === 'text_start') m.content[i] = { type: 'text', text: '' };
         if (e.type === 'text_delta') {
           m.content[i] ??= { type: 'text', text: '' };
@@ -469,6 +528,11 @@ export class AgentService extends EventEmitter {
         if (last && last.role === record.message?.role)
           r.messages[r.messages.length - 1] = redactMessageError(record.message);
         else r.messages.push(redactMessageError(record.message));
+        if (record.message?.role === 'assistant') {
+          this.liveUsage = undefined;
+          delete r.liveUsage;
+        }
+        if (['user', 'assistant', 'toolResult'].includes(record.message?.role)) this.refreshLiveStats();
         break;
       }
       case 'tool_execution_start':
@@ -553,6 +617,7 @@ export class AgentService extends EventEmitter {
         if (record.errorMessage) this.notify(`上下文压缩失败：${record.errorMessage}`, 'warning');
         if (!this.stopRequested)
           this.status(record.reason === 'manual' && !record.willRetry ? 'idle' : 'running');
+        this.refreshLiveStats();
         break;
       case 'auto_retry_start':
         this.updateRetryNotice(
@@ -739,9 +804,7 @@ export class AgentService extends EventEmitter {
         }
       }
       try {
-        const stats = await rpc.request('get_session_stats');
-        if (this.rpc === rpc && this.runtime === runtime && !this.switchEvents)
-          this.updateStats(sessionStats(stats));
+        await this.readStats(rpc, runtime);
       } catch {}
     }
     this.publish();
@@ -1090,6 +1153,7 @@ export class AgentService extends EventEmitter {
     }
   }
   private resetSession(sessionId: string, cwd: string) {
+    this.liveUsage = undefined;
     this.freshSessionFile = undefined;
     this.checkpointRecorder.reset();
     this.activeWriteTargets.clear();
@@ -1275,7 +1339,7 @@ export class AgentService extends EventEmitter {
       this.runtime.thinking = thinking;
     }
     try {
-      this.updateStats(sessionStats(await rpc.request('get_session_stats')));
+      await this.readStats(rpc, this.runtime);
     } catch {}
     assertActive();
     this.runtime.status = 'idle';

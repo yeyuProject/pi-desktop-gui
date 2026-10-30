@@ -231,6 +231,8 @@ export async function verifyTurnOutlineUI({ app, page, output }) {
   await expect(row(6)).toHaveAttribute('aria-current', 'step');
   await input.fill('');
 
+  // Escape suppresses hover until the pointer leaves the outline, even if keyboard focus moves.
+  await outside();
   await row(6).locator('.turn-tick').hover();
   await expect(outline).toHaveClass(/expanded/);
   const modified = outline.getByRole('button', { name: '修改 2', exact: true });

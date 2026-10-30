@@ -20,6 +20,19 @@ export function contextUsageLabel(stats: Stats, compact = false) {
   return compact ? `${Math.round(percent)}% (${capacity})` : `${capacity} (${percent.toFixed(1)}%)`;
 }
 
+/** Project the active request from Pi's last context estimate and received output. */
+export function liveContextUsage(stats: Stats, live: NonNullable<Runtime['liveUsage']>): Stats | undefined {
+  const input = live.inputTokens ?? stats.contextTokens;
+  if (input === undefined) return undefined;
+  const contextTokens = input + live.outputTokens;
+  return {
+    ...stats,
+    contextTokens,
+    contextPercent: stats.contextWindow ? (contextTokens / stats.contextWindow) * 100 : undefined,
+    tokens: stats.tokens === undefined ? undefined : stats.tokens + contextTokens,
+  };
+}
+
 /** Pi normalizes uncached input, cache reads and cache writes as separate token categories. */
 export function cacheReadPercent(stats: Stats) {
   const { inputTokens, cacheReadTokens, cacheWriteTokens } = stats;
