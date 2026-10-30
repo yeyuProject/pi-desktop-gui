@@ -245,6 +245,9 @@ try {
   await progressDialog.getByRole('button', { name: '稍后', exact: true }).click();
   await update({ installation: 'nsis', state: 'downloading', progress: 42, error: undefined, download });
   await page.evaluate(() => window.desktop.invoke('saveSettings', { sidebarWidth: 180 }));
+  await expect
+    .poll(() => page.locator('.sidebar').evaluate((node) => node.getBoundingClientRect().width))
+    .toBe(180);
   for (const [uiStyle, theme] of [
     ['classic', 'light'],
     ['classic', 'dark'],
@@ -257,7 +260,14 @@ try {
       uiStyle,
       theme,
     });
-    await expect.poll(() => page.evaluate(() => document.documentElement.dataset.style)).toBe(uiStyle);
+    await expect
+      .poll(() =>
+        page.evaluate(() => ({
+          style: document.documentElement.dataset.style,
+          theme: document.documentElement.dataset.theme,
+        })),
+      )
+      .toEqual({ style: uiStyle, theme });
     await expect(page.locator('.update-badge')).toContainText('剩余约 20 秒');
     const bounds = await page.locator('.update-badge').evaluate((node) => ({
       scroll: node.scrollWidth,
