@@ -1,4 +1,4 @@
-import { _electron as electron } from 'playwright';
+import { launchApp, closeApp } from '../tests/support/desktop-app.mjs';
 import assert from 'node:assert/strict';
 import fs from 'node:fs/promises';
 import path from 'node:path';
@@ -23,15 +23,12 @@ await fs.writeFile(switchedFile, 'reference cancelled by switching sessions');
 let app, page;
 const errors = [];
 const launch = async () => {
-  app = await electron.launch({
+  ({ app, page } = await launchApp({
     executablePath: process.env.PI_DESKTOP_EXE,
-    args: process.env.PI_DESKTOP_EXE ? [] : [path.resolve('.')],
-    env: { ...process.env, PI_DESKTOP_DATA_DIR: fixture.dataDir, PI_OFFLINE: '1' },
-    timeout: 30000,
-  });
-  page = await app.firstWindow();
-  page.setDefaultTimeout(30000);
-  page.on('pageerror', (error) => errors.push(error.message));
+    dataDir: fixture.dataDir,
+    errors: errors,
+  }));
+
   await page.getByRole('textbox', { name: '任务输入' }).waitFor();
 };
 const savedSession = async (id, predicate) => {
@@ -258,7 +255,7 @@ try {
           .click()
           .catch(() => {});
     }
-    await app.close();
+    await closeApp(app);
   }
   await provider.close();
 }

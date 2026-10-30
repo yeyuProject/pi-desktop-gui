@@ -8,7 +8,7 @@ import type { Environment } from '../shared/types';
 // Exercise the production coordinator without launching Electron or subprocesses.
 const source = readFileSync('electron/main.ts', 'utf8');
 const start = source.indexOf('let environmentRevision =');
-const end = source.indexOf('let searchController:', start);
+const end = source.indexOf('// Broadcasts, bootstrap', start);
 assert.ok(start >= 0 && end > start);
 const { code } = transformSync(
   `const create = (store, detectEnvironment, send) => {

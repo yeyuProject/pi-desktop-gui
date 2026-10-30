@@ -1,4 +1,4 @@
-import { _electron as electron } from 'playwright';
+import { launchApp, closeApp } from '../tests/support/desktop-app.mjs';
 import assert from 'node:assert/strict';
 import fs from 'node:fs/promises';
 import path from 'node:path';
@@ -16,15 +16,12 @@ const exists = (file) =>
     () => false,
   );
 try {
-  app = await electron.launch({
+  ({ app, page } = await launchApp({
     executablePath: process.env.PI_DESKTOP_EXE,
-    args: process.env.PI_DESKTOP_EXE ? [] : [path.resolve('.')],
-    env: { ...process.env, PI_DESKTOP_DATA_DIR: fixture.dataDir, PI_OFFLINE: '1' },
-    timeout: 30000,
-  });
-  page = await app.firstWindow();
-  page.setDefaultTimeout(30000);
-  page.on('pageerror', (error) => errors.push(error.message));
+    dataDir: fixture.dataDir,
+    errors: errors,
+  }));
+
   const input = page.getByRole('textbox', { name: '任务输入' });
   const mode = page.getByRole('button', { name: '审批模式' });
   await input.waitFor();
@@ -125,18 +122,6 @@ try {
   if (page && !page.isClosed()) await page.screenshot({ path: path.join(output, 'approval-ui-failure.png') });
   throw error;
 } finally {
-  if (app) {
-    await app
-      .evaluate(({ BrowserWindow }) => {
-        return BrowserWindow.getAllWindows()[0]?.webContents.executeJavaScript(
-          `void window.desktop.onEvent(event => {
-            if (event.type === 'appDialog') void window.desktop.invoke('respondAppDialog', event.dialog.id,
-              event.dialog.message === 'Pi 仍在执行任务' ? 1 : event.dialog.cancelId);
-          })`,
-        );
-      })
-      .catch(() => {});
-    await app.close();
-  }
+  await closeApp(app);
   await provider.close();
 }

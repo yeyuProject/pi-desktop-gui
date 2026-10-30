@@ -1,7 +1,7 @@
 // Real Electron regression: run after `npm run build` with `node --import tsx`.
 // Linux needs Xvfb plus a window manager for minimize/maximize assertions.
 // Renderer screenshots do NOT include native popup menus or OS window controls.
-import { _electron as electron } from 'playwright';
+import { launchApp, closeApp } from '../tests/support/desktop-app.mjs';
 import assert from 'node:assert/strict';
 import fs from 'node:fs/promises';
 import os from 'node:os';
@@ -118,18 +118,15 @@ const connectModel = async () => {
 };
 
 async function launch() {
-  app = await electron.launch({
+  ({ app, page } = await launchApp({
     executablePath: process.env.PI_DESKTOP_EXE,
-    args: process.env.PI_DESKTOP_EXE ? [] : [path.resolve('.')],
-    // Playwright defaults to light emulation; nativeTheme must own this media query.
     colorScheme: null,
-    env: { ...process.env, PI_DESKTOP_DATA_DIR: dir, PI_OFFLINE: '1' },
-    timeout: 30000,
-  });
-  page = await app.firstWindow();
+    dataDir: dir,
+    pageTimeout: 15000,
+    errors: errors,
+  }));
   await page.emulateMedia({ reducedMotion: 'reduce' });
-  page.setDefaultTimeout(15000);
-  page.on('pageerror', (error) => errors.push(error.message));
+
   await page.getByRole('textbox', { name: '任务输入', exact: true }).waitFor();
   await eventually(mainWindowState, (state) => state.visible, 'Application window did not become visible');
   // Preserve production handlers, validation, dialog broker, storage, and native theme.
@@ -1037,7 +1034,7 @@ try {
         app.exit(0);
       })
       .catch(() => {});
-    await app.close().catch(() => {});
+    await closeApp(app).catch(() => {});
   }
   await fs.rm(dir, { recursive: true, force: true });
 }

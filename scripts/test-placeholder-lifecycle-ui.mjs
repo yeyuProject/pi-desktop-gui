@@ -1,7 +1,7 @@
 // Real Electron renderer/IPC and unmodified Pi against the isolated local provider.
 // The no-agent cases hold readHistory before its production handler and pause the real
 // filesystem writer; no Store, SessionAgents, main close handler or save result is mocked.
-import { _electron as electron } from 'playwright';
+import { launchApp, closeApp } from '../tests/support/desktop-app.mjs';
 import { expect } from 'playwright/test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs/promises';
@@ -41,15 +41,14 @@ const navigation = async () => (await invoke('navigationState')).state;
 const bootstrap = () => invoke('bootstrap');
 const input = () => page.getByRole('textbox', { name: '任务输入' });
 async function launch(dataDir = f.dataDir, launcher) {
-  app = await electron.launch({
+  ({ app, page } = await launchApp({
     executablePath: launcher ? undefined : process.env.PI_DESKTOP_EXE,
     args: launcher ? [launcher] : process.env.PI_DESKTOP_EXE ? [] : [path.resolve('.')],
-    env: { ...process.env, PI_DESKTOP_DATA_DIR: dataDir, PI_OFFLINE: '1' },
-    timeout: 60000,
-  });
-  page = await app.firstWindow();
-  page.setDefaultTimeout(45000);
-  page.on('pageerror', (error) => errors.push(error.message));
+    dataDir: dataDir,
+    pageTimeout: 45000,
+    errors: errors,
+  }));
+
   await app.evaluate(({ ipcMain }) => {
     const handler = ipcMain._invokeHandlers.get('desktop:invoke');
     globalThis.placeholderNavigation = [];
@@ -558,6 +557,6 @@ try {
   );
   throw error;
 } finally {
-  if (app) await app.close().catch(() => {});
+  if (app) await closeApp(app).catch(() => {});
   await provider.close();
 }

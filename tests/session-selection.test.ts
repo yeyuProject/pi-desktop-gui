@@ -6,6 +6,7 @@ import path from 'node:path';
 import * as ts from 'typescript/unstable/ast';
 import { API } from 'typescript/unstable/sync';
 import { transformSync } from 'esbuild';
+import { handlerSource } from './support/ipc-handler-source';
 import { Store } from '../electron/store';
 import { SessionAgents } from '../electron/session-agents';
 import { Workspace } from '../electron/workspace';
@@ -25,23 +26,7 @@ try {
 } finally {
   api.close();
 }
-function variable(name: string) {
-  const matches = source.statements
-    .filter(ts.isVariableStatement)
-    .flatMap((statement) => [...statement.declarationList.declarations])
-    .filter((declaration) => declaration.name.getText(source) === name);
-  assert.equal(matches.length, 1, `Expected one ${name} declaration`);
-  assert.ok(matches[0].initializer);
-  return matches[0].initializer;
-}
-const handlers = variable('handlers');
-assert.ok(ts.isObjectLiteralExpression(handlers));
-const selections = handlers.properties
-  .filter(ts.isPropertyAssignment)
-  .filter((property) => property.name.getText(source) === 'selectSession');
-assert.equal(selections.length, 1);
-const selection = selections[0];
-assert.ok(ts.isPropertyAssignment(selection) && ts.isArrowFunction(selection.initializer));
+const selection = handlerSource('selectSession', true);
 const textHelpers = source.statements.filter(
   (statement) => ts.isFunctionDeclaration(statement) && statement.name?.text === 'text',
 );
@@ -49,7 +34,7 @@ assert.equal(textHelpers.length, 1);
 const { code } = transformSync(
   `const createHandler = (store, service, send) => {
     ${textHelpers[0].getText(source)}
-    return ${selection.initializer.getText(source)};
+    return ${selection};
   };`,
   { loader: 'ts', format: 'cjs' },
 );

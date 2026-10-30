@@ -1,4 +1,4 @@
-import { _electron as electron } from 'playwright';
+import { launchApp, closeApp } from '../tests/support/desktop-app.mjs';
 import assert from 'node:assert/strict';
 import fs from 'node:fs/promises';
 import path from 'node:path';
@@ -121,15 +121,13 @@ const idle = () =>
       ),
   );
 try {
-  app = await electron.launch({
+  ({ app, page } = await launchApp({
     executablePath: process.env.PI_DESKTOP_EXE,
-    args: process.env.PI_DESKTOP_EXE ? [] : [path.resolve('.')],
-    env: { ...process.env, PI_DESKTOP_DATA_DIR: fixture.dataDir, PI_OFFLINE: '1' },
-    timeout: 30000,
-  });
-  page = await app.firstWindow();
-  page.setDefaultTimeout(45000);
-  page.on('pageerror', (error) => errors.push(error.message));
+    dataDir: fixture.dataDir,
+    pageTimeout: 45000,
+    errors: errors,
+  }));
+
   const input = page.getByRole('textbox', { name: '任务输入' });
   await input.waitFor();
   const firstProject = page.locator('.project-row').filter({ hasText: 'Pi GUI 验收项目' });
@@ -335,19 +333,7 @@ try {
     await page.screenshot({ path: path.join(output, 'management-v014-failure.png') });
   throw error;
 } finally {
-  if (app) {
-    await app
-      .evaluate(({ BrowserWindow }) => {
-        return BrowserWindow.getAllWindows()[0]?.webContents.executeJavaScript(
-          `void window.desktop.onEvent(event => {
-            if (event.type === 'appDialog') void window.desktop.invoke('respondAppDialog', event.dialog.id,
-              event.dialog.message === 'Pi 仍在执行任务' ? 1 : event.dialog.cancelId);
-          })`,
-        );
-      })
-      .catch(() => {});
-    await app.close();
-  }
+  await closeApp(app);
   server.closeAllConnections();
   await new Promise((resolve) => server.close(resolve));
 }

@@ -1,5 +1,5 @@
 import { verifyPlanUI } from '../tests/support/plan-ui.mjs';
-import { _electron as electron } from 'playwright';
+import { launchApp } from '../tests/support/desktop-app.mjs';
 import assert from 'node:assert/strict';
 import fs from 'node:fs/promises';
 import path from 'node:path';
@@ -36,14 +36,12 @@ await fs.mkdir(output, { recursive: true });
 const errors = [];
 let app, page, testError, lastViewExpectation, lastModelCheck;
 const launch = async () => {
-  app = await electron.launch({
+  ({ app, page } = await launchApp({
     executablePath: process.env.PI_DESKTOP_EXE,
-    args: process.env.PI_DESKTOP_EXE ? [] : [path.resolve('.')],
-    env: { ...process.env, PI_DESKTOP_DATA_DIR: fixture.dataDir, PI_OFFLINE: '1' },
-    timeout: 30000,
-  });
-  page = await app.firstWindow();
-  page.on('pageerror', (error) => errors.push(error.message));
+    dataDir: fixture.dataDir,
+    errors: errors,
+  }));
+
   page.on('console', (message) => {
     if (message.type() === 'error') errors.push(message.text());
   });

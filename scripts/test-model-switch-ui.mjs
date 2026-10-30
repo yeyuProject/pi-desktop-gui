@@ -1,4 +1,4 @@
-import { _electron as electron } from 'playwright';
+import { launchApp, closeApp } from '../tests/support/desktop-app.mjs';
 import assert from 'node:assert/strict';
 import fs from 'node:fs/promises';
 import http from 'node:http';
@@ -123,15 +123,12 @@ const observeModelSwitchState = () =>
   });
 
 try {
-  app = await electron.launch({
+  ({ app, page } = await launchApp({
     executablePath: process.env.PI_DESKTOP_EXE,
-    args: process.env.PI_DESKTOP_EXE ? [] : [path.resolve('.')],
-    env: { ...process.env, PI_OFFLINE: '1', PI_DESKTOP_DATA_DIR: f.dataDir },
-    timeout: 60000,
-  });
-  page = await app.firstWindow();
-  page.setDefaultTimeout(30000);
-  page.on('pageerror', (error) => errors.push(error.message));
+    dataDir: f.dataDir,
+    errors: errors,
+  }));
+
   await page.getByRole('textbox', { name: '任务输入' }).waitFor();
   await observeModelSwitchState();
   // Opening the model picker reads metadata without connecting the conversation.
@@ -476,7 +473,7 @@ try {
       );
     })
     .catch(() => {});
-  await app?.close().catch(() => {});
+  await closeApp(app).catch(() => {});
   server.closeAllConnections();
   await new Promise((resolve) => server.close(resolve));
 }

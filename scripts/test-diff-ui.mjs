@@ -1,4 +1,4 @@
-import { _electron as electron } from 'playwright';
+import { launchApp, closeApp } from '../tests/support/desktop-app.mjs';
 import { expect } from 'playwright/test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs/promises';
@@ -29,16 +29,15 @@ await fs.writeFile(
 const report = { packaged: Boolean(process.env.PI_DESKTOP_TEST_EXECUTABLE), errors: [] };
 let app;
 try {
-  app = await electron.launch({
-    ...(process.env.PI_DESKTOP_TEST_EXECUTABLE
-      ? { executablePath: process.env.PI_DESKTOP_TEST_EXECUTABLE, args: [] }
-      : { args: [path.resolve('.')] }),
-    env: { ...process.env, PI_DESKTOP_DATA_DIR: fixture.dataDir, PI_OFFLINE: '1' },
-    timeout: 60000,
+  const launched = await launchApp({
+    executablePath: process.env.PI_DESKTOP_TEST_EXECUTABLE,
+    dataDir: fixture.dataDir,
+    pageTimeout: 20000,
+    errors: report.errors,
   });
-  const page = await app.firstWindow();
-  page.setDefaultTimeout(20000);
-  page.on('pageerror', (error) => report.errors.push(error.message));
+  app = launched.app;
+  const page = launched.page;
+
   const input = page.getByRole('textbox', { name: '任务输入' });
   await input.waitFor();
   await page.bringToFront();
@@ -162,6 +161,6 @@ try {
   );
   console.log(JSON.stringify({ packaged: report.packaged, mainIpcDuringDiffMs: report.mainIpcDuringDiffMs }));
 } finally {
-  await app?.close();
+  await closeApp(app);
   await provider.close();
 }

@@ -1,4 +1,4 @@
-import { _electron as electron } from 'playwright';
+import { launchApp, closeApp } from '../tests/support/desktop-app.mjs';
 import assert from 'node:assert/strict';
 import fs from 'node:fs/promises';
 import path from 'node:path';
@@ -43,13 +43,11 @@ for (let i = 0; i < 100; i++) {
 }
 let app;
 try {
-  app = await electron.launch({
-    args: [path.resolve('.')],
-    env: { ...process.env, PI_DESKTOP_DATA_DIR: fixture.dataDir, PI_OFFLINE: '1' },
-    timeout: 30000,
-  });
-  const page = await app.firstWindow();
-  page.setDefaultTimeout(30000);
+  const errors = [];
+  const launched = await launchApp({ dataDir: fixture.dataDir, errors: errors });
+  app = launched.app;
+  const page = launched.page;
+
   await page.getByRole('textbox', { name: '任务输入' }).waitFor();
   await app.evaluate(({ ipcMain }, runtime) => {
     const handler = ipcMain._invokeHandlers.get('desktop:invoke');
@@ -60,8 +58,6 @@ try {
       return method === 'bootstrap' ? { ...result, runtime } : result;
     });
   }, runtime);
-  const errors = [];
-  page.on('pageerror', (error) => errors.push(error.message));
   await page.reload();
   await page.bringToFront();
   await page.getByRole('textbox', { name: '任务输入' }).waitFor({ timeout: 30000 });
@@ -129,6 +125,6 @@ try {
   await fs.writeFile(path.join(output, `${label}.json`), JSON.stringify(result, null, 2));
   console.log(JSON.stringify({ ...result, durations: undefined }));
 } finally {
-  await app?.close();
+  await closeApp(app);
   await provider.close();
 }

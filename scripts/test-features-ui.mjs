@@ -1,4 +1,4 @@
-import { _electron as electron } from 'playwright';
+import { launchApp, closeApp } from '../tests/support/desktop-app.mjs';
 import fs from 'node:fs/promises';
 import path from 'node:path';
 import assert from 'node:assert/strict';
@@ -20,15 +20,13 @@ async function waitForState(predicate, timeout = 45000) {
   throw new Error('Desktop state did not reach expected condition');
 }
 try {
-  app = await electron.launch({
+  ({ app, page } = await launchApp({
     executablePath: process.env.PI_DESKTOP_EXE,
-    args: process.env.PI_DESKTOP_EXE ? [] : [path.resolve('.')],
-    env: { ...process.env, PI_DESKTOP_DATA_DIR: fixture.dataDir, PI_OFFLINE: '1' },
-    timeout: 30000,
-  });
-  page = await app.firstWindow();
-  page.setDefaultTimeout(20000);
-  page.on('pageerror', (e) => errors.push(e.message));
+    dataDir: fixture.dataDir,
+    pageTimeout: 20000,
+    errors: errors,
+  }));
+
   page.on('console', (m) => {
     if (m.type() === 'error') errors.push(m.text());
   });
@@ -236,6 +234,6 @@ try {
       })
       .catch(() => {});
   }
-  await app?.close();
+  await closeApp(app);
   await provider.close();
 }

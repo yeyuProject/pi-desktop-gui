@@ -1,4 +1,4 @@
-import { _electron as electron } from 'playwright';
+import { launchApp, closeApp } from '../tests/support/desktop-app.mjs';
 import assert from 'node:assert/strict';
 import fs from 'node:fs/promises';
 import os from 'node:os';
@@ -29,14 +29,12 @@ try {
   ]) {
     const recognized = compatibility !== 'unknown';
     await fs.writeFile(path.join(dir, 'fixture-version.txt'), version);
-    app = await electron.launch({
+    ({ app, page } = await launchApp({
       executablePath: process.env.PI_DESKTOP_EXE,
-      args: process.env.PI_DESKTOP_EXE ? [] : [path.resolve('.')],
-      env: { ...process.env, PI_DESKTOP_DATA_DIR: dir, PI_OFFLINE: '1' },
-    });
-    page = await app.firstWindow();
-    page.setDefaultTimeout(30000);
-    page.on('pageerror', (error) => errors.push(error.message));
+      dataDir: dir,
+      errors: errors,
+    }));
+
     const input = page.getByRole('textbox', { name: '任务输入' });
     await input.waitFor();
     const notice = page.getByLabel('Pi 版本兼容性');
@@ -83,6 +81,6 @@ try {
   }
   throw error;
 } finally {
-  if (app) await app.close();
+  if (app) await closeApp(app);
   await fs.rm(dir, { recursive: true, force: true });
 }

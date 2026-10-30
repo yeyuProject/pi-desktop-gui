@@ -1,4 +1,4 @@
-import { _electron as electron } from 'playwright';
+import { launchApp, closeApp } from '../tests/support/desktop-app.mjs';
 import assert from 'node:assert/strict';
 import fs from 'node:fs/promises';
 import path from 'node:path';
@@ -110,15 +110,9 @@ const waitSettings = async (key, expected) => {
   throw new Error(`${key} did not persist as ${expected}`);
 };
 try {
-  app = await electron.launch({
-    args: [path.resolve('.')],
-    env: { ...process.env, PI_DESKTOP_DATA_DIR: fixture.dataDir, PI_OFFLINE: '1' },
-    timeout: 30000,
-  });
-  page = await app.firstWindow();
+  ({ app, page } = await launchApp({ dataDir: fixture.dataDir, pageTimeout: 10000, errors: errors }));
   await app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows()[0].setSize(1440, 900));
-  page.setDefaultTimeout(10000);
-  page.on('pageerror', (error) => errors.push(error.message));
+
   await page.getByRole('textbox', { name: '任务输入' }).waitFor();
   await app.evaluate(({ ipcMain }, runtime) => {
     globalThis.conversationCalls = [];
@@ -659,6 +653,6 @@ try {
   }
   throw error;
 } finally {
-  await app?.close();
+  await closeApp(app);
   await provider.close();
 }

@@ -1,4 +1,4 @@
-import { _electron as electron } from 'playwright';
+import { launchApp, closeApp } from '../tests/support/desktop-app.mjs';
 import { expect } from 'playwright/test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs/promises';
@@ -13,14 +13,8 @@ await fs.mkdir(output, { recursive: true });
 let app, page;
 const errors = [];
 try {
-  app = await electron.launch({
-    args: [path.resolve('.')],
-    env: { ...process.env, PI_DESKTOP_DATA_DIR: fixture.dataDir, PI_OFFLINE: '1' },
-    timeout: 30000,
-  });
-  page = await app.firstWindow();
-  page.setDefaultTimeout(10000);
-  page.on('pageerror', (error) => errors.push(error.message));
+  ({ app, page } = await launchApp({ dataDir: fixture.dataDir, pageTimeout: 10000, errors: errors }));
+
   const input = page.getByRole('textbox', { name: '任务输入' });
   await input.waitFor();
   const goalButton = page.getByRole('button', { name: 'Goal 目标管理', exact: true });
@@ -367,12 +361,7 @@ try {
     },
   });
   await fs.writeFile(legacyFile, legacyRows.map((row) => JSON.stringify(row)).join('\n') + '\n');
-  app = await electron.launch({
-    args: [path.resolve('.')],
-    env: { ...process.env, PI_DESKTOP_DATA_DIR: fixture.dataDir, PI_OFFLINE: '1' },
-    timeout: 30000,
-  });
-  page = await app.firstWindow();
+  ({ app, page } = await launchApp({ dataDir: fixture.dataDir }));
   const restoredGoalButton = page.getByRole('button', { name: '查看上个 Goal 结果', exact: true });
   await expect(restoredGoalButton.locator('.goal-completed-dot')).toHaveCount(1);
   await expect(page.getByRole('region', { name: 'Goal 状态' })).toHaveCount(0);
@@ -404,5 +393,5 @@ try {
 } finally {
   await provider.close();
   await app?.evaluate(({ app }) => app.exit(0)).catch(() => {});
-  await app?.close().catch(() => {});
+  await closeApp(app).catch(() => {});
 }

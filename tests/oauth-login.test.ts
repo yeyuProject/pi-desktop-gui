@@ -12,7 +12,7 @@ import {
   startOAuthCallbackServer,
   waitForCallbackOrManualInput,
 } from '../node_modules/@earendil-works/pi-ai/dist/auth/oauth/callback-server.js';
-import desktopBridge from '../electron/pi-bridge';
+import { installDesktopBridge } from './support/bridge-fixture';
 import { DESKTOP_BRIDGE_COMMAND } from '../shared/pi-bridge';
 
 function deferred<T>() {
@@ -85,7 +85,7 @@ async function loginFixture(t: TestContext) {
     },
     registerTool() {},
   };
-  desktopBridge(pi as ExtensionAPI);
+  installDesktopBridge(pi as ExtensionAPI);
   const events: any[] = [];
   let refreshed = 0;
   const ctx = {

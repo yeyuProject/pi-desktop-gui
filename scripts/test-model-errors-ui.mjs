@@ -1,4 +1,4 @@
-import { _electron as electron } from 'playwright';
+import { launchApp, closeApp as closeTestApp } from '../tests/support/desktop-app.mjs';
 import assert from 'node:assert/strict';
 import fs from 'node:fs/promises';
 import path from 'node:path';
@@ -44,15 +44,12 @@ const wait = async (condition, message) => {
   }
 };
 const launch = async () => {
-  app = await electron.launch({
+  ({ app, page } = await launchApp({
     executablePath: process.env.PI_DESKTOP_EXE,
-    args: process.env.PI_DESKTOP_EXE ? [] : [path.resolve('.')],
-    env: { ...process.env, PI_OFFLINE: '1', PI_DESKTOP_DATA_DIR: fixture.dataDir },
-    timeout: 60000,
-  });
-  page = await app.firstWindow();
-  page.setDefaultTimeout(30000);
-  page.on('pageerror', (error) => rendererErrors.push(error.message));
+    dataDir: fixture.dataDir,
+    errors: rendererErrors,
+  }));
+
   page.on('console', (message) => {
     if (message.type() === 'error') rendererErrors.push(message.text());
   });
@@ -273,6 +270,6 @@ try {
   }
   throw error;
 } finally {
-  await app?.close().catch(() => {});
+  await closeTestApp(app).catch(() => {});
   await provider.close();
 }

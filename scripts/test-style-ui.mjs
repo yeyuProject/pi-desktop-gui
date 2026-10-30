@@ -1,6 +1,6 @@
 // Real Electron renderer acceptance with deterministic conversation data.
 // Native settings persistence and titlebar APIs are covered by test-theme-ui.mjs.
-import { _electron as electron } from 'playwright';
+import { launchApp, closeApp } from '../tests/support/desktop-app.mjs';
 import { expect } from 'playwright/test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs/promises';
@@ -333,11 +333,10 @@ async function collectBaseline(uiStyle) {
   return baseline;
 }
 try {
-  app = await electron.launch({ args: [entry], colorScheme: null });
-  page = await app.firstWindow();
-  page.setDefaultTimeout(15000);
+  ({ app, page } = await launchApp({ args: [entry], colorScheme: null, pageTimeout: 15000, errors: errors }));
+
   await page.emulateMedia({ reducedMotion: 'reduce' });
-  page.on('pageerror', (error) => errors.push(error.message));
+
   await page.addInitScript({
     content: `(${workbenchFixture.toString()})(JSON.parse(new URLSearchParams(location.search).get('fixture') || '{}'))`,
   });
@@ -483,7 +482,7 @@ try {
     );
   }
 } finally {
-  await app?.close();
+  await closeApp(app);
   await server.close();
   await fs.rm(dir, { recursive: true, force: true });
 }

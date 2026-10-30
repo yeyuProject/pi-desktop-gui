@@ -6,6 +6,8 @@ import path from 'node:path';
 import * as ts from 'typescript/unstable/ast';
 import { API } from 'typescript/unstable/sync';
 import { transformSync } from 'esbuild';
+import { handlerSource } from './support/ipc-handler-source';
+import { invocationPolicy } from '../electron/ipc/policy';
 import { Store } from '../electron/store';
 import { AgentService } from '../electron/agent';
 import { SessionAgents } from '../electron/session-agents';
@@ -53,17 +55,8 @@ function initializer(name: string) {
   assert.ok(ts.isVariableDeclaration(declaration) && declaration.initializer);
   return declaration.initializer.getText(source);
 }
-const handlers = one((node) => ts.isVariableDeclaration(node) && node.name.getText(source) === 'handlers');
-assert.ok(ts.isVariableDeclaration(handlers) && handlers.initializer);
-assert.ok(ts.isObjectLiteralExpression(handlers.initializer));
 function handler(name: string) {
-  assert.ok(ts.isVariableDeclaration(handlers) && handlers.initializer);
-  assert.ok(ts.isObjectLiteralExpression(handlers.initializer));
-  const found = handlers.initializer.properties.filter(
-    (property) => ts.isPropertyAssignment(property) && property.name.getText(source) === name,
-  );
-  assert.equal(found.length, 1, name);
-  return found[0].getText(source);
+  return handlerSource(name);
 }
 function compile(body: string, dependencies: Record<string, unknown>) {
   const { code } = transformSync(body, { loader: 'ts', format: 'cjs' });
@@ -103,6 +96,7 @@ async function fixture(t: TestContext, dependencies: Record<string, unknown> = {
       removeSessionScratch: async () => {},
       service: agents,
       sideFlight: undefined,
+      getSideFlight: () => dependencies.sideFlight,
       sideChats: new SideChats(dir),
       send,
       validateImages,
@@ -361,6 +355,7 @@ for (const [method, rest] of [
     };
     const execute = compile(`return ${initializer('execute')};`, {
       method,
+      policy: invocationPolicy(method, [blank.id, ...rest], f.store.state.settings),
       args: [blank.id, ...rest],
       store: f.store,
       service: f.agents,
@@ -401,7 +396,7 @@ for (const kind of ['connect', 'send', 'recover', 'navigate'] as const)
     const blank = await f.newSession();
     const agent = f.agents.get(blank.id);
     const release = deferred();
-    (agent as any).operation = release.promise;
+    void (agent as any).exclusive(() => release.promise);
     t.mock.method(agent as any, 'ensureConnected', async () => {
       throw new Error('connection cancelled');
     });
@@ -454,7 +449,7 @@ for (const kind of ['model', 'thinking', 'approval'] as const)
     const blank = await f.newSession();
     const agent = f.agents.get(blank.id);
     const release = deferred();
-    (agent as any).settingsOperation = release.promise;
+    void (agent as any).preference(() => release.promise);
     if (kind === 'model') t.mock.method(agent as any, 'readModelCatalog', async () => {});
     const operation =
       kind === 'model'

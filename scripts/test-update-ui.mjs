@@ -1,4 +1,4 @@
-import { _electron as electron } from 'playwright';
+import { launchApp, closeApp } from '../tests/support/desktop-app.mjs';
 import { expect } from 'playwright/test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs/promises';
@@ -24,15 +24,13 @@ await store.save();
 let app, page;
 const errors = [];
 const launch = async () => {
-  app = await electron.launch({
+  ({ app, page } = await launchApp({
     executablePath: process.env.PI_DESKTOP_EXE,
-    args: process.env.PI_DESKTOP_EXE ? [] : [path.resolve('.')],
-    env: { ...process.env, PI_DESKTOP_DATA_DIR: dir, PI_OFFLINE: '1' },
-  });
-  page = await app.firstWindow();
+    dataDir: dir,
+    errors: errors,
+  }));
   await page.emulateMedia({ reducedMotion: 'reduce' });
-  page.setDefaultTimeout(30000);
-  page.on('pageerror', (error) => errors.push(error.message));
+
   await page.getByRole('textbox', { name: '任务输入' }).waitFor();
 };
 const about = async () => {
@@ -435,6 +433,6 @@ try {
   }
   throw error;
 } finally {
-  if (app) await app.close();
+  if (app) await closeApp(app);
   await fs.rm(dir, { recursive: true, force: true });
 }

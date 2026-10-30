@@ -21,19 +21,46 @@ test('large fragmented records preserve their payload and the following partial 
   assert.equal(errors.length, 1);
 });
 
-test('unfinished record limit counts all fragments and clears them after rejection', () => {
+test('unfinished oversized records are discarded through LF before reading another record', () => {
   const values: any[] = [],
     errors: Error[] = [];
   const decoder = new LfJsonDecoder(
     (value) => values.push(value),
     (error) => errors.push(error),
+    128,
   );
-  const chunk = Buffer.alloc(1024 * 1024, 120);
+  const chunk = Buffer.from('x');
   for (let i = 0; i < 128; i++) decoder.push(chunk);
   assert.equal(errors.length, 0);
   decoder.push(Buffer.from('x'));
   assert.equal(errors.length, 1);
   assert.match(errors[0].message, /内容过大.*终端导出/);
-  decoder.push(Buffer.from('{"type":"recovered"}\n'));
+  decoder.push(Buffer.from('{"type":"not-a-new-record"}\n{"type":"recovered"}\n'));
   assert.deepEqual(values, [{ type: 'recovered' }]);
+  assert.equal(errors.length, 1);
+});
+
+test('the final fragment and complete records are limited by UTF-8 bytes before parsing', () => {
+  const record = Buffer.from(JSON.stringify({ type: 'response', data: '中文🙂' }));
+  for (const split of [0, record.length - 1, record.length]) {
+    for (const limit of [record.length - 1, record.length]) {
+      const values: unknown[] = [],
+        errors: Error[] = [];
+      const decoder = new LfJsonDecoder(
+        (value) => values.push(value),
+        (error) => errors.push(error),
+        limit,
+      );
+      decoder.push(record.subarray(0, split));
+      decoder.push(Buffer.concat([record.subarray(split), Buffer.from('\n{"type":"next"}\n')]));
+      assert.deepEqual(
+        values,
+        limit === record.length
+          ? [{ type: 'response', data: '中文🙂' }, { type: 'next' }]
+          : [{ type: 'next' }],
+      );
+      assert.equal(errors.length, limit === record.length ? 0 : 1);
+      if (errors.length) assert.match(errors[0].message, /内容过大/);
+    }
+  }
 });

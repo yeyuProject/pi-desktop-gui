@@ -3,6 +3,7 @@ import path from 'node:path';
 import * as ts from 'typescript/unstable/ast';
 import { API } from 'typescript/unstable/sync';
 import { transformSync } from 'esbuild';
+import { handlerSource } from './ipc-handler-source';
 import { isReusableSession } from '../../electron/session-maintenance';
 import type { Store } from '../../electron/store';
 import type { SessionAgents } from '../../electron/session-agents';
@@ -38,15 +39,8 @@ function declaration(name: string) {
   assert.equal(matches.length, 1, `Expected current ${name} function`);
   return matches[0].getText(source);
 }
-const handlers = variable('handlers');
-assert.ok(ts.isObjectLiteralExpression(handlers));
 function handler(name: string) {
-  assert.ok(ts.isObjectLiteralExpression(handlers));
-  const matches = handlers.properties
-    .filter(ts.isPropertyAssignment)
-    .filter((property) => property.name.getText(source) === name);
-  assert.equal(matches.length, 1, `Expected current ${name} handler`);
-  return matches[0].initializer.getText(source);
+  return handlerSource(name, true);
 }
 const { code } = transformSync(
   `const create = (store, service, publish, isReusableSession, showAppDialog) => {
