@@ -204,15 +204,38 @@ try {
   );
   assert.equal(details().at(-1)?.status, 'timeout_recommended');
   assert.equal(service.runtime.goal?.status, 'active');
-  const goalEntries = (await fs.readFile(fixture.store.session(id).file!, 'utf8'))
-    .trim()
-    .split('\n')
-    .map((line) => JSON.parse(line));
-  assert.equal(goalEntries.findLast((entry) => entry.customType === 'desktop-goal')?.data.noProgressRuns, 0);
-  await service.stop();
+  const noProgressRuns = async () =>
+    (await fs.readFile(fixture.store.session(id).file!, 'utf8'))
+      .trim()
+      .split('\n')
+      .map((line) => JSON.parse(line))
+      .findLast((entry) => entry.customType === 'desktop-goal')?.data.noProgressRuns;
+  assert.equal(await noProgressRuns(), 0, 'awaiting user input does not settle a Goal turn');
+  for (let count = 1; count <= 3; count++) {
+    provider.respond('这一轮没有执行新的工作。');
+    if (count === 3)
+      await until(
+        () => service.runtime.goal?.status === 'blocked',
+        'Repeated questions bypassed the Goal stall limit',
+      );
+    else
+      await until(
+        () => (service.runtime.goal?.continuations ?? 0) === count + 1 && provider.waiting > 0,
+        'Goal did not settle its completed turn',
+      );
+    assert.equal(await noProgressRuns(), count);
+    if (count < 3) {
+      provider.respond({ tool: DESKTOP_ASK_TOOL, args: singleQuestion });
+      await until(
+        () => details().length === beforeGoal + 4 + count && provider.waiting > 0,
+        'Continuation question did not finish',
+      );
+      assert.equal(service.runtime.goal?.status, 'active');
+    }
+  }
   await settled();
   console.log(
-    'PASS real Goal timeout, recommended choice, active continuation and per-turn question limit reset',
+    'PASS real Goal timeout, recommended choice, active continuation, question limit reset and normal no-progress stop',
   );
 } finally {
   await service.dispose().catch(() => {});

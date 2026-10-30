@@ -434,6 +434,34 @@ test('three automatic runs without work block; get/plan alone cannot manufacture
   assert.equal(h.state()!.failedRuns, 0);
 });
 
+test('questions wait without changing progress, then completed no-work turns retain the normal stall limit', async () => {
+  const h = harness();
+  await h.command('目标');
+  for (let index = 0; index < 4; index++) {
+    await h.emit({ type: 'agent_start' });
+    const before = h.state()!.noProgressRuns;
+    await h.emit({
+      type: 'tool_execution_start',
+      toolCallId: 'question',
+      toolName: 'desktop_ask_user',
+      args: {},
+    });
+    assert.equal(h.state()!.status, 'active');
+    assert.equal(h.state()!.noProgressRuns, before);
+    await h.emit({
+      type: 'tool_execution_end',
+      toolCallId: 'question',
+      toolName: 'desktop_ask_user',
+      result: { content: [], details: { status: 'answered' } },
+      isError: false,
+    });
+    assert.equal(h.state()!.noProgressRuns, before);
+    await h.boundary();
+  }
+  assert.equal(h.state()!.status, 'blocked');
+  assert.equal(h.state()!.noProgressRuns, 3);
+});
+
 test('three automatic command failures block, but successful work resets failure runs', async () => {
   const h = harness();
   await h.command('修复构建');

@@ -18,7 +18,6 @@ import { decide } from '../shared/approval';
 import { registerDesktopAsk } from '../electron/pi-ask';
 import { AgentDialogs } from '../electron/agent-dialogs';
 import type { PiRpc } from '../electron/rpc';
-import { nextGoalBoundary, type DesktopGoalState } from '../electron/goal-state';
 import { SessionSearch } from '../src/lib/session-search';
 import { conversationTurns, placeRuntimeTools } from '../src/lib/conversation-layout';
 import { RuntimeStore } from '../src/lib/runtime-store';
@@ -315,24 +314,6 @@ test('desktop validates responses before writing, preserves invalid answers, and
   });
   assert.equal(runtime.dialogs.length, 0);
   dialogs.clear();
-});
-
-test('waiting for user is neither work nor an extra no-progress run', () => {
-  const goal = { status: 'active', continuations: 4, noProgressRuns: 2, failedRuns: 0 } as DesktopGoalState;
-  const result = nextGoalBoundary(
-    goal,
-    { usedTools: false, failedCommand: false, successfulTool: false, askedUser: true },
-    500,
-  );
-  assert.equal(result.state.noProgressRuns, 2);
-  assert.equal(result.state.status, 'active');
-  assert.equal(result.continue, true);
-  const worked = nextGoalBoundary(
-    goal,
-    { usedTools: true, failedCommand: false, successfulTool: true, askedUser: true },
-    500,
-  );
-  assert.equal(worked.state.noProgressRuns, 0);
 });
 
 test('history search uses persisted details; pending and cancelled questions do not create failed turns', () => {
