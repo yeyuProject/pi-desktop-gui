@@ -1,6 +1,7 @@
 import { messageText, type ContentBlock, type Message, type ToolActivity } from '../../shared/types';
 import { stripAnsi } from './ansi';
 import { parseUserMessage } from './message-content';
+import { DESKTOP_ASK_TOOL, readAskDetails, askHistoryText } from '../../shared/ask';
 
 export interface SessionMatch {
   messageIndex?: number;
@@ -48,14 +49,19 @@ export class SessionSearch {
     if (cached && cached.tool === tool && cached.call === call) return cached.parts;
     const parts: SearchPart[] = [];
     if (message.role === 'toolResult') {
+      const ask = [tool?.name, message.toolName, call?.name].includes(DESKTOP_ASK_TOOL)
+        ? readAskDetails(message.details)
+        : undefined;
       parts.push(
         part(
-          [
-            tool?.name ?? message.toolName ?? call?.name ?? '',
-            JSON.stringify(tool?.args ?? call?.arguments ?? {}),
-            stripAnsi(messageText(message)),
-            tool?.patch ?? '',
-          ].join('\n'),
+          ask
+            ? askHistoryText(ask)
+            : [
+                tool?.name ?? message.toolName ?? call?.name ?? '',
+                JSON.stringify(tool?.args ?? call?.arguments ?? {}),
+                stripAnsi(messageText(message)),
+                tool?.patch ?? '',
+              ].join('\n'),
           { toolId: message.toolCallId ?? '', section: 'tool' },
         ),
       );
@@ -131,7 +137,7 @@ export class SessionSearch {
           add(part, index);
       }
       for (const tool of tools) {
-        if (tool.name === 'desktop_plan' || seen.has(tool.id)) continue;
+        if (tool.name === 'desktop_plan' || tool.name === DESKTOP_ASK_TOOL || seen.has(tool.id)) continue;
         let cached = this.tools.get(tool);
         if (!cached) {
           cached = part(

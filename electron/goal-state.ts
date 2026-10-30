@@ -88,13 +88,14 @@ export interface GoalRunActivity {
   usedTools: boolean;
   failedCommand: boolean;
   successfulTool: boolean;
+  askedUser?: boolean;
 }
 export function nextGoalBoundary(goal: DesktopGoalState, activity: GoalRunActivity, now: number) {
   if (goal.status !== 'active') return { state: goal, continue: false };
   const automatic = goal.continuations > 0;
   const next = {
     ...goal,
-    noProgressRuns: automatic && !activity.usedTools ? goal.noProgressRuns + 1 : 0,
+    noProgressRuns: automatic && !activity.usedTools ? goal.noProgressRuns + (activity.askedUser ? 0 : 1) : 0,
     failedRuns: automatic && activity.failedCommand && !activity.successfulTool ? goal.failedRuns + 1 : 0,
     updatedAt: now,
   };

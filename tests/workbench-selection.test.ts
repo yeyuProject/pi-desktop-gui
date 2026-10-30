@@ -1,6 +1,7 @@
 import { hidePlanTools } from '../src/lib/plan-transcript';
 import * as goalInput from '../shared/goal-input';
 import * as goal from '../shared/goal';
+import * as ask from '../shared/ask';
 import test, { type TestContext } from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
@@ -198,6 +199,7 @@ function harness(
     '../../shared/types': types,
     '../../shared/goal-input': goalInput,
     '../../shared/goal': goal,
+    '../../shared/ask': ask,
     '../lib/format': { readableError },
     '../lib/conversation-layout': { hideRecoveredErrors },
     '../lib/plan-transcript': { hidePlanTools },

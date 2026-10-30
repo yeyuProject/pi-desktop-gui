@@ -1,5 +1,6 @@
 import { messageText, type Message, type ToolActivity } from '../../shared/types';
 import { parseUserMessage } from './message-content';
+import { DESKTOP_ASK_TOOL } from '../../shared/ask';
 const readOnly = new Set(['read', 'grep', 'find', 'ls', 'tool_search']);
 
 /** Nested calls have live tool events but no separate transcript message. */
@@ -18,7 +19,7 @@ export function placeRuntimeTools(messages: Message[], tools: ToolActivity[]) {
   const afterMessage = new Map<number, ToolActivity[]>();
   const trailing: ToolActivity[] = [];
   for (const tool of tools) {
-    if (tool.name === 'desktop_plan' || results.has(tool.id)) continue;
+    if (tool.name === 'desktop_plan' || tool.name === DESKTOP_ASK_TOOL || results.has(tool.id)) continue;
     let id: string | undefined = tool.id;
     const seen = new Set<string>();
     while (id && !messageForTool.has(id) && !seen.has(id)) {
@@ -199,6 +200,7 @@ export function conversationTurns(
       });
     const current = turns.at(-1);
     if (!current) continue;
+    if (message.role === 'toolResult' && toolFor(message).name === DESKTOP_ASK_TOOL) continue;
     if (
       message.role === 'assistant' &&
       (typeof message.content === 'string'

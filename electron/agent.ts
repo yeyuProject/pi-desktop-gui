@@ -44,6 +44,7 @@ import {
   type MessageAction,
   type RuntimeNotification,
   type ApprovalMode,
+  type ExtensionResponse,
 } from '../shared/types';
 import { validateImages } from './images';
 import { piShellEnvironment, samePath } from './platform';
@@ -128,6 +129,7 @@ export class AgentService extends EventEmitter {
     resumeStatus: () => (this.connecting ? 'starting' : 'running'),
     status: (status) => this.status(status),
     publish: () => this.publish(true),
+    diagnostic: (message) => this.diagnostic(message),
   });
   private rpc?: PiRpc;
   private sideRequest?: { id: string; done: Promise<SideChatResult> };
@@ -695,7 +697,7 @@ export class AgentService extends EventEmitter {
     } else if (record.method === 'setTitle') r.title = String(record.title ?? 'Pi Desktop');
     else this.notify(`扩展界面能力 ${record.method} 暂不支持，请在终端使用该扩展。`, 'warning');
   }
-  respond(id: string, values: { value?: string; confirmed?: boolean; cancelled?: boolean }) {
+  respond(id: string, values: ExtensionResponse) {
     return this.dialogs.respond(id, values);
   }
   private async refresh(reconcile = true) {
@@ -1374,6 +1376,8 @@ export class AgentService extends EventEmitter {
     goalStart?: GoalStartInput,
   ) {
     this.store.assertWritable();
+    if (this.runtime.sessionId === id && this.runtime.dialogs.some((dialog) => dialog.ask))
+      throw new Error('Pi 正在等待你的回答，请在回答面板中提交，或在输入框中重新发送文字回答。');
     if (epoch !== this.stopEpoch) throw new Error('任务已取消，内容保留在草稿中');
     if (this.probing) throw new Error('正在测试模型连接，请稍候');
     validateImages(images);
@@ -1388,6 +1392,8 @@ export class AgentService extends EventEmitter {
     const prompt = project ? await attachmentPrompt(project, text, attachments) : text;
     const previousRuntime = this.runtime;
     await this.ensureConnected(id);
+    if (this.runtime.dialogs.some((dialog) => dialog.ask))
+      throw new Error('Pi 正在等待你的回答，请在回答面板中提交，或在输入框中重新发送文字回答。');
     // A tool continuation or a queued steer/follow-up is still the same user task.
     if (!busy(this.runtime.status)) await this.applyTaskSelection(id);
     const shellCommand = !goalStart && text.startsWith('!') && text.replace(/^!!?/, '').trim().length > 0;

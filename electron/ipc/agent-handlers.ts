@@ -438,6 +438,8 @@ export function createAgentHandlers(context: AgentHandlerContext) {
         value: values.value,
         confirmed: values.confirmed === true,
         cancelled: values.cancelled === true,
+        ask: values.ask,
+        skipped: values.skipped,
       });
     },
     openResource: async (id, target) => {

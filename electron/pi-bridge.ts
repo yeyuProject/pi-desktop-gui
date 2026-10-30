@@ -1,4 +1,5 @@
 import { registerDesktopPlan } from './pi-plan';
+import { registerDesktopAsk } from './pi-ask';
 // Loaded by Pi's extension loader, never by Electron. Responses use RPC UI notifications.
 import {
   ModelRuntime,
@@ -170,6 +171,7 @@ export default function desktopBridge(pi: ExtensionAPI) {
   }
   const goal = registerDesktopGoal(pi);
   registerDesktopPlan(pi, goal.isActive);
+  registerDesktopAsk(pi, goal.isActive);
   pi.registerCommand(DESKTOP_BRIDGE_COMMAND, {
     description: 'Pi Desktop internal bridge',
     handler: async (encoded, ctx) => {
