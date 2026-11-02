@@ -297,7 +297,6 @@ async function chooseTheme(source, style = 'classic') {
       exact: true,
     })
     .click();
-  await settings.getByRole('button', { name: '保存设置', exact: true }).click();
   const save = await eventually(
     () =>
       app.evaluate(
@@ -523,17 +522,23 @@ try {
         await settings.locator('.theme-options').getByRole('button').count(),
         UI_STYLES.length + 3,
       );
-      assert.equal((await bootstrap()).state.settings.uiStyle, 'classic', 'Preview must not persist');
+      await eventually(
+        bootstrap,
+        ({ state }) => state.settings.uiStyle === style && state.settings.theme === expected,
+        'Appearance must save immediately',
+      );
       await settings.getByRole('button', { name: STYLE_META.classic.label, exact: true }).click();
       assert.equal(await page.evaluate(() => document.documentElement.dataset.theme), expected);
       await settings.getByRole('button', { name: STYLE_META[style].label, exact: true }).click();
+      await eventually(
+        bootstrap,
+        ({ state }) => state.settings.uiStyle === style,
+        'The last style selection did not finish saving',
+      );
       await settings.locator(':scope > footer').getByRole('button', { name: '关闭', exact: true }).click();
-      await page
-        .getByRole('dialog', { name: '放弃尚未保存的修改？', exact: true })
-        .getByRole('button', { name: '放弃修改', exact: true })
-        .click();
       await settings.waitFor({ state: 'hidden' });
-      await checkTheme(theme);
+      assert.equal(await page.getByRole('dialog', { name: '放弃尚未保存的修改？', exact: true }).count(), 0);
+      await checkTheme(expected, { style });
     }
     for (const theme of ['light', 'dark', 'system']) {
       await chooseTheme(theme, style);
@@ -551,7 +556,7 @@ try {
     await settings.locator(':scope > footer').getByRole('button', { name: '关闭', exact: true }).click();
     await chooseTheme('light');
     pass(
-      `${STYLE_META[style].label} saves validate and normalize; style preview, cancel and all three saved modes work`,
+      `${STYLE_META[style].label} saves immediately, normalizes themes and persists after closing; all three modes work`,
     );
   }
 

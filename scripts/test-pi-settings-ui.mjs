@@ -27,6 +27,10 @@ const bundle = await build({
           session: { id: 'settings-test', projectId: 'project', title: '设置测试', draft: '', attachments: [], updatedAt: 1, lastStatus: 'idle' },
           runtime: window.idleRuntime,
           initialTab: 'settings', close: () => {}, projectEnabled: true,
+          onAuthenticated: async (provider) => {
+            window.authenticatedProviders ??= [];
+            window.authenticatedProviders.push(provider);
+          },
           storage: { writable: true },
           environment: { supported: true, compatibility: 'verified', version: '1.1.0', piPath: '/pi', agentDir: '/agent', authExists: false, modelsExist: false, errors: [] },
           ...overrides,
@@ -337,7 +341,7 @@ try {
   await expect(modal.getByRole('button', { name: '设置 API Key', exact: true })).toBeEnabled();
   await json.fill('{"providers":{},"unsavedProviderEdit":true}');
   await modal.getByRole('button', { name: '设置 API Key', exact: true }).click();
-  await modal.getByText('凭据已保存', { exact: true }).waitFor();
+  await page.waitForFunction(() => window.authenticatedProviders?.at(-1) === 'key-only');
   const providerSelect = modal.getByRole('combobox', { name: '登录供应商' });
   await expect(providerSelect.locator('option:checked')).toHaveText('API Key provider · 已保存凭据');
   await expect(json).toHaveValue(/unsavedProviderEdit/);

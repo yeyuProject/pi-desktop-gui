@@ -310,10 +310,7 @@ async function computed(selector) {
 async function load(options) {
   await page.goto(server.url + '?fixture=' + encodeURIComponent(JSON.stringify(options)));
   await page.getByRole('textbox', { name: '任务输入' }).waitFor();
-  await page
-    .getByRole('button', { name: /工作区/ })
-    .first()
-    .click();
+  await page.getByRole('button', { name: '查看项目变更', exact: true }).first().click();
   await page.locator('aside').getByText('src/auth/validate.ts').click();
   await page.locator('.diff-row.added').first().waitFor();
 }
