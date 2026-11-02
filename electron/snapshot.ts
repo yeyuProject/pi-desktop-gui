@@ -116,7 +116,7 @@ export async function storeBlobs(repo: string, projectRoot: string, names: strin
       names.map((name) => quotePath(path.resolve(projectRoot, name))).join('\n') + '\n',
     ),
   );
-  if (ids.length !== names.length) throw new Error('快照写入不完整');
+  if (ids.length !== names.length) throw new Error('这一轮的文件备份没有写完整，无法建立检查点，请重试。');
   return ids;
 }
 export async function hashBlobs(projectRoot: string, names: string[]) {
@@ -136,6 +136,6 @@ export async function readBlob(repo: string, projectRoot: string, id: string) {
   try {
     return await git(['--git-dir', repo, 'cat-file', 'blob', id], projectRoot);
   } catch {
-    throw new Error('快照内容已不存在（可能已被 Git 清理），无法撤销这个文件');
+    throw new Error('这个文件的备份已经不存在（可能被 Git 清理过），无法撤销它。');
   }
 }

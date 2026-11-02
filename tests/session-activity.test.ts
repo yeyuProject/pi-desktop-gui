@@ -106,7 +106,7 @@ test('cancelled and failed connection attempts preserve activity and unread', as
   f.older.unread = false;
   const before = f.recency();
   await fs.writeFile(path.join(f.dir, 'control.json'), JSON.stringify({ cancelSwitch: true }));
-  await assert.rejects(f.service.connect(f.newer.id), /取消了会话切换/);
+  await assert.rejects(f.service.connect(f.newer.id), /拦截了这次切换/);
   assert.deepEqual(f.recency(), before);
   await f.service.disconnect();
   await fs.writeFile(path.join(f.dir, 'control.json'), JSON.stringify({ exitOnStats: true }));

@@ -2,6 +2,7 @@ import { CheckCircle2 } from 'lucide-react';
 import { type Runtime, type Environment } from '../../shared/types';
 import { compatibilityMessage } from '../../shared/pi-version';
 import { PiCompatibilityNotice } from './PiCompatibilityNotice';
+import { PI_INSTALL_COMMAND } from '../../shared/pi-version';
 
 export function ReadinessChecklist({
   environment,
@@ -12,6 +13,7 @@ export function ReadinessChecklist({
   checkEnvironment,
   connect,
   providers,
+  chooseModel,
 }: {
   environment?: Environment;
   runtime: Runtime;
@@ -21,6 +23,7 @@ export function ReadinessChecklist({
   checkEnvironment: () => void;
   connect: () => void;
   providers: () => void;
+  chooseModel: () => void;
 }) {
   if (!environment) return null;
   const connected = ownRuntime && runtime.connected;
@@ -28,17 +31,19 @@ export function ReadinessChecklist({
   const modelReady = connected ? Boolean(runtime.model) : Boolean(modelLabel);
   const shellReady = Boolean(environment.bash);
   if (piReady && modelReady && shellReady) return null;
-  const chooseModel = () => document.querySelector<HTMLButtonElement>('.model-pill')?.click();
   const steps: { done: boolean; title: string; detail: string; action?: [string, () => void] }[] = [
     {
       done: piReady,
       title: piReady ? `已找到 Pi ${environment.version ?? ''}` : '找到 Pi',
       detail: piReady
         ? environment.piPath
-        : environment.version
-          ? compatibilityMessage(environment.version, environment.compatibility)
-          : '未检测到 Pi，请安装或在设置中指定 cli.js',
-      action: piReady ? undefined : ['检查运行环境', checkEnvironment],
+        : environment.errors?.[0] ||
+          (environment.version
+            ? compatibilityMessage(environment.version, environment.compatibility)
+            : '找不到 Pi，请复制安装命令安装，或在设置中选择 Pi 路径。'),
+      action: piReady
+        ? undefined
+        : [/Node/i.test(environment.errors?.[0] ?? '') ? '选择 Node' : '检查运行环境', checkEnvironment],
     },
     {
       done: modelReady,
@@ -77,9 +82,15 @@ export function ReadinessChecklist({
     action: shellReady ? undefined : ['重新检查运行环境', checkEnvironment],
   });
   return (
-    <div className="readiness" role="region" aria-label="开始前检查">
+    <div className="readiness" role="region" aria-label="开始前检查" tabIndex={-1}>
       <strong>开始前检查</strong>
       {!piReady && <PiCompatibilityNotice environment={environment} />}
+      {!piReady && !environment.version && !/Node/i.test(environment.errors?.[0] ?? '') && (
+        <p>
+          <code>{PI_INSTALL_COMMAND}</code>
+          <button onClick={() => void window.desktop.invoke('copy', PI_INSTALL_COMMAND)}>复制安装命令</button>
+        </p>
+      )}
       {steps.map((s, i) => (
         <div key={i} className={'readiness-step' + (s.done ? ' done' : '')}>
           {s.done ? <CheckCircle2 size={17} /> : <span className="step-number">{i + 1}</span>}

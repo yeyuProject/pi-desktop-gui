@@ -29,10 +29,7 @@ try {
     await page.addInitScript(workbenchFixture, { theme, approval, uiStyle });
     await page.goto(server.url);
     await page.getByText('修复登录表单的空邮箱校验').first().waitFor();
-    await page
-      .getByRole('button', { name: /工作区/ })
-      .first()
-      .click();
+    await page.getByRole('button', { name: '查看项目变更', exact: true }).first().click();
     await page.locator('aside').getByText('src/auth/validate.ts').click();
     await page.locator('.preview-toolbar').waitFor();
     if (name === 'goal-composer') {

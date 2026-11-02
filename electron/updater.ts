@@ -2,6 +2,7 @@ import { EventEmitter } from 'node:events';
 import { MacUpdateError } from './mac-update';
 import { UpdateSignatureError } from '../shared/update-signature';
 import { UpdateProgress } from './update-progress';
+import { describeSystemError } from '../shared/errors';
 import {
   compareAppVersions,
   stableVersion,
@@ -312,9 +313,15 @@ export class UpdateService extends EventEmitter {
     } catch (error) {
       this.options.installFailed();
       this.markInstallFailed();
+      console.error('Preparing update failed:', error);
+      const detail = error instanceof Error ? error.message : String(error);
       this.publish({
         installing: false,
-        error: error instanceof Error ? error.message : '无法准备重启更新，请重试。',
+        error:
+          describeSystemError(error) ??
+          (/[\u3400-\u9fff]/.test(detail) && !/^(?:\w*Error:)|\n\s+at /.test(detail)
+            ? detail
+            : '无法准备重启更新，请检查安装权限后重试。'),
       });
       throw error;
     }

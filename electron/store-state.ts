@@ -65,7 +65,7 @@ export function parseState(value: unknown) {
     !Array.isArray(value.projects) ||
     !Array.isArray(value.sessions)
   )
-    throw new Error('本地索引格式不受支持');
+    throw new Error('本地数据格式不受支持，请检查应用版本或从备份恢复。');
   const state = emptyState();
   if (typeof value.appVersion === 'string') state.appVersion = value.appVersion;
   let discardedProjects = 0,

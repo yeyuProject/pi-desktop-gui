@@ -74,6 +74,7 @@ export function groupConversation(
   messages: Message[],
   toolFor: (message: Message) => ToolActivity,
   expanded: string[],
+  startIndex = 0,
 ): ConversationItem[] {
   const result: ConversationItem[] = [],
     pending: number[] = [];
@@ -87,7 +88,7 @@ export function groupConversation(
     else for (const index of pending) result.push({ kind: 'message', index });
     pending.length = 0;
   };
-  for (let index = 0; index < messages.length; index++) {
+  for (let index = startIndex; index < messages.length; index++) {
     const message = messages[index];
     if (isEmptyFailure(message)) {
       flush();
@@ -184,13 +185,15 @@ export function conversationTurns(
   messages: Message[],
   toolFor: (message: Message) => ToolActivity,
   running = false,
+  startIndex = 0,
+  turnOffset = 0,
 ): TurnItem[] {
   const turns: TurnItem[] = [];
-  for (let index = 0; index < messages.length; index++) {
+  for (let index = startIndex; index < messages.length; index++) {
     const message = messages[index];
     if (message.role === 'user')
       turns.push({
-        turn: turns.length + 1,
+        turn: turns.length + 1 + turnOffset,
         index,
         ...turnTitle(message),
         modified: false,
@@ -236,7 +239,9 @@ export function turnThinking(messages: Message[], startIndex = 0, endIndex = mes
     parts: { index: number; block: number; offset: number }[];
   }[] = [];
   let current: (typeof groups)[number] | undefined;
-  for (let index = 0; index < endIndex; index++) {
+  let first = Math.max(0, Math.min(startIndex, messages.length - 1));
+  while (first > 0 && messages[first].role !== 'user') first--;
+  for (let index = first; index < endIndex; index++) {
     const message = messages[index];
     if (message.role === 'user') current = undefined;
     if (current) current.end = index;

@@ -163,7 +163,7 @@ try {
     updatedAt: Date.now(),
   });
   await fs.writeFile(path.join(fixture.agentDir, 'cancel-switch'), 'cancel');
-  await assert.rejects(service.connect(other), /取消了会话切换/);
+  await assert.rejects(service.connect(other), /拦截了这次切换/);
   assert.equal(service.runtime.sessionId, sessionId);
   await fs.unlink(path.join(fixture.agentDir, 'cancel-switch'));
   console.log('PASS actual Pi extension dialogs, timeout, handled commands and cancelled switch');

@@ -31,7 +31,12 @@ export function WorkspaceHeader(
 ) {
   const { setFeatureTab, sidebar, setSidebar, compact, inspector, setInspector, changes, selected, project } =
     props;
-  const waiting = props.state?.sessions.filter((session) => props.activities[session.id]?.pending > 0) ?? [];
+  const waiting =
+    props.state?.sessions.filter(
+      (session) =>
+        props.activities[session.id]?.pending > 0 ||
+        (session.unread && ['error', 'interrupted'].includes(session.lastStatus)),
+    ) ?? [];
 
   return (
     <header className="workspace-header" inert={inspector && compact}>
@@ -60,17 +65,29 @@ export function WorkspaceHeader(
           侧边对话
         </button>
         {waiting.length > 0 && (
-          <button
-            className="attention-button"
-            aria-live="polite"
-            title={waiting.map((session) => session.title).join('、')}
-            onClick={() => {
-              const next = waiting.find((session) => session.id !== selected?.id) ?? waiting[0];
-              void props.selectSession(next);
-            }}
-          >
-            待回复 {waiting.reduce((sum, session) => sum + props.activities[session.id].pending, 0)}
-          </button>
+          <details className="attention-menu">
+            <summary
+              className="attention-button"
+              aria-live="polite"
+              title={waiting.map((session) => session.title).join('、')}
+            >
+              待处理 {waiting.length}
+            </summary>
+            <div role="menu">
+              {waiting.map((session) => (
+                <button
+                  key={session.id}
+                  role="menuitem"
+                  onClick={(event) => {
+                    event.currentTarget.closest('details')?.removeAttribute('open');
+                    void props.selectSession(session);
+                  }}
+                >
+                  {session.title} · {props.activities[session.id]?.waitingFor ?? '出错'}
+                </button>
+              ))}
+            </div>
+          </details>
         )}
         <button aria-label="Pi 功能" disabled={!selected} onClick={() => setFeatureTab('session')}>
           <Command size={16} />
@@ -79,14 +96,14 @@ export function WorkspaceHeader(
         {selected && (
           <button
             className={'workspace-toggle ' + (inspector ? 'active' : '')}
-            aria-label={inspector ? '收起工作区面板' : project ? '查看工作区变更' : '查看会话输出'}
+            aria-label={inspector ? '收起变更面板' : project ? '查看项目变更' : '查看会话输出'}
             aria-expanded={inspector}
             aria-controls="workspace-inspector"
             onClick={() => setInspector((v) => !v)}
             title={project ? '变更、文件与输出' : '当前会话的工具输出'}
           >
             {inspector ? <PanelRightClose size={16} /> : <PanelRightOpen size={16} />}
-            <span>{project ? '工作区' : '输出'}</span>
+            <span>{project ? '变更' : '输出'}</span>
             {project && !!changes?.files.length && <span className="count">{changes.files.length}</span>}
           </button>
         )}

@@ -101,7 +101,7 @@ export function validateBridgeResult(method: string, value: unknown) {
       typeof value.autoRetry !== 'boolean' ||
       !['auto', 'confirm', 'readonly'].includes(value.approvalMode))
   )
-    incompatible('桌面适配', '适配扩展未正确加载或协议版本不一致');
+    incompatible('Pi Desktop 的配套扩展', 'Pi Desktop 的配套扩展没有加载，或者和当前 Pi 版本不匹配。');
   if (
     ['options', 'approval_mode', 'revoke_approval'].includes(method) &&
     (!object(value) || !Array.isArray(value.approvalGrants) || !value.approvalGrants.every(isApprovalGrant))

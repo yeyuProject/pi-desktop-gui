@@ -65,7 +65,7 @@ try {
   assert.equal(question()!.expiresAt, undefined);
   assert.equal(service.runtime.dialogs.length, 1, 'readonly mode does not add an approval dialog');
   const userCount = service.runtime.messages.filter((message) => message.role === 'user').length;
-  await assert.rejects(service.send(id, 'stale renderer send', [], 'steer'), /等待你的回答/);
+  await assert.rejects(service.send(id, 'stale renderer send', [], 'steer'), /Pi 在等你回答/);
   await assert.rejects(
     service.respond(question()!.id, {
       ask: {

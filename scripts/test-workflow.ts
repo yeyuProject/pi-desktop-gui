@@ -256,7 +256,7 @@ try {
   await fs.writeFile(path.join(f.agentDir, 'slow-switch'), 'enabled');
   const switching = s.connect(f.sessionId);
   await until(() => s.runtime.notices.includes('SWITCH_WAITING'));
-  await assert.rejects(s.disconnect(), /会话操作/);
+  await assert.rejects(s.disconnect(), /会话正忙/);
   await switching;
   await fs.unlink(path.join(f.agentDir, 'slow-switch'));
   console.log(
@@ -285,7 +285,8 @@ try {
   await s.connect(alternate.id);
   assert.notEqual((s as any).rpc.child.pid, stablePid);
   assert.equal(s.lastSwitch?.mode, 'restart');
-  assert.match(s.lastSwitch!.reason!, /TEST_SWITCH_FAILURE/);
+  assert.match(s.lastSwitch!.reason!, /会话切换没有完成/);
+  assert.ok(s.runtime.diagnostic.some((entry) => entry.includes('TEST_SWITCH_FAILURE')));
   assert.equal(s.runtime.error, undefined);
   console.log('PASS failed reuse restarts cleanly and records the reason without an error banner');
 

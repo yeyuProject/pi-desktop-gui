@@ -1,9 +1,7 @@
-import { hidePlanTools } from '../lib/plan-transcript';
-import { isGoalStartMessage } from '../../shared/goal-input';
 import { useEffect, useLayoutEffect, useMemo, useRef, useState, type RefObject } from 'react';
 import type { Message, Runtime, Session } from '../../shared/types';
-import { hideRecoveredErrors } from '../lib/conversation-layout';
 import { readableError } from '../lib/format';
+import { HistoryDeriver } from '../lib/history-derive';
 const empty: Message[] = [];
 
 export function useHistory(
@@ -48,23 +46,17 @@ export function useHistory(
     };
   }, [selected?.id, hasLiveHistory]);
   const own = runtime.sessionId === selected?.id;
+  const deriver = useMemo(() => new HistoryDeriver(), [selected?.id]);
   const messages = useMemo(
     () =>
-      hideRecoveredErrors(
-        hidePlanTools(
-          (own && (runtime.connected || runtime.messages.length)
-            ? runtime.messages
-            : history && history.sessionId === selected?.id
-              ? history.messages
-              : empty
-          )
-            .map((message, index, all) =>
-              isGoalStartMessage(all, index) ? { ...message, goalStart: true } : message,
-            )
-            .filter((message) => message.role !== 'custom' || message.display !== false),
-        ),
+      deriver.derive(
+        own && (runtime.connected || runtime.messages.length)
+          ? runtime.messages
+          : history && history.sessionId === selected?.id
+            ? history.messages
+            : empty,
       ),
-    [own, runtime.connected, runtime.messages, history, selected?.id],
+    [own, runtime.connected, runtime.messages, history, selected?.id, deriver],
   );
   useLayoutEffect(() => {
     const element = thread.current;

@@ -46,6 +46,7 @@ export function PromptArguments({
           </span>
           <input
             aria-label={`模板参数：${field.label}`}
+            aria-invalid={field.required && !(values[index] ?? '').trim()}
             value={values[index] ?? ''}
             placeholder={field.required ? '必填' : '可选'}
             onKeyDown={(event) => {

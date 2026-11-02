@@ -38,6 +38,7 @@ export interface Project {
   name: string;
   path: string;
   trusted: boolean;
+  approvalMode?: ApprovalMode;
   createdAt: number;
 }
 export interface Session {
@@ -396,6 +397,7 @@ export interface FileDiff {
  * receiver's arrays from `messagesFrom` / `toolsFrom` onwards (a full resync uses 0).
  */
 export type RuntimePatch = Partial<Omit<Runtime, 'messages' | 'tools'>> & {
+  messageTail?: { index: number; blocks: { at: number; block: ContentBlock; from?: number }[] };
   removed?: (keyof Runtime)[];
   messagesFrom: number;
   messages: Message[];
@@ -405,6 +407,7 @@ export type RuntimePatch = Partial<Omit<Runtime, 'messages' | 'tools'>> & {
   toolCount: number;
 };
 export type AppEvent =
+  | { type: 'flushDraft'; id: string }
   | { type: 'sideChat'; chat: SideChat }
   | { type: 'sideChatDelta'; sessionId: string; id: string; text: string }
   | { type: 'action'; action: import('./workbench-actions').WorkbenchAction }
@@ -419,8 +422,10 @@ export type AppEvent =
   | { type: 'runtimeRemoved'; sessionId: string }
   | { type: 'runtimePatch'; patch: RuntimePatch };
 /** Apply a patch; arrays before the change point keep their identity so the UI can skip them. */
+export const messageArrayChanges = new WeakMap<Message[], { previous: Message[]; from: number }>();
 export function applyRuntimePatch(previous: Runtime, patch: RuntimePatch): Runtime {
-  const { messagesFrom, messages, messageCount, toolsFrom, tools, toolCount, removed, ...rest } = patch;
+  const { messagesFrom, messages, messageCount, toolsFrom, tools, toolCount, removed, messageTail, ...rest } =
+    patch;
   const sameSession = previous.sessionId === patch.sessionId;
   const applyItems = <T>(before: T[], from: number, changed: T[], count: number) => {
     if (sameSession && from === before.length && changed.length === 0 && count === before.length)
@@ -433,7 +438,30 @@ export function applyRuntimePatch(previous: Runtime, patch: RuntimePatch): Runti
     messages: applyItems(previous.messages, messagesFrom, messages, messageCount),
     tools: applyItems(previous.tools, toolsFrom, tools, toolCount),
   };
+  if (sameSession && messageTail) {
+    const message = next.messages[messageTail.index];
+    if (message && Array.isArray(message.content)) {
+      const content = [...message.content];
+      for (const { at, block, from } of messageTail.blocks) {
+        const field = block.type === 'text' ? 'text' : block.type === 'thinking' ? 'thinking' : undefined;
+        content[at] =
+          from !== undefined && field
+            ? {
+                ...block,
+                [field]: String(content[at]?.[field] ?? '').slice(0, from) + String(block[field] ?? ''),
+              }
+            : block;
+      }
+      next.messages = [...next.messages];
+      next.messages[messageTail.index] = { ...message, content };
+    }
+  }
   for (const key of removed ?? []) delete (next as unknown as Record<string, unknown>)[key];
+  if (next.messages !== previous.messages)
+    messageArrayChanges.set(next.messages, {
+      previous: previous.messages,
+      from: sameSession ? Math.min(messagesFrom, messageTail?.index ?? Infinity) : 0,
+    });
   return next;
 }
 export interface Bootstrap extends StateSnapshot {
@@ -444,6 +472,10 @@ export interface Bootstrap extends StateSnapshot {
   update: UpdateState;
 }
 export interface ApiMap {
+  logRendererError: { args: [string]; result: void };
+  getToolOutput: { args: [string, string]; result: string };
+  draftFlushed: { args: [string]; result: void };
+  recheckCrash: { args: [string]; result: void };
   retryStorage: { args: []; result: void };
   rendererReady: { args: []; result: void };
   clearLocalData: { args: []; result: void };
@@ -458,7 +490,7 @@ export interface ApiMap {
   addProject: { args: []; result: Project | null };
   renameProject: { args: [string, string]; result: void };
   removeProject: { args: [string]; result: void };
-  trustProject: { args: [string]; result: void };
+  trustProject: { args: [string, ('auto' | 'confirm')?]; result: void };
   newSession: { args: [projectId?: string]; result: Session };
   importSession: { args: [projectId?: string]; result: Session | null };
   selectSession: { args: [string]; result: void };
@@ -477,8 +509,10 @@ export interface ApiMap {
   checkpoints: { args: [string]; result: CheckpointSummary[] };
   checkpointPreview: { args: [string, string]; result: CheckpointPreview };
   revertCheckpoint: { args: [string, string, string[], string]; result: string[] };
+  revertPreview: { args: [string]; result: CheckpointPreview };
+  undoLastRestore: { args: [string]; result: string[] };
   revertChanges: {
-    args: [string, string[] | null, { sessionId: string; checkpointId?: string }?];
+    args: [string, string[] | null, { sessionId: string; checkpointId?: string; revision?: string }?];
     result: string[];
   };
   setEntryLabel: { args: [string, string, string]; result: void };
@@ -501,7 +535,7 @@ export interface ApiMap {
   choosePath: { args: ['pi' | 'node' | 'agent' | 'editor']; result: string | null };
   saveSettings: { args: [Partial<Settings>]; result: void };
   connect: { args: [string]; result: void };
-  readModels: { args: [string]; result: void };
+  readModels: { args: [string]; result: Model[] };
   recover: { args: [string, string?]; result: void };
   testConnection: { args: [string]; result: { elapsed: number; text: string } };
   send: { args: [string, string, string[], SendMode, ImageAttachment[]?, GoalStartInput?]; result: void };
@@ -530,7 +564,7 @@ export interface ApiMap {
   };
   promptDelete: { args: [string, string, string]; result: void };
   usageSummary: { args: []; result: LocalUsageSummary };
-  cleanupEmptySessions: { args: []; result: number };
+  cleanupEmptySessions: { args: []; result: number | null };
   toggleResource: { args: [string, ResourceItem, boolean]; result: void };
   packageAction: { args: [string, 'install' | 'remove' | 'update', string, boolean]; result: boolean };
   providers: { args: [string]; result: ProviderInfo[] };

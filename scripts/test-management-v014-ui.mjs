@@ -184,7 +184,7 @@ try {
   await card.getByRole('button', { name: '拒绝', exact: true }).click();
   await idle();
   await mode.click();
-  await page.getByRole('button', { name: '撤回 完整命令：npm test tests/a.ts', exact: true }).click();
+  await page.getByRole('button', { name: '撤销 完整命令：npm test tests/a.ts', exact: true }).click();
   await until((value) => !value.runtime.approvalGrants.length);
   await page.keyboard.press('Escape');
   await input.fill('!npm test tests/c.ts');

@@ -390,6 +390,24 @@ try {
     'PASS G2 states, editing, replacement, plans, quota settings, title, budget resume, restored dot and result navigation with real Pi',
   );
 } catch (error) {
+  await fs.writeFile(
+    path.join(output, 'goal-ui-state.json'),
+    JSON.stringify(
+      {
+        snapshot: await snapshotForFailure(),
+        input: await page
+          ?.getByRole('textbox', { name: '任务输入' })
+          .inputValue()
+          .catch(() => ''),
+        errors: await page
+          ?.locator('.error-banner,.toast')
+          .allTextContents()
+          .catch(() => []),
+      },
+      null,
+      2,
+    ),
+  );
   await fs.writeFile(path.join(output, 'goal-ui-provider.json'), JSON.stringify(provider.requests, null, 2));
   await page?.screenshot({ path: path.join(output, 'goal-failure.png'), animations: 'disabled' });
   throw error;
@@ -397,4 +415,7 @@ try {
   await provider.close();
   await app?.evaluate(({ app }) => app.exit(0)).catch(() => {});
   await closeApp(app).catch(() => {});
+}
+async function snapshotForFailure() {
+  return page?.evaluate(() => window.desktop.invoke('bootstrap')).catch(() => undefined);
 }

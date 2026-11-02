@@ -66,7 +66,7 @@ export function updateInstallNotice(update: UpdateState) {
   if (compareAppVersions(update.currentVersion, attempt.targetVersion) >= 0) return undefined;
   const versions = `上次尝试更新到 v${attempt.targetVersion}，当前仍是 v${update.currentVersion}。`;
   return attempt.outcome === 'failed'
-    ? `${versions}无法启动更新安装程序，或安装程序报告了错误。请重试或下载完整安装包。`
+    ? `上次更新到 v${attempt.targetVersion} 没有成功，当前仍是 v${update.currentVersion}。请重试，或下载完整安装包。`
     : `${versions}尚未确认更新完成。如果安装程序仍在运行，请等待完成；否则可重试或下载完整安装包。`;
 }
 

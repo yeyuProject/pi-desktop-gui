@@ -7,14 +7,20 @@ import { Inspector as InspectorView } from './components/Inspector';
 import { Toasts as ToastsView } from './components/Toasts';
 import { WorkbenchDialogs as WorkbenchDialogsView } from './components/WorkbenchDialogs';
 import { Composer as ComposerView } from './components/Composer';
-import { SettingsModal as SettingsModalView } from './components/SettingsModal';
 import { StorageBanner } from './components/StorageBanner';
+import { AutomaticUpdate } from './components/AutomaticUpdate';
 import { CrashCard } from './components/CrashCard';
-import { memo, useEffect, useMemo, useState } from 'react';
-import { AboutUpdates, UpdateBadge, UpdateDialog } from './components/Updates';
+import { Suspense, memo, useEffect, useMemo, useState } from 'react';
+import { UpdateBadge } from './components/Updates';
 import { ResizeHandle } from './components/ResizeHandle';
-import { CheckpointDialog } from './components/CheckpointDialog';
-import { SideChatPanel } from './components/SideChatPanel';
+import {
+  AboutUpdates,
+  preloadDialogs,
+  SettingsModal,
+  CheckpointDialog,
+  SideChatPanel,
+  UpdateDialog,
+} from './lib/lazy-dialogs';
 const Sidebar = memo(SidebarView);
 const WorkspaceHeader = memo(WorkspaceHeaderView);
 const Inspector = memo(
@@ -30,12 +36,15 @@ const Inspector = memo(
 const Toasts = memo(ToastsView);
 const WorkbenchDialogs = memo(WorkbenchDialogsView);
 const Composer = memo(ComposerView);
-const SettingsModal = memo(SettingsModalView);
 const Conversation = memo(ConversationView);
 function pick<T, K extends keyof T>(model: T, keys: readonly K[]): Pick<T, K> {
   return Object.fromEntries(keys.map((key) => [key, model[key]])) as Pick<T, K>;
 }
 export default function App() {
+  useEffect(() => {
+    const idle = window.requestIdleCallback(() => preloadDialogs());
+    return () => window.cancelIdleCallback(idle);
+  }, []);
   const model = useWorkbench();
   const [updateOpen, setUpdateOpen] = useState(false);
   const { state, compact, columns, error } = model;
@@ -103,6 +112,7 @@ export default function App() {
     );
   const updateBusy = model.anyRunning || model.pending;
   const installUpdate = async () => {
+    await model.flushDraft();
     if (model.selected && model.storage.writable)
       await window.desktop.invoke(
         'saveDraft',
@@ -133,6 +143,12 @@ export default function App() {
   };
   return (
     <div className="app-shell">
+      <AutomaticUpdate
+        updates={model.updates}
+        busy={updateBusy}
+        install={installUpdate}
+        flushDraft={model.flushDraft}
+      />
       <Sidebar
         {...pick(model, [
           'activities',
@@ -223,11 +239,13 @@ export default function App() {
                 'selectSession',
                 'openSettings',
                 'connect',
+                'openModelPicker',
                 'inspectFile',
                 'toggleTool',
                 'messageContext',
                 'addQuote',
                 'setNotice',
+                'setNoticeAction',
               ])}
               state={state}
               recovery={recovery}
@@ -247,6 +265,7 @@ export default function App() {
                 'attachmentsPending',
                 'selectionChanging',
                 'selectionRevision',
+                'modelPickerRequest',
                 'draft',
                 'draftGoal',
                 'openGoalComposer',
@@ -324,9 +343,11 @@ export default function App() {
                 direction={-1}
                 save={(width) => saveWidth('sideChatWidth', width)}
               />
-              <SideChatPanel
-                {...pick(model, ['sideChat', 'runtime', 'selected', 'openSettings', 'connect', 'copy'])}
-              />
+              <Suspense fallback={null}>
+                <SideChatPanel
+                  {...pick(model, ['sideChat', 'runtime', 'selected', 'openSettings', 'connect', 'copy'])}
+                />
+              </Suspense>
             </>
           )}
           {model.inspector && !compact && (
@@ -389,7 +410,7 @@ export default function App() {
           />
         </div>
       </main>
-      <Toasts {...pick(model, ['notice', 'setDismissed', 'toasts'])} />
+      <Toasts {...pick(model, ['notice', 'noticeAction', 'setDismissed', 'toasts'])} />
       {(model.searchOpen ||
         model.shortcutsOpen ||
         model.rename ||
@@ -397,86 +418,94 @@ export default function App() {
         model.featureTab ||
         model.runtime.auth ||
         model.prompts.length > 0) && (
-        <WorkbenchDialogs
-          {...pick(model, [
-            'runtime',
-            'environment',
-            'storage',
-            'featureTab',
-            'setFeatureTab',
-            'searchOpen',
-            'setSearchOpen',
-            'searchQuery',
-            'setSearchQuery',
-            'rename',
-            'setRename',
-            'shortcutsOpen',
-            'setShortcutsOpen',
-            'selected',
-            'prompts',
-            'attempt',
-            'selectSession',
-          ])}
-          state={state}
-          settings={
-            model.settingsOpen ? (
-              <SettingsModal
-                {...pick(model, [
-                  'state',
-                  'runtime',
-                  'environment',
-                  'error',
-                  'setError',
-                  'setNotice',
-                  'settingsOpen',
-                  'setSettingsOpen',
-                  'settingsTab',
-                  'setSettingsTab',
-                  'prefs',
-                  'setPrefs',
-                  'pending',
-                  'setFeatureTab',
-                  'testResult',
-                  'setTestResult',
-                  'diagnostic',
-                  'setDiagnostic',
-                  'selected',
-                  'sessionEnabled',
-                  'running',
-                  'modelLocked',
-                  'attempt',
-                  'action',
-                  'detect',
-                  'saveSettings',
-                  'connect',
-                  'chooseSettingPath',
-                  'setModel',
-                  'setThinking',
-                ])}
-                updatePanel={updatePanel}
-              />
-            ) : null
-          }
-        />
+        <Suspense fallback={null}>
+          <WorkbenchDialogs
+            {...pick(model, [
+              'runtime',
+              'environment',
+              'storage',
+              'featureTab',
+              'setFeatureTab',
+              'searchOpen',
+              'setSearchOpen',
+              'searchQuery',
+              'setSearchQuery',
+              'rename',
+              'setRename',
+              'shortcutsOpen',
+              'setShortcutsOpen',
+              'selected',
+              'prompts',
+              'onAuthenticated',
+              'attempt',
+              'selectSession',
+            ])}
+            state={state}
+            settings={
+              model.settingsOpen ? (
+                <SettingsModal
+                  {...pick(model, [
+                    'state',
+                    'runtime',
+                    'environment',
+                    'error',
+                    'setError',
+                    'setNotice',
+                    'settingsOpen',
+                    'setSettingsOpen',
+                    'settingsTab',
+                    'setSettingsTab',
+                    'prefs',
+                    'setPrefs',
+                    'pending',
+                    'setFeatureTab',
+                    'testResult',
+                    'setTestResult',
+                    'diagnostic',
+                    'setDiagnostic',
+                    'selected',
+                    'sessionEnabled',
+                    'running',
+                    'modelLocked',
+                    'attempt',
+                    'action',
+                    'detect',
+                    'saveSettings',
+                    'connect',
+                    'chooseSettingPath',
+                    'setModel',
+                    'setThinking',
+                  ])}
+                  updatePanel={updatePanel}
+                />
+              ) : null
+            }
+          />
+        </Suspense>
       )}
       {model.checkpointPreview && (
-        <CheckpointDialog
-          key={model.checkpointPreview.id + model.checkpointPreview.revision}
-          preview={model.checkpointPreview}
-          pending={model.pending}
-          restoredCount={model.checkpointRestoredCount}
-          onClose={model.closeCheckpoint}
-          onConfirm={(paths, revision) => void model.confirmCheckpoint(paths, revision)}
-          onReturnToMessage={() => void model.returnToCheckpointMessage()}
-        />
+        <Suspense fallback={null}>
+          <CheckpointDialog
+            key={model.checkpointPreview.id + model.checkpointPreview.revision}
+            preview={model.checkpointPreview}
+            pending={model.pending}
+            restoredCount={model.checkpointRestoredCount}
+            onClose={model.closeCheckpoint}
+            onConfirm={(paths, revision) => void model.confirmCheckpoint(paths, revision)}
+            onReturnToMessage={() => void model.returnToCheckpointMessage()}
+            onUndoRestore={() => void model.undoLastRestore()}
+          />
+        </Suspense>
       )}
       {updateOpen && (
-        <UpdateDialog
-          updates={model.updates}
-          busy={updateBusy}
-          install={installUpdate}
-          close={() => setUpdateOpen(false)}
-        />
+        <Suspense fallback={null}>
+          <UpdateDialog
+            updates={model.updates}
+            busy={updateBusy}
+            install={installUpdate}
+            close={() => setUpdateOpen(false)}
+          />
+        </Suspense>
       )}
     </div>
   );

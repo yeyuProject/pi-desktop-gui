@@ -121,8 +121,10 @@ export function createSessionHandlers(context: SessionHandlerContext) {
       }
       await save();
     },
-    trustProject: async (id) => {
+    trustProject: async (id, approvalMode) => {
       text(id, 100);
+      if (approvalMode !== undefined && !['auto', 'confirm'].includes(approvalMode))
+        throw new Error('请选择全自动或确认修改。');
       const p = store.project(id);
       if (p.trusted) return;
       const result = await showAppDialog({
@@ -135,6 +137,12 @@ export function createSessionHandlers(context: SessionHandlerContext) {
       });
       if (result.response === 1) {
         p.trusted = true;
+        if (approvalMode !== undefined) {
+          p.approvalMode = approvalMode;
+          for (const session of store.state.sessions)
+            if (session.projectId === id && session.approvalMode === undefined)
+              session.approvalMode = approvalMode;
+        }
         await save();
       }
     },
@@ -259,7 +267,7 @@ export function createSessionHandlers(context: SessionHandlerContext) {
         defaultId: 0,
         cancelId: 0,
       });
-      if (result.response !== 1) return 0;
+      if (result.response !== 1) return null;
       const removable = new Set<string>();
       for (const id of candidates) {
         const session = store.state.sessions.find((item) => item.id === id);
@@ -314,7 +322,8 @@ export function createSessionHandlers(context: SessionHandlerContext) {
         const relative = path.relative(root, resolved);
         return relative && !relative.startsWith('..') && !path.isAbsolute(relative);
       });
-      if (!inside || !resolved.endsWith('.jsonl')) throw new Error('只能打开 Pi 会话目录中的会话');
+      if (!inside || !resolved.endsWith('.jsonl'))
+        throw new Error('只能打开 Pi 会话目录里的 .jsonl 会话文件。');
       return adoptSessionFile(resolved);
     },
     usageSummary: async () => {

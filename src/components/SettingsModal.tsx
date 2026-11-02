@@ -18,6 +18,8 @@ import {
 } from 'lucide-react';
 import { platform } from '../lib/platform';
 import { readableError } from '../lib/format';
+import { classifyModelError, redact } from '../../shared/errors';
+import { useEffect, useState } from 'react';
 import { IconButton } from './IconButton';
 import { Modal } from './Modal';
 import { CodeBlock } from './conversation/Markdown';
@@ -82,6 +84,14 @@ export function SettingsModal(
     | 'setThinking'
   > & { updatePanel: ReactNode },
 ) {
+  const [saved, setSaved] = useState(false);
+  const [connectionError, setConnectionError] = useState('');
+  useEffect(() => {
+    if (saved) {
+      const timer = setTimeout(() => setSaved(false), 2000);
+      return () => clearTimeout(timer);
+    }
+  }, [saved]);
   const {
     runtime,
     environment,
@@ -120,6 +130,33 @@ export function SettingsModal(
     draftKeys.some((key) => prefs[key] !== props.state!.settings[key]),
   );
   const guard = useUnsavedChanges(dirty);
+  const unsaved = (key: (typeof draftKeys)[number]) =>
+    prefs && props.state && prefs[key] !== props.state.settings[key] ? <small>未保存</small> : null;
+  const appearanceKeys = [
+    'theme',
+    'uiStyle',
+    'fontScale',
+    'sidebarWidth',
+    'inspectorWidth',
+    'inspectorSplit',
+    'expandThinking',
+  ] as const;
+  const appearance = (value: NonNullable<typeof prefs>) => {
+    setPrefs(value);
+    const patch = Object.fromEntries(appearanceKeys.map((key) => [key, value[key]]));
+    void attempt(() => api.invoke('saveSettings', patch));
+  };
+  useEffect(() => {
+    if (
+      !settingsOpen ||
+      !prefs ||
+      settingsTab !== 'environment' ||
+      !/Node/i.test(environment?.errors[0] ?? '')
+    )
+      return;
+    const frame = requestAnimationFrame(() => document.getElementById('settings-node')?.focus());
+    return () => cancelAnimationFrame(frame);
+  }, [settingsOpen, settingsTab, Boolean(prefs)]);
   const requestClose = () => {
     if (!pending) guard.confirmLeave(() => setSettingsOpen(false));
   };
@@ -193,7 +230,7 @@ export function SettingsModal(
                     </p>
                   ))}
                   <label className="field-label">
-                    Pi 入口 <small>留空自动检测，支持 cli.js 与官方可执行文件</small>
+                    Pi 入口 {unsaved('piPath')} <small>保存后，下次启动 Pi 时生效；留空自动检测</small>
                   </label>
                   <div className="path-field">
                     <input
@@ -205,11 +242,12 @@ export function SettingsModal(
                     <button onClick={() => void chooseSettingPath('pi')}>选择</button>
                   </div>
                   <label className="field-label">
-                    Node.js 入口 <small>用于启动 JavaScript 版 Pi</small>
+                    Node.js 入口 {unsaved('nodePath')} <small>保存后，下次启动 Pi 时生效</small>
                   </label>
                   <div className="path-field">
                     <input
                       aria-label="Node.js 入口"
+                      id="settings-node"
                       value={prefs.nodePath}
                       placeholder={environment?.nodePath || '自动检测'}
                       onChange={(e) => setPrefs({ ...prefs, nodePath: e.target.value })}
@@ -217,7 +255,7 @@ export function SettingsModal(
                     <button onClick={() => void chooseSettingPath('node')}>选择</button>
                   </div>
                   <label className="field-label">
-                    Pi 配置目录 <small>复用已有模型、凭据和扩展</small>
+                    Pi 配置目录 {unsaved('agentDir')} <small>保存后，下次启动 Pi 时生效</small>
                   </label>
                   <div className="path-field">
                     <input
@@ -270,7 +308,7 @@ export function SettingsModal(
                       ? '已发现凭据配置，连接状态以实际请求为准'
                       : '尚未发现 Pi 凭据文件；也可以使用环境变量配置'}
                   </div>
-                  {!selected && <p className="environment-note">请先新建对话，再连接 Pi 获取模型列表。</p>}
+                  {!selected && <p className="environment-note">请先新建会话，再连接 Pi 获取模型列表。</p>}
                   <label className="field-label">当前模型</label>
                   <select
                     className="input"
@@ -332,11 +370,16 @@ export function SettingsModal(
                       onClick={() =>
                         void action(async () => {
                           setTestResult('正在连接…');
+                          setConnectionError('');
                           try {
                             const r = await api.invoke('testConnection', selected!.id);
                             setTestResult(`连接成功 · ${r.elapsed} ms · ${r.text.slice(0, 100)}`);
                           } catch (e) {
-                            setTestResult('连接失败：' + readableError(e));
+                            const raw = e instanceof Error ? e.message : String(e);
+                            setConnectionError(redact(raw));
+                            const description = classifyModelError(raw);
+                            readableError(e);
+                            setTestResult(`${description.title}。${description.detail}`);
                           }
                         })
                       }
@@ -347,6 +390,11 @@ export function SettingsModal(
                     <small>将发送一次简短请求，可能产生模型费用。</small>
                   </div>
                   {testResult && <p className="test-result">{testResult}</p>}
+                  {connectionError && (
+                    <button onClick={() => void attempt(() => api.invoke('copy', connectionError))}>
+                      复制详情
+                    </button>
+                  )}
                   <details className="setup-guide" open={!environment?.authExists}>
                     <summary>登录或配置模型</summary>
                     <button
@@ -387,7 +435,7 @@ export function SettingsModal(
                         className={prefs.uiStyle === style ? 'active' : ''}
                         aria-pressed={prefs.uiStyle === style}
                         onClick={() =>
-                          setPrefs({ ...prefs, uiStyle: style, theme: styleTheme(prefs.theme, style) })
+                          appearance({ ...prefs, uiStyle: style, theme: styleTheme(prefs.theme, style) })
                         }
                       >
                         {STYLE_META[style].label}
@@ -416,7 +464,7 @@ export function SettingsModal(
                           className={prefs.theme === key ? 'active' : ''}
                           key={key}
                           onClick={() => {
-                            setPrefs({ ...prefs, theme: key });
+                            appearance({ ...prefs, theme: key });
                           }}
                         >
                           {Icon ? <Icon size={23} /> : <span className="theme-swatch" data-theme={key} />}
@@ -436,7 +484,7 @@ export function SettingsModal(
                     value={prefs.fontScale}
                     onChange={(e) => {
                       const fontScale = Number(e.target.value);
-                      setPrefs({ ...prefs, fontScale });
+                      appearance({ ...prefs, fontScale });
                     }}
                   />
                   <label className="field-label">
@@ -451,7 +499,7 @@ export function SettingsModal(
                     value={prefs.sidebarWidth}
                     onChange={(e) => {
                       const sidebarWidth = Number(e.target.value);
-                      setPrefs({ ...prefs, sidebarWidth });
+                      appearance({ ...prefs, sidebarWidth });
                     }}
                   />
                   <label className="field-label">
@@ -466,7 +514,7 @@ export function SettingsModal(
                     value={prefs.inspectorWidth}
                     onChange={(e) => {
                       const inspectorWidth = Number(e.target.value);
-                      setPrefs({ ...prefs, inspectorWidth });
+                      appearance({ ...prefs, inspectorWidth });
                     }}
                   />
                   <label className="field-label">
@@ -481,14 +529,14 @@ export function SettingsModal(
                     value={prefs.inspectorSplit}
                     onChange={(e) => {
                       const inspectorSplit = Number(e.target.value);
-                      setPrefs({ ...prefs, inspectorSplit });
+                      appearance({ ...prefs, inspectorSplit });
                     }}
                   />
                   <label className="check-row">
                     <input
                       type="checkbox"
                       checked={prefs.expandThinking}
-                      onChange={(e) => setPrefs({ ...prefs, expandThinking: e.target.checked })}
+                      onChange={(e) => appearance({ ...prefs, expandThinking: e.target.checked })}
                     />
                     <span>
                       默认展开思考过程
@@ -496,7 +544,8 @@ export function SettingsModal(
                     </span>
                   </label>
                   <label className="field-label">
-                    代码编辑器 <small>留空时在{platform.fileManager}中定位文件</small>
+                    代码编辑器 {unsaved('editorPath')}{' '}
+                    <small>保存后生效；留空时在{platform.fileManager}中定位文件</small>
                   </label>
                   <div className="path-field">
                     <input
@@ -517,6 +566,7 @@ export function SettingsModal(
                     />
                     <span>
                       任务完成时发送系统通知
+                      {prefs.notifyOnFinish !== props.state?.settings.notifyOnFinish && <small>未保存</small>}
                       <small>当前未查看的会话完成时提醒</small>
                     </span>
                   </label>
@@ -531,6 +581,7 @@ export function SettingsModal(
                         {key === 'notifyOnApproval'
                           ? '审批或等待回复时发送系统通知'
                           : '任务失败时发送系统通知'}
+                        {prefs[key] !== props.state?.settings[key] && <small>未保存</small>}
                       </span>
                     </label>
                   ))}
@@ -596,13 +647,6 @@ export function SettingsModal(
                     运行差异基线保留 7 天，总计不超过 200 MiB。清理基线不影响项目与 Pi 会话文件。
                   </p>
                   <h3>旧空会话</h3>
-                  <button
-                    disabled={pending || running}
-                    onClick={() => void attempt(() => api.invoke('clearLocalData'))}
-                  >
-                    <Trash2 size={15} />
-                    清除桌面本地数据…
-                  </button>
                   <p className="settings-copy">
                     新建后未使用的占位不会成为长期历史。旧版本留下的空会话可在这里手动清理；草稿、附件、图片、自定义设置和正在使用的会话会保留。
                   </p>
@@ -611,17 +655,25 @@ export function SettingsModal(
                     onClick={() =>
                       void attempt(async () => {
                         const count = await api.invoke('cleanupEmptySessions');
-                        setNotice(
-                          count
-                            ? `已清理 ${count} 个空会话`
-                            : '未清理会话；有内容、自定义设置或正在使用的会话会保留。',
-                        );
+                        if (count === null) return;
+                        setNotice(count ? `已清理 ${count} 个空会话` : '没有可清理的会话。');
                       })
                     }
                   >
                     <Trash2 size={15} />
                     清理空会话
                   </button>
+                  <section className="danger-actions">
+                    {' '}
+                    <h3>危险操作</h3>
+                    <button
+                      disabled={pending || running}
+                      onClick={() => void attempt(() => api.invoke('clearLocalData'))}
+                    >
+                      <Trash2 size={15} />
+                      清除桌面本地数据…
+                    </button>
+                  </section>
                 </>
               )}
             </div>
@@ -629,13 +681,22 @@ export function SettingsModal(
           <footer>
             <span className="settings-footer-note">
               {dirty
-                ? '有尚未保存的修改。外观为预览，保存后长期生效。'
-                : '设置已保存。运行环境路径在下一次启动对应进程时生效。'}
+                ? '未保存。外观立即预览；其他设置需要保存。'
+                : saved
+                  ? '已保存'
+                  : '运行环境路径在下一次启动对应进程时生效。'}
             </span>
             <button disabled={pending} onClick={requestClose}>
               关闭
             </button>
-            <button className="primary" disabled={pending && !running} onClick={saveSettings}>
+            <button
+              className="primary"
+              disabled={pending && !running}
+              onClick={async () => {
+                await saveSettings();
+                setSaved(true);
+              }}
+            >
               {pending ? <LoaderCircle size={14} className="spin" /> : <Check size={14} />}保存设置
             </button>
           </footer>

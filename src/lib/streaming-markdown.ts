@@ -9,12 +9,27 @@ export interface MarkdownParts {
   tail: string;
   plain: boolean;
 }
-const chunkSize = 4096;
+const chunkSize = 1024;
+function hasReferenceDefinition(text: string) {
+  if (!/^ {0,3}\[[^\]]+\]:\s*\S/m.test(text)) return false;
+  let fence: string | undefined;
+  let width = 0;
+  for (const line of text.split('\n')) {
+    const marker = /^ {0,3}(`{3,}|~{3,})(.*)$/.exec(line);
+    if (marker) {
+      if (!fence) {
+        fence = marker[1][0];
+        width = marker[1].length;
+      } else if (marker[1][0] === fence && marker[1].length >= width && !marker[2].trim()) fence = undefined;
+    } else if (!fence && /^ {0,3}\[[^\]]+\]:\s*\S/.test(line)) return true;
+  }
+  return false;
+}
 /** Freeze complete root blocks, retaining the last two for list/table continuation.
  * References can change earlier blocks, so those documents retain whole-document semantics.
  */
 export function streamingMarkdown(text: string, previous?: MarkdownParts): MarkdownParts {
-  const references = /\[[^\]\n]*\](?!\()/.test(text);
+  const references = hasReferenceDefinition(text);
   if (references || text.length < chunkSize * 2)
     return { source: text, blocks: [], offset: 0, tail: text, plain: text.length > 16000 };
   const append = previous && text.startsWith(previous.source);

@@ -41,6 +41,7 @@ export function ProvidersTab({
   refresh,
   addJson,
   configEditor,
+  onAuthenticated,
 }: Pick<
   FeatureModel,
   | 'session'
@@ -74,7 +75,7 @@ export function ProvidersTab({
   | 'refresh'
   | 'addJson'
   | 'configEditor'
->) {
+> & { onAuthenticated: (provider: string) => Promise<void> }) {
   return (
     <>
       <h3>登录与凭据</h3>
@@ -115,7 +116,7 @@ export function ProvidersTab({
             void run(async () => {
               await api.invoke('login', session.id, provider, 'oauth');
               await refresh();
-              setNotice('登录成功');
+              await onAuthenticated(provider);
             })
           }
         >
@@ -135,7 +136,7 @@ export function ProvidersTab({
             void run(async () => {
               await api.invoke('login', session.id, provider, 'api_key');
               await refresh();
-              setNotice('凭据已保存');
+              await onAuthenticated(provider);
             })
           }
         >

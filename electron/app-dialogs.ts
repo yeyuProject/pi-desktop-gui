@@ -21,7 +21,7 @@ export class AppDialogRequests {
   }
 
   show(options: DialogOptions) {
-    const buttons = [...(options.buttons ?? ['确定'])];
+    const buttons = [...(options.buttons ?? ['知道了'])];
     const cancelId = options.cancelId ?? 0;
     if (!buttons.length || !Number.isInteger(cancelId) || cancelId < 0 || cancelId >= buttons.length)
       throw new Error('无效对话框选项');

@@ -47,7 +47,7 @@ try {
   await page.getByRole('button', { name: '清除桌面本地数据…', exact: true }).click();
   const confirmation = page.getByRole('dialog', { name: '清除桌面本地数据并重启？', exact: true });
   await confirmation.waitFor();
-  await expect(confirmation).toContainText('外部项目源码、Pi 外部历史和供应商登录凭据');
+  await expect(confirmation).toContainText('项目源码、Pi 的历史记录和登录凭据不受影响');
   await confirmation.getByRole('button', { name: '取消', exact: true }).click();
   assert.equal((await page.evaluate(() => window.desktop.invoke('bootstrap'))).state.sessions.length, 1);
   await page.getByRole('button', { name: '关闭', exact: true }).last().click();

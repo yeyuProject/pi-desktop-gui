@@ -71,7 +71,7 @@ test('save rejection remains a failure and does not reconnect or overwrite the o
       connected = true;
       return { applied: true };
     }),
-    /其他程序修改/,
+    /在你编辑时被别处改过了/,
   );
   assert.equal(connected, false);
   assert.equal(await fs.readFile(f.file, 'utf8'), f.original);
@@ -98,7 +98,7 @@ test('the native Pi file lock prevents a config save from overwriting a concurre
   const saving = f.config.save(f.session.id, 'settings', false, f.document).finally(() => {
     finished = true;
   });
-  const rejected = assert.rejects(saving, /其他程序修改/);
+  const rejected = assert.rejects(saving, /在你编辑时被别处改过了/);
   try {
     await new Promise((resolve) => setTimeout(resolve, 50));
     assert.equal(finished, false, 'desktop save must wait while native Pi owns the file lock');
@@ -136,6 +136,6 @@ test('malformed config exposes its repair document and path, retaining backup an
   assert.equal(JSON.parse(await fs.readFile(f.file, 'utf8')).client_secret, 'local-test-value');
   await assert.rejects(
     f.config.save(f.session.id, 'settings', false, { ...document, text: '{}' }),
-    /其他程序修改/,
+    /在你编辑时被别处改过了/,
   );
 });

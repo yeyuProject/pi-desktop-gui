@@ -22,6 +22,7 @@ import path from 'node:path';
 import { promisify } from 'node:util';
 import { classifyModelError } from '../shared/errors';
 import { goalNotificationTitle } from '../shared/goal';
+import { InvalidRequestError, describeSystemError } from '../shared/errors';
 import { isDraftQuote, splitMessageQuotes } from '../shared/message-content';
 import {
   sideChatContext,
@@ -78,6 +79,24 @@ let sideFlight: SideFlight | undefined;
 let workspaceCleanup: Promise<void> | undefined;
 let updates: UpdateService;
 let quitting = false;
+const draftWaiters = new Map<string, () => void>();
+async function flushRendererDraft() {
+  if (!window || window.isDestroyed() || !workbenchReady || !rendererResponsive || !store.storage.writable)
+    return;
+  const id = randomUUID();
+  await new Promise<void>((resolve, reject) => {
+    const timer = setTimeout(() => {
+      draftWaiters.delete(id);
+      reject(new Error('草稿未能及时保存，请回到输入框检查后重试。'));
+    }, 10000);
+    draftWaiters.set(id, () => {
+      clearTimeout(timer);
+      draftWaiters.delete(id);
+      resolve();
+    });
+    send({ type: 'flushDraft', id });
+  });
+}
 let closing = false;
 let sessionEnding = false;
 let activeOperations = 0;
@@ -163,6 +182,7 @@ function showAppDialog(options: DialogOptions, allowNativeFallback = false) {
   return unavailable ? dialog.showMessageBox(window, options) : appDialogs.show(options);
 }
 async function confirmUnsavedQuit(error: unknown, copyOnly = false) {
+  console.error('Quit persistence:', error);
   // A renderer-backed dialog must still be able to reply while close is paused.
   quitting = false;
   const result = await showAppDialog(
@@ -173,7 +193,7 @@ async function confirmUnsavedQuit(error: unknown, copyOnly = false) {
         (copyOnly
           ? '会话服务已关闭，窗口仅保留用于复制尚未保存的内容。请先复制需要保留的草稿。\n\n'
           : '未保存的草稿和设置仍保留在窗口中。建议留在窗口，先复制需要保留的内容。\n\n') +
-        String(error instanceof Error ? error.message : error),
+        (describeSystemError(error) ?? '保存没有完成，请检查磁盘空间和数据目录权限。'),
       buttons: [copyOnly ? '保留窗口以复制内容' : '留在窗口', '仍然退出，丢弃未保存内容'],
       defaultId: 0,
       cancelId: 0,
@@ -204,10 +224,20 @@ async function watchSelectedProject() {
   const revision = ++watcherRevision;
   workspaceWatcher?.dispose();
   workspaceWatcher = undefined;
+  workspace.watchProject(project?.id);
   if (!project) return;
-  const watcher = await WorkspaceWatcher.watch(project, (event) => {
-    if (!quitting && revision === watcherRevision) send(event);
-  });
+  const watcher = await WorkspaceWatcher.watch(
+    project,
+    (event) => {
+      if (!quitting && revision === watcherRevision) send(event);
+    },
+    undefined,
+    {
+      changed: (paths) => workspace.changedPaths(project.id, paths),
+      running: () => service?.requiresStopConfirmation ?? false,
+      failed: () => workspace.watchProject(undefined),
+    },
+  );
   if (quitting || revision !== watcherRevision) watcher.dispose();
   else workspaceWatcher = watcher;
 }
@@ -289,10 +319,17 @@ function notifyAttention(runtime: Runtime) {
     if (window.isMinimized()) window.restore();
     window.show();
     window.focus();
-    if (store.state.sessions.some((s) => s.id === session.id)) {
-      store.selectSession(session.id);
-      void save();
-    }
+    void flushRendererDraft()
+      .then(async () => {
+        if (closing || quitting || !store.state.sessions.some((s) => s.id === session.id)) return;
+        store.selectSession(session.id);
+        await save();
+        if (runtime.dialogs.some((dialog) => dialog.approval))
+          send({ type: 'action', action: 'focusApproval' });
+      })
+      .catch((error) => {
+        console.error('Notification navigation failed:', error);
+      });
   });
   toast.show();
   _lastToast = toast;
@@ -357,7 +394,7 @@ function changeZoom(direction: number) {
 }
 function text(value: unknown, max = 1024 * 1024): asserts value is string {
   if (typeof value !== 'string' || value.length > max || value.includes('\0'))
-    throw new Error('输入格式无效');
+    throw new InvalidRequestError('输入格式无效');
 }
 function strings(value: unknown): asserts value is string[] {
   if (
@@ -365,7 +402,7 @@ function strings(value: unknown): asserts value is string[] {
     value.length > 1000 ||
     !value.every((v) => typeof v === 'string' && v.length < 4096 && !v.includes('\0'))
   )
-    throw new Error('列表格式无效');
+    throw new InvalidRequestError('列表格式无效');
 }
 // The workspace/terminal checks below await I/O before the handler is reached. Record
 // an accepted session intent first, so another New click cannot reuse its stable ID.
@@ -408,12 +445,17 @@ async function newSessionFromMenu() {
     store.assertWritable();
     activeOperations++;
     try {
+      await flushRendererDraft();
       await newSession();
     } finally {
       finishOperation();
     }
   } catch (error) {
-    await showAppDialog({ message: '无法新建对话', detail: String(error) });
+    console.error('New session from menu failed:', error);
+    await showAppDialog({
+      message: '无法新建会话',
+      detail: describeSystemError(error) ?? '草稿保存没有完成，请处理后再试。',
+    });
   }
 }
 function sessionRoots() {
@@ -672,7 +714,7 @@ const handlers: Record<
     const result = await showAppDialog({
       type: 'warning',
       message: '清除桌面本地数据并重启？',
-      detail: `将永久清除 ${store.dir} 中的会话索引、草稿、草稿图片、备份、代码快照、桌面会话文件和独立对话工作目录。外部项目源码、Pi 外部历史和供应商登录凭据不在此范围内。请先导出需要保留的内容。`,
+      detail: `将永久删除 Pi Desktop 的本地数据：会话列表、草稿、备份、检查点和独立对话的文件。项目源码、Pi 的历史记录和登录凭据不受影响。数据目录：${store.dir}。请先导出需要保留的内容。`,
       buttons: ['取消', '清除并重启'],
       defaultId: 0,
       cancelId: 0,
@@ -704,6 +746,34 @@ const handlers: Record<
     appDialogsReady = true;
     rendererResponsive = true;
     if (workbenchReady) void acknowledgeUpdateHealth(app.getVersion()).catch(() => {});
+  },
+  logRendererError: (value) => {
+    text(value, 16000);
+    const id = store.state.selectedSessionId;
+    if (id) service.get(id).logRendererError(value);
+  },
+  getToolOutput: async (id, toolId) => {
+    text(id, 100);
+    text(toolId, 1000);
+    const agent = service.get(id);
+    const message = (await agent.history(id)).findLast(
+      (message) =>
+        (message.role === 'toolResult' && message.toolCallId === toolId) ||
+        (toolId === 'desktop-bash' && message.role === 'bashExecution'),
+    );
+    return message
+      ? message.role === 'bashExecution'
+        ? String(message.output ?? '')
+        : messageText(message)
+      : (agent.runtime.tools.find((tool) => tool.id === toolId)?.output ?? '');
+  },
+  draftFlushed: (id) => {
+    text(id, 100);
+    draftWaiters.get(id)?.();
+  },
+  recheckCrash: async (id) => {
+    text(id, 100);
+    await service.get(id).recheckCrash();
   },
   respondAppDialog: (id, response) => {
     text(id, 100);
@@ -899,14 +969,26 @@ async function createWindow() {
     window?.webContents.setZoomFactor(saved.zoom ?? 1);
     if (saved.maximized) window?.maximize();
     window?.show();
-    if (!closing && !quitting && store.storage.writable)
+    const cleanup = () => {
+      if (closing || quitting || !store.storage.writable) return;
+      if (service.hasPendingWork) {
+        const timer = setTimeout(cleanup, 10000);
+        timer.unref();
+        return;
+      }
       workspaceCleanup = workspace.cleanup().catch((error) => {
-        dialog.showErrorBox(
-          '检查点清理未完成',
-          `应用可以继续使用，请检查本地数据目录的权限和磁盘空间。\n\n${String(error)}`,
-        );
+        console.error('Checkpoint cleanup:', error);
+        dialog.showErrorBox('检查点清理未完成', '应用可以继续使用，请检查本地数据目录的权限和磁盘空间。');
       });
+    };
+    const cleanupTimer = setTimeout(cleanup, 60000);
+    cleanupTimer.unref();
   });
+  const visibility = () => service.setVisible(Boolean(window?.isVisible() && !window?.isMinimized()));
+  window.on('hide', visibility);
+  window.on('minimize', visibility);
+  window.on('show', visibility);
+  window.on('restore', visibility);
   for (const event of ['resize', 'move', 'maximize', 'unmaximize'] as const)
     window.on(event as 'resize', () => void rememberWindow());
   window.webContents.on('zoom-changed', (_event, direction) => changeZoom(direction === 'in' ? 1 : -1));
@@ -935,6 +1017,10 @@ async function createWindow() {
     closing = true;
     void (async () => {
       try {
+        // Capture the close-time bounds before either renderer or disk persistence yields.
+        const finalWindowWrite = writeWindowState();
+        void finalWindowWrite.catch(() => {});
+        await flushRendererDraft();
         service.suspendReload(true);
         if (service.requiresStopConfirmation || sideFlight) {
           const result = await showAppDialog(
@@ -969,9 +1055,6 @@ async function createWindow() {
         quitting = true;
         clearTimeout(windowTimer);
         windowTimer = undefined;
-        // Capture the close-time bounds before persistence/disposal can yield to
-        // late native resize events; still await this write before destroying.
-        const finalWindowWrite = writeWindowState();
         // First await only the already-enqueued filesystem writes. If they fail,
         // the user can stay before any session service has been disposed.
         let discardUnsaved = false;
@@ -985,6 +1068,8 @@ async function createWindow() {
         // a queued model read can otherwise wait for a dialog that disposal closes.
         store.stopRecovery();
         await service.dispose();
+        await workspace.flush();
+        await workspace.disposeRestoreCopies();
         await waitForOperations();
         await configurationWrites;
         // Keep a defensive final barrier for disposal-triggered writes. Never
@@ -1003,6 +1088,17 @@ async function createWindow() {
         updates.dispose();
         window?.destroy();
         app.quit();
+      } catch (error) {
+        quitting = false;
+        console.error('Close failed:', error);
+        await showAppDialog(
+          {
+            type: 'error',
+            message: '暂时不能退出，请先检查未保存的内容。',
+            detail: describeSystemError(error) ?? '草稿或文件保存没有完成，详情已记入诊断。请处理后再退出。',
+          },
+          true,
+        );
       } finally {
         if (!quitting) service.suspendReload(false);
         closing = false;
@@ -1116,6 +1212,7 @@ else {
       });
       service.on('attention', notifyAttention);
       service.on('runtimeRemoved', (sessionId) => {
+        void workspace.releaseSession(sessionId).catch((error) => console.error(error));
         attention.delete(sessionId);
         updateAttentionBadge();
         send({ type: 'runtimeRemoved', sessionId });
@@ -1153,6 +1250,7 @@ else {
         },
         busy: () => service.hasPendingWork || updatingConfiguration || activeOperations > 0,
         beforeInstall: async () => {
+          await flushRendererDraft();
           if (closing || sessionEnding) throw new Error('应用正在退出，请下次启动后重试更新');
           if (!store.storage.writable && !store.storage.newerFormat) store.assertWritable();
           if (sideFlight) {
@@ -1173,6 +1271,8 @@ else {
             }
           }
           await service.disconnect();
+          await workspace.flush();
+          await workspace.disposeRestoreCopies();
           await workspaceCleanup;
           if (store.storage.writable) await store.flush();
           clearTimeout(windowTimer);
@@ -1197,16 +1297,16 @@ else {
           event.sender !== window.webContents ||
           event.senderFrame !== window.webContents.mainFrame
         )
-          throw new Error('无效 IPC 来源');
+          throw new InvalidRequestError('无效 IPC 来源');
         if (
           !Object.prototype.hasOwnProperty.call(ipcHandlers, method) ||
           !Array.isArray(args) ||
           args.length > 6
         )
-          throw new Error('无效请求');
+          throw new InvalidRequestError('无效请求');
         let trackedOperation = false;
         try {
-          if (quitting) throw new Error('应用正在关闭，请稍后重新打开');
+          if (quitting) throw new Error('应用正在关闭，请等关闭完成后再打开。');
           // Late layout cleanup must not create writes after the update's persistence barrier.
           if (updates.state.installing && method === 'saveView') return;
           const policy = invocationPolicy(method as keyof ApiMap, args, store.state.settings);
@@ -1255,6 +1355,13 @@ else {
           }
           return await execute();
         } catch (e) {
+          const diagnostic =
+            e instanceof Error
+              ? [e.stack, e.cause instanceof Error ? e.cause.stack : e.cause].filter(Boolean).join('\n')
+              : String(e);
+          service.runtime.diagnostic = [...service.runtime.diagnostic, redact(diagnostic).slice(-4000)].slice(
+            -100,
+          );
           // eslint-disable-next-line preserve-caught-error -- The unsanitized cause must not cross the IPC boundary.
           throw new Error(redact(e instanceof Error ? e.message : String(e)));
         } finally {
@@ -1293,7 +1400,7 @@ else {
             label: '文件',
             submenu: [
               {
-                label: '新建对话',
+                label: '新建会话',
                 accelerator: 'CmdOrCtrl+N',
                 registerAccelerator: false,
                 click: () => {

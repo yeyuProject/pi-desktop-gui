@@ -246,7 +246,7 @@ test('normal and running exports preserve the source file, live partial reply an
   assert.deepEqual(entries.slice(0, 2), f.records);
   assert.equal(entries[2].message.content, '<partial & reply>');
   assert.equal(entries[2].message.stopReason, 'aborted');
-  assert.match(entries[2].message.errorMessage, /导出快照/);
+  assert.match(entries[2].message.errorMessage, /导出时此回复尚未完成/);
   assert.equal(entries[2].parentId, 'user');
   assert.equal(entries[3].parentId, entries[2].id);
   assert.equal(entries[3].customType, 'desktop-export-output');

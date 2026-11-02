@@ -386,16 +386,16 @@ try {
   const renamed = await newChat();
   permanent.add(renamed.id);
   const row = page.locator(`[data-session-id="${renamed.id}"]`);
-  await row.getByRole('button', { name: '新对话 会话操作', exact: true }).click();
+  await row.getByRole('button', { name: '新会话 会话操作', exact: true }).click();
   await page.getByRole('menuitem', { name: '重命名', exact: true }).click();
   const rename = page.getByRole('dialog', { name: '重命名会话', exact: true });
-  await rename.getByRole('textbox', { name: '新名称', exact: true }).fill('新对话');
+  await rename.getByRole('textbox', { name: '新名称', exact: true }).fill('新会话');
   await rename.getByRole('button', { name: '保存', exact: true }).click();
   await rename.waitFor({ state: 'hidden' });
-  await row.getByRole('button', { name: '新对话 会话操作', exact: true }).click();
+  await row.getByRole('button', { name: '新会话 会话操作', exact: true }).click();
   await page.getByRole('menuitem', { name: '置顶', exact: true }).click();
   await waitField(renamed.id, 'pinned', true);
-  await row.getByRole('button', { name: '新对话 会话操作', exact: true }).click();
+  await row.getByRole('button', { name: '新会话 会话操作', exact: true }).click();
   await page.getByRole('menuitem', { name: '取消置顶', exact: true }).click();
   await waitField(renamed.id, 'pinned', false);
   await select(f.sessionId);
@@ -412,7 +412,7 @@ try {
   const deletedId = deleted.id;
   await page
     .locator(`[data-session-id="${deletedId}"]`)
-    .getByRole('button', { name: '新对话 会话操作', exact: true })
+    .getByRole('button', { name: '新会话 会话操作', exact: true })
     .click();
   await page.getByRole('menuitem', { name: '删除', exact: true }).click();
   const deletion = page.getByRole('dialog', { name: /删除会话/ });

@@ -4,7 +4,6 @@ import type { Workbench } from '../hooks/useWorkbench';
 import { RichText } from './conversation/Markdown';
 import { parseUserMessage, quoteLabel } from '../../shared/message-content';
 import { useLayer, topLayer } from '../hooks/useLayer';
-import '../styles/side-chat.css';
 
 export function SideChatPanel({
   sideChat,

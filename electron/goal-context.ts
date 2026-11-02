@@ -15,6 +15,7 @@ export function goalContext(goal: DesktopGoalState): string {
     '多步工作用 desktop_goal_plan 维护对应目标的简短计划，单步工作跳过；更新计划不能代替实际工作。上下文压缩后可用 desktop_goal_get 核对。',
     '完成审计：先默认尚未完成。从目标及引用文件和要求中列出每一项具体要求，逐项核对权威证据（文件、命令输出、测试结果、实际运行行为）是否覆盖该项。证据不确定或间接就视为未完成，继续工作。必须证明已完成，而不只是没发现剩余工作。',
     '阻碍审计：第一次遇到阻碍不报告；同一阻碍连续出现 3 个 Goal 轮次后，且无法在没有用户输入或外部条件改变时继续推进，才提交 blocked。工作难、慢、不确定或需要澄清都不是阻碍。用户恢复后重新计数。',
+    // eslint-disable-next-line pi-desktop/user-copy -- Model-only tool instructions name the required protocol fields.
     '审计通过后用 desktop_goal_update 提交当前 goal_id、revision、status 和 summary。completed 或 blocked 必须是本次回复唯一的直接工具调用。普通文字回复不能结束 Goal。',
     '不得因为用量快用完或准备停止而提交 completed。只有用户在消息中明确要求暂停才可以提交 paused，不得自行暂停。',
     '用户的新消息用于补充或修正当前目标；尊重暂停、停止和取消，不自行创建或替换目标。',

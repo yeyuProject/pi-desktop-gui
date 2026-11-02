@@ -1,4 +1,36 @@
 export type ModelErrorKind = 'auth' | 'quota' | 'busy' | 'context' | 'model' | 'network' | 'unknown';
+export class InvalidRequestError extends Error {
+  constructor(message: string) {
+    super(`InvalidRequestError: ${message}`);
+    this.name = 'InvalidRequestError';
+  }
+}
+export function describeSystemError(error: unknown): string | undefined {
+  const value =
+    error && typeof error === 'object' ? (error as { code?: string; message?: string }) : undefined;
+  const code =
+    value?.code ??
+    /\b(ENOENT|EACCES|EPERM|ENOSPC|EBUSY|ETIMEDOUT|ECONNREFUSED|ENOTFOUND)\b/.exec(
+      value?.message ?? String(error),
+    )?.[1];
+  switch (code) {
+    case 'ENOENT':
+      return '找不到文件或目录';
+    case 'EACCES':
+    case 'EPERM':
+      return '没有读写权限';
+    case 'ENOSPC':
+      return '磁盘空间不足';
+    case 'EBUSY':
+      return '文件被其他程序占用';
+    case 'ETIMEDOUT':
+    case 'ECONNREFUSED':
+    case 'ENOTFOUND':
+      return '网络连接失败';
+    default:
+      return undefined;
+  }
+}
 export type ModelErrorAction = 'providers' | 'billing' | 'regenerate' | 'compact' | 'model' | 'proxy';
 export interface ModelErrorDescription {
   kind: ModelErrorKind;

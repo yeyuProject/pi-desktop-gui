@@ -30,16 +30,16 @@ export function StorageBanner({
         {!storage.writable && <p>{storage.problem}</p>}
         {recovery?.recoveredFrom ? (
           <p>
-            本地会话索引{recovery.corruptFile ? '已损坏' : '缺失'}，已恢复到 {restoredAt}{' '}
-            的备份。恢复时间之后的草稿改动可能未保存。
+            会话列表数据{recovery.corruptFile ? '损坏了' : '缺失了'}，已用 {restoredAt}{' '}
+            的备份恢复，之后的草稿改动可能丢失。
           </p>
         ) : recovery?.restarted ? (
           <p>未找到可用备份，已重新开始；Pi 会话文件仍在，可在搜索面板 → Pi 历史会话中重新打开。</p>
         ) : null}
         {recovery && (recovery.discardedProjects > 0 || recovery.discardedSessions > 0) && (
           <p>
-            已忽略 {recovery.discardedProjects} 个损坏的项目入口和 {recovery.discardedSessions}{' '}
-            条损坏的会话索引；其余内容已保留。
+            有 {recovery.discardedProjects} 个项目、{recovery.discardedSessions}{' '}
+            个会话的记录损坏了，已跳过，其余内容正常。
           </p>
         )}
         {!!recovery?.repairedSettings && <p>已将 {recovery.repairedSettings} 项无效设置恢复为默认值。</p>}

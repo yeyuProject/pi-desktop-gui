@@ -1,4 +1,6 @@
 import { hidePlanTools } from '../src/lib/plan-transcript';
+import { HistoryDeriver } from '../src/lib/history-derive';
+import { TranscriptIndex } from '../src/lib/transcript-index';
 import * as goalInput from '../shared/goal-input';
 import * as goal from '../shared/goal';
 import * as ask from '../shared/ask';
@@ -203,6 +205,8 @@ function harness(
     '../lib/format': { readableError },
     '../lib/conversation-layout': { hideRecoveredErrors },
     '../lib/plan-transcript': { hidePlanTools },
+    '../lib/history-derive': { HistoryDeriver },
+    '../lib/transcript-index': { TranscriptIndex },
     '../../shared/pi-version': { PI_SOURCE_URL: '' },
   };
   const require = (id: string) => {
@@ -577,13 +581,13 @@ test('failed confirmation stays visibly disabled and a fresh valid navigation re
   const confirm = p.navigation.confirm.bind(p.navigation);
   let calls = 0;
   t.mock.method(p.navigation, 'confirm', () => {
-    if (++calls === 1) throw new Error('TEST_CONFIRMATION_FAILED');
+    if (++calls === 1) throw new Error('测试确认失败');
     return confirm();
   });
   await p.f.current.selectSession(p.original);
   await p.f.settle();
   assert.equal(p.f.current.selectionChanging, true);
-  assert.match(p.f.current.error, /无法确认当前会话.*TEST_CONFIRMATION_FAILED/);
+  assert.match(p.f.current.error, /无法确认当前会话.*测试确认失败/);
   await p.f.current.connect();
   assert.ok(!p.trace.some((entry) => entry.method === 'connect'));
   await p.f.current.selectSession(p.original);
@@ -597,7 +601,7 @@ test('confirmation failure remains visible when a queued external selection comm
   const confirm = p.navigation.confirm.bind(p.navigation);
   let count = 0;
   t.mock.method(p.navigation, 'confirm', () => {
-    if (++count === 1) throw new Error('TEST_CONFIRMATION_FAILED');
+    if (++count === 1) throw new Error('测试确认失败');
     return confirm();
   });
   await p.f.current.selectSession(p.original);
@@ -608,7 +612,7 @@ test('confirmation failure remains visible when a queued external selection comm
   p.f.flush();
   assert.equal(p.f.current.selected?.id, c);
   assert.equal(p.f.current.selectionChanging, true);
-  assert.match(p.f.current.error, /无法确认当前会话.*TEST_CONFIRMATION_FAILED/);
+  assert.match(p.f.current.error, /无法确认当前会话.*测试确认失败/);
   p.f.deferStateCommit(false);
   await p.f.current.selectSession(p.store.session(c));
   await p.f.settle();
@@ -935,10 +939,10 @@ test('current B selection failure belongs to B, never the click-time A closure',
   const selecting = f.current.selectSession(session('B'));
   f.select('B');
   f.flush();
-  connection.reject(new Error('B selection failed'));
+  connection.reject(new Error('B 会话选择失败'));
   await selecting;
   await f.settle();
-  assert.match(f.current.error, /B selection failed/);
+  assert.match(f.current.error, /B 会话选择失败/);
   assert.equal(f.current.pending, false);
   f.select('A');
   f.flush();
@@ -958,13 +962,13 @@ test('an obsolete B failure cannot overwrite the newer C failure or leak into A'
   const c = f.current.selectSession(session('C'));
   f.select('C');
   f.flush();
-  latest.reject(new Error('current C failure'));
+  latest.reject(new Error('当前 C 会话选择失败'));
   await c;
   await f.settle();
   old.reject(new Error('obsolete B failure'));
   await b;
   await f.settle();
-  assert.equal(f.current.error, 'current C failure');
+  assert.equal(f.current.error, '当前 C 会话选择失败');
   f.select('B');
   f.flush();
   assert.equal(f.current.error, '');
@@ -1017,10 +1021,10 @@ test('same-ID callers still expose the latest selection failure', async () => {
   f.flush();
   const two = f.current.selectSession(session('B'));
   f.flush();
-  shared.reject(new Error('shared connection failed'));
+  shared.reject(new Error('共同连接失败'));
   await Promise.all([one, two]);
   await f.settle();
-  assert.match(f.current.error, /shared connection failed/);
+  assert.match(f.current.error, /共同连接失败/);
   assert.equal(f.current.pending, false);
   f.select('A');
   f.flush();
@@ -1204,23 +1208,23 @@ test('a new selection cancels the old transition owner and failures release the 
   await b;
   await f.settle();
   assert.equal(f.current.selectionChanging, true);
-  latest.reject(new Error('selection rejected'));
+  latest.reject(new Error('选择被拒绝'));
   await c;
   await f.settle();
   assert.equal(f.current.selectionChanging, false);
-  assert.match(f.current.error, /selection rejected/);
+  assert.match(f.current.error, /选择被拒绝/);
   f.unmount();
 });
 
 test('failed new chat releases the transition without connecting or changing selection', async () => {
   const f = harness((method) =>
-    method === 'newSession' ? Promise.reject(new Error('creation cancelled')) : Promise.resolve([]),
+    method === 'newSession' ? Promise.reject(new Error('创建被取消')) : Promise.resolve([]),
   );
   await f.current.createSession();
   await f.settle();
   assert.equal(f.current.selectionChanging, false);
   assert.equal(f.current.selected?.id, 'A');
-  assert.match(f.current.error, /creation cancelled/);
+  assert.match(f.current.error, /创建被取消/);
   f.unmount();
 });
 

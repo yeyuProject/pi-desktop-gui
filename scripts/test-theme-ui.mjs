@@ -409,7 +409,7 @@ try {
   );
   const findMenu = (id) => menus.find((item) => item.id === id);
   for (const id of ['file', 'edit', 'view']) assert.ok(findMenu(id), `Native menu ${id} retained`);
-  assert.equal(findMenu('file').items.find((item) => item.label === '新建对话').accelerator, 'CmdOrCtrl+N');
+  assert.equal(findMenu('file').items.find((item) => item.label === '新建会话').accelerator, 'CmdOrCtrl+N');
   for (const role of ['undo', 'redo', 'cut', 'copy', 'paste', 'selectall'])
     assert.ok(
       findMenu('edit').items.some((item) => item.role?.toLowerCase() === role),
@@ -755,7 +755,7 @@ try {
       const win = BrowserWindow.getAllWindows()[0];
       Menu.getApplicationMenu()
         .getMenuItemById('file')
-        .submenu.items.find((item) => item.label === '新建对话')
+        .submenu.items.find((item) => item.label === '新建会话')
         .click({}, win, win.webContents);
     });
     assert.equal(

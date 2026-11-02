@@ -67,6 +67,7 @@ function UserMessageMenu({ text, copy }: { text: string; copy: (text: string) =>
 }
 
 export interface MessageContext {
+  sessionId?: string;
   quoteSources?: Set<string>;
   running: boolean;
   locked: boolean;
@@ -121,6 +122,7 @@ export const ChatMessage = memo(
       return (
         <div>
           <ToolCard
+            sessionId={ctx.sessionId}
             tool={tool}
             expanded={ctx.expanded.includes(tool.id)}
             onToggle={(v) => ctx.toggleTool(tool.id, v)}

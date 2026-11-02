@@ -16,6 +16,10 @@ const configuration = { access: 'write', operation: 'configuration' } as const;
 // Every IPC method gets one entry. Adding an ApiMap method without deciding its
 // storage, quit/update and workspace behavior is a compile error.
 export const IPC_POLICIES: Record<keyof ApiMap, IpcPolicy> = {
+  logRendererError: { ...read, duringDialog: true, duringUpdate: true },
+  getToolOutput: { ...read, duringDialog: true },
+  draftFlushed: { ...read, duringDialog: true, duringUpdate: true },
+  recheckCrash: engineRead,
   retryStorage: read,
   rendererReady: read,
   clearLocalData: engineRead,
@@ -49,6 +53,8 @@ export const IPC_POLICIES: Record<keyof ApiMap, IpcPolicy> = {
   checkpoints: read,
   checkpointPreview: read,
   revertCheckpoint: { ...engineWrite, workspace: 'checkpoint' },
+  revertPreview: read,
+  undoLastRestore: { ...engineWrite, workspace: 'project' },
   revertChanges: { ...engineWrite, workspace: 'project' },
   setEntryLabel: engineWrite,
   saveDraft: { ...write, duringDialog: true },

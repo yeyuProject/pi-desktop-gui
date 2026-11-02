@@ -15,5 +15,8 @@
 @import './styles/resize.css';
 @import './styles/conversation-v014.css';
 @import './styles/titlebar.css';
+@import './styles/side-chat.css';
+@import './styles/workspace-v014.css';
+@import './styles/optimizations.css';
 @import './styles/codex.css';
 @import './styles/claude.css';

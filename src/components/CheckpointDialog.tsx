@@ -1,7 +1,6 @@
 import { useState } from 'react';
 import { Modal } from './Modal';
 import type { CheckpointPreview } from '../../shared/checkpoints';
-import '../styles/workspace-v014.css';
 
 export interface CheckpointDialogProps {
   preview: CheckpointPreview;
@@ -10,6 +9,7 @@ export interface CheckpointDialogProps {
   onClose: () => void;
   onConfirm: (paths: string[], revision: string) => void;
   onReturnToMessage: () => void;
+  onUndoRestore: () => void;
 }
 
 export function CheckpointDialog({
@@ -19,6 +19,7 @@ export function CheckpointDialog({
   onClose,
   onConfirm,
   onReturnToMessage,
+  onUndoRestore,
 }: CheckpointDialogProps) {
   const [selected, setSelected] = useState(
     () => new Set(preview.files.filter((file) => file.selected).map((file) => file.path)),
@@ -37,7 +38,10 @@ export function CheckpointDialog({
             <p>
               已把 {restoredCount} 个文件恢复到第 {preview.turn} 轮之前。
             </p>
-            <button onClick={onReturnToMessage}>同时回到这条消息之前的对话</button>
+            <button onClick={onReturnToMessage}>同时把对话退回到这条消息之前</button>
+            <button disabled={pending} onClick={onUndoRestore}>
+              还原到恢复前
+            </button>
           </>
         ) : (
           <>

@@ -138,6 +138,7 @@ export function createAgentHandlers(context: AgentHandlerContext) {
     readModels: async (id) => {
       text(id, 100);
       await service.get(id).readModels(id, (read) => inSessionWorkspace(id, read));
+      return service.get(id).runtime.models;
     },
     recover: async (id, prompt) => {
       text(id, 100);
@@ -258,7 +259,7 @@ export function createAgentHandlers(context: AgentHandlerContext) {
       const local = found.metadata.scope === 'project';
       const config = new Configuration(store);
       const document = await config.read(id, 'settings', local);
-      if (document.error) throw new Error(`配置格式有误，请在完整 Pi 配置中修复：${document.path}`);
+      if (document.error) throw new Error(`配置文件格式有误，请修复后再试：${document.path}`);
       const values = toggleResourceSetting(JSON.parse(document.text), found, enabled);
       await config.save(id, 'settings', local, { ...document, text: JSON.stringify(values) });
       await service.reloadConfiguration(id, local);
@@ -420,7 +421,7 @@ export function createAgentHandlers(context: AgentHandlerContext) {
         type: 'warning',
         message: '强制结束当前 Pi 会话进程？',
         detail:
-          '会尝试终止 Pi 及其子进程，已写入的项目文件将保留。已脱离进程树的后台服务可能继续占用端口，请到终端停止。',
+          '会强制关闭 Pi 及它启动的命令，已写入的文件会保留。放到后台单独运行的服务不会被关闭，需要自己在终端停止。',
         buttons: ['继续等待', '强制结束'],
         defaultId: 0,
         cancelId: 0,

@@ -47,6 +47,26 @@ async function until(condition: () => boolean) {
   }
 }
 
+test('state deduplication keeps Goal editor changes while merging busy timestamps', async (t) => {
+  const { agents, store, a } = await fixture(t);
+  const agent = agents.get(a.id);
+  const states: unknown[] = [];
+  agents.on('state', (state) => states.push(structuredClone(state)));
+  a.lastStatus = 'running';
+  agent.emit('state', store.state);
+  a.updatedAt++;
+  agent.emit('state', store.state);
+  assert.equal(states.length, 1);
+  a.draftGoal = { kind: 'start' };
+  agent.emit('state', store.state);
+  assert.equal(states.length, 2);
+  a.draftGoal = undefined;
+  agent.emit('state', store.state);
+  assert.equal(states.length, 3, 'saving a Goal edit must close its composer even while Pi keeps running');
+  agent.emit('state', store.state, true);
+  assert.equal(states.length, 4, 'explicit editor results also refresh renderer-owned buffers');
+});
+
 test('idle background processes and cached runtimes are released, selected and busy sessions survive', async (t) => {
   const { agents, store, a, b, runtimes } = await fixture(t);
   const first = agents.get(a.id),
@@ -398,7 +418,7 @@ test('a configuration load failure after abort does not turn a confirmed stop in
   assert.equal(agent.runtime.status, 'stopped');
   assert.equal(agent.runtime.connected, false);
   assert.equal(agent.runtime.configurationPending, true);
-  assert.ok(agent.runtime.notices.some((notice) => notice.includes('配置已保存，加载失败')));
+  assert.ok(agent.runtime.notices.some((notice) => notice.includes('配置已保存，暂时无法加载')));
 });
 
 test('application shutdown stops without restarting Pi to load deferred configuration', async (t) => {

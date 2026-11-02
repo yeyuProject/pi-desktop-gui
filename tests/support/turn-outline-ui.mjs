@@ -819,12 +819,16 @@ export async function verifyMessageContentUI({ app, page, output }) {
   await thinking.locator('summary').click();
   await choose(thinking.locator('pre'), '后续只有思考');
   await selectionMenu.getByRole('button', { name: '引用', exact: true }).click();
-  const quotes = () =>
-    page.evaluate(async () => {
+  const quotes = async () => {
+    // The renderer batches edits for 200 ms. The low-level storage flush only
+    // drains requests already received by the main process.
+    await page.waitForTimeout(250);
+    return page.evaluate(async () => {
       await window.desktop.invoke('flushDraft');
       const { state } = await window.desktop.invoke('bootstrap');
       return state.sessions.find((session) => session.id === state.selectedSessionId).draftQuotes;
     });
+  };
   await expect.poll(async () => (await quotes()).at(-1).messageTimestamp).toBe(1800000000105);
   await page.locator('.draft-quotes > span').last().locator('button').first().click();
   await expect

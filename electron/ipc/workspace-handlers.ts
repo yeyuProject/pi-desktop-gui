@@ -22,6 +22,8 @@ export type WorkspaceHandlerName =
   | 'checkpoints'
   | 'checkpointPreview'
   | 'revertCheckpoint'
+  | 'revertPreview'
+  | 'undoLastRestore'
   | 'revertChanges'
   | 'projectImage'
   | 'files'
@@ -58,8 +60,9 @@ export function createWorkspaceHandlers(context: WorkspaceHandlerContext) {
     const context = value as CheckpointContext;
     text(context.sessionId, 100);
     if (context.checkpointId !== undefined) text(context.checkpointId, 100);
+    if (context.revision !== undefined) text(context.revision, 200);
     if (store.session(context.sessionId).projectId !== projectId) throw new Error('该检查点不属于当前项目');
-    return { sessionId: context.sessionId, checkpointId: context.checkpointId };
+    return { sessionId: context.sessionId, checkpointId: context.checkpointId, revision: context.revision };
   }
 
   const handlers: Record<WorkspaceHandlerName, (...args: any[]) => any> = {
@@ -80,7 +83,7 @@ export function createWorkspaceHandlers(context: WorkspaceHandlerContext) {
       text(checkpointId, 100);
       strings(files);
       text(revision, 200);
-      if (!files.length || !revision) throw new Error('请重新查看检查点并选择要撤销的文件');
+      if (!files.length || !revision) throw new Error('检查点内容已经更新，请重新选择要撤销的文件。');
       const session = store.session(id);
       if (!session.projectId) throw new Error('独立对话没有项目检查点');
       try {
@@ -94,6 +97,21 @@ export function createWorkspaceHandlers(context: WorkspaceHandlerContext) {
         send({ type: 'workspaceChanged', projectId: session.projectId });
       }
     },
+    revertPreview: async (id) => {
+      text(id, 100);
+      const session = store.session(id);
+      if (!session.projectId) throw new Error('独立对话没有项目文件可恢复。');
+      return workspace.legacyPreview(store.project(session.projectId), id);
+    },
+    undoLastRestore: async (projectId) => {
+      text(projectId, 100);
+      if (service.projectBusy(projectId)) throw new Error('项目有任务正在运行，请等任务结束后再还原。');
+      try {
+        return await workspace.undoLastRestore(store.project(projectId), (file) => shell.trashItem(file));
+      } finally {
+        send({ type: 'workspaceChanged', projectId });
+      }
+    },
     revertChanges: async (projectId, only, rawContext) => {
       text(projectId, 100);
       if (only !== null) strings(only);
@@ -105,18 +123,20 @@ export function createWorkspaceHandlers(context: WorkspaceHandlerContext) {
       );
       if (!pending.length) return [];
       const created = pending.filter((f) => f.status === '新增').length;
-      const result = await showAppDialog({
-        type: 'warning',
-        message:
-          only?.length === 1 ? `撤销对 ${only[0]} 的修改？` : `撤销本轮 ${pending.length} 个文件的修改？`,
-        detail:
-          '文件会恢复为本轮任务开始前的内容。' +
-          (created ? `本轮新建的 ${created} 个文件会移到回收站。` : '') +
-          (pending.some((f) => f.existedBeforeRun) ? '\n任务开始前就已有的未提交修改会保留。' : ''),
-        buttons: ['取消', '撤销修改'],
-        defaultId: 0,
-        cancelId: 0,
-      });
+      const result = rawContext?.revision
+        ? { response: 1 }
+        : await showAppDialog({
+            type: 'warning',
+            message:
+              only?.length === 1 ? `撤销对 ${only[0]} 的修改？` : `撤销本轮 ${pending.length} 个文件的修改？`,
+            detail:
+              '文件会恢复为本轮任务开始前的内容。' +
+              (created ? `本轮新建的 ${created} 个文件会移到回收站。` : '') +
+              (pending.some((f) => f.existedBeforeRun) ? '\n任务开始前就已有的未提交修改会保留。' : ''),
+            buttons: ['取消', '撤销修改'],
+            defaultId: 0,
+            cancelId: 0,
+          });
       if (result.response !== 1) return [];
       if (service.projectBusy(projectId)) throw new Error('任务正在执行，请停止后再撤销');
       try {

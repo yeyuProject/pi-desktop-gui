@@ -1,0 +1,56 @@
+.send-wrapper {
+  display: inline-flex;
+}
+.send-wrapper .send-button:disabled {
+  pointer-events: none;
+}
+.send-wrapper:focus-visible {
+  outline: 2px solid var(--accent);
+  border-radius: 8px;
+}
+.unread.completed {
+  background: var(--accent);
+}
+.unread.error,
+.unread.interrupted {
+  background: var(--red);
+}
+.unread.stopped {
+  background: var(--muted);
+}
+.approval-attention {
+  background: var(--accent);
+  color: var(--bg);
+}
+.attention-menu {
+  position: relative;
+}
+.attention-menu > summary {
+  cursor: pointer;
+  padding: 6px 10px;
+  color: var(--accent);
+}
+.attention-menu > div {
+  position: absolute;
+  right: 0;
+  top: 100%;
+  z-index: 25;
+  min-width: 240px;
+  max-width: 380px;
+  max-height: 50vh;
+  overflow: auto;
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  box-shadow: var(--shadow-soft);
+  padding: 6px;
+}
+.attention-menu [role='menuitem'] {
+  display: block;
+  width: 100%;
+  text-align: left;
+  white-space: normal;
+}
+.danger-actions h3 {
+  color: var(--red);
+}

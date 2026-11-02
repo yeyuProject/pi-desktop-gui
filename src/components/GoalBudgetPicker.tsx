@@ -1,3 +1,4 @@
+import { readableError } from '../lib/format';
 import { useEffect, useId, useRef, useState } from 'react';
 import { Info } from 'lucide-react';
 import { useLayer } from '../hooks/useLayer';
@@ -66,7 +67,7 @@ export function GoalBudgetPicker({
       await submit(tokenBudget);
       setOpen(false);
     } catch (error) {
-      setError(error instanceof Error ? error.message : String(error));
+      setError(readableError(error));
     } finally {
       setPending(false);
     }

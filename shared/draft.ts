@@ -55,7 +55,7 @@ export function moveSnippetOffsets(before: string, after: string, snippets: Draf
     endAfter--;
   }
   const delta = after.length - before.length;
-  return snippets.map((snippet) => ({
+  const moved = snippets.map((snippet) => ({
     ...snippet,
     offset:
       snippet.offset <= start
@@ -64,6 +64,7 @@ export function moveSnippetOffsets(before: string, after: string, snippets: Draf
           ? snippet.offset + delta
           : endAfter,
   }));
+  return moved.every((item, index) => item.offset === snippets[index].offset) ? snippets : moved;
 }
 export const textBytes = (text: string) => new TextEncoder().encode(text).length;
 export const textLines = (text: string) => text.split(/\r\n|\n|\r/).length;

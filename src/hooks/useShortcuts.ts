@@ -58,6 +58,7 @@ export function useShortcuts(options: ShortcutsOptions) {
         window.dispatchEvent(new CustomEvent('pi:find'));
       },
       quoteSelection: () => window.dispatchEvent(new Event('pi:quote-selection')),
+      focusApproval: () => requestAnimationFrame(() => window.dispatchEvent(new Event('pi:focus-approval'))),
       sideChat: () => window.dispatchEvent(new Event('pi:side-action')),
       previousTurn: () => window.dispatchEvent(new CustomEvent('pi:turn', { detail: -1 })),
       nextTurn: () => window.dispatchEvent(new CustomEvent('pi:turn', { detail: 1 })),

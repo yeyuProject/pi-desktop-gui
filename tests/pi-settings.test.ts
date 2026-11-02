@@ -53,7 +53,7 @@ test('missing Pi and project trust block engine actions but allow saving persona
   assert.match(missing.engineReason, /运行环境/);
   const untrusted = piFeatureAvailability({ ...available, projectEnabled: false });
   assert.equal(untrusted.operationReason, '');
-  assert.match(untrusted.engineReason, /信任并启用/);
+  assert.match(untrusted.engineReason, /启用项目/);
   assert.equal(
     piFeatureAvailability({
       ...available,

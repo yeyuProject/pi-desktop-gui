@@ -47,7 +47,7 @@ test('configuration preserves secrets, backs up and rejects stale writes', async
   assert.equal(saved.providers.cpa.apiKey, original.providers.cpa.apiKey);
   assert.equal(saved.providers.cpa.headers.Authorization, original.providers.cpa.headers.Authorization);
   assert.deepEqual(JSON.parse(await fs.readFile(file + '.desktop-backup', 'utf8')), original);
-  await assert.rejects(config.save(s.id, 'models', false, document), /其他程序修改/);
+  await assert.rejects(config.save(s.id, 'models', false, document), /在你编辑时被别处改过了/);
   await assert.rejects(config.read(s.id, 'models', true), /个人范围/);
 });
 test('resource toggles keep unrelated package filters and settings', () => {

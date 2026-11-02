@@ -132,6 +132,17 @@ export function Sidebar(
   const projectStatus = (projectId: string) => {
     const sessions = state.sessions.filter((session) => session.projectId === projectId);
     const pending = sessions.reduce((total, session) => total + (activities[session.id]?.pending ?? 0), 0);
+    if (sessions.some((session) => session.unread && ['error', 'interrupted'].includes(session.lastStatus)))
+      return (
+        <>
+          <i className="unread error" aria-label="出错，未查看" />
+          {pending > 0 && (
+            <em className="project-waiting" aria-label={`待确认 ${pending} 项`}>
+              待确认 {pending}
+            </em>
+          )}
+        </>
+      );
     if (pending)
       return (
         <em className="project-waiting" aria-label={`待确认 ${pending} 项`}>
@@ -140,8 +151,26 @@ export function Sidebar(
       );
     if (sessions.some((session) => busy(activities[session.id]?.status ?? session.lastStatus)))
       return <LoaderCircle size={13} className="spin project-running" aria-label="正在运行" />;
-    if (sessions.some((session) => session.unread))
-      return <i className="unread" aria-label="有未读完成会话" />;
+    const unread = sessions
+      .filter((session) => session.unread)
+      .sort(
+        (a, b) =>
+          Number(['error', 'interrupted'].includes(b.lastStatus)) -
+          Number(['error', 'interrupted'].includes(a.lastStatus)),
+      )[0];
+    if (unread)
+      return (
+        <i
+          className={'unread ' + unread.lastStatus}
+          aria-label={
+            ['error', 'interrupted'].includes(unread.lastStatus)
+              ? '出错，未查看'
+              : unread.lastStatus === 'stopped'
+                ? '已停止，未查看'
+                : '已完成，未查看'
+          }
+        />
+      );
     return null;
   };
   const renderSession = (s: Session) => (
@@ -163,7 +192,18 @@ export function Sidebar(
       >
         {s.pinned && <Pin size={14} className="pin-icon" />}
         <span>{s.title}</span>
-        {s.unread && <i className="unread" />}
+        {s.unread && (
+          <i
+            className={'unread ' + s.lastStatus}
+            aria-label={
+              ['error', 'interrupted'].includes(s.lastStatus)
+                ? '出错，未查看'
+                : s.lastStatus === 'stopped'
+                  ? '已停止，未查看'
+                  : '已完成，未查看'
+            }
+          />
+        )}
         {!!activities[s.id]?.pending && (
           <span className="project-waiting" aria-label={`待确认 ${activities[s.id].pending} 项`}>
             待确认
@@ -292,7 +332,7 @@ export function Sidebar(
       </div>
       <button className="new-session" onClick={() => void createSession()}>
         <Plus size={17} />
-        新建对话<kbd>{shortcut('N')}</kbd>
+        新建会话<kbd>{shortcut('N')}</kbd>
       </button>
       <div className="project-list">
         <div className="section-heading">对话</div>

@@ -2,7 +2,7 @@ import { EventEmitter } from 'node:events';
 import { AgentService } from './agent';
 import type { Store } from './store';
 import type { Workspace } from './workspace';
-import { emptyRuntime, type Runtime, type RuntimePatch } from '../shared/types';
+import { busy, emptyRuntime, type Runtime, type RuntimePatch } from '../shared/types';
 import { samePath } from './platform';
 import { canonicalWritePath, isWithinDirectory } from './approval-paths';
 import { agentDirectory } from './environment';
@@ -18,6 +18,12 @@ export class SessionAgents extends EventEmitter {
   private reloadSuspended = false;
   private touched = new Map<string, { at: number; version: number }>();
   private collecting = false;
+  private visible = true;
+  private sentState = '';
+  setVisible(visible: boolean) {
+    this.visible = visible;
+    for (const agent of this.agents.values()) agent.setVisible(visible);
+  }
   private releasing = new Set<string>();
   private readonly idleTimer: NodeJS.Timeout;
 
@@ -37,7 +43,7 @@ export class SessionAgents extends EventEmitter {
   }
 
   get(id: string): AgentService {
-    if (this.closing) throw new Error('应用正在关闭，请稍后重新打开');
+    if (this.closing) throw new Error('应用正在关闭，请等关闭完成后再打开。');
     this.store.session(id);
     this.touched.set(id, { at: Date.now(), version: (this.touched.get(id)?.version ?? 0) + 1 });
     const existing = this.agents.get(id);
@@ -64,6 +70,7 @@ export class SessionAgents extends EventEmitter {
       },
     );
     agent.suspendReload(this.reloadSuspended);
+    agent.setVisible(this.visible);
     this.agents.set(id, agent);
     agent.on('runtimePatch', (patch: RuntimePatch) => {
       if (agent.hasPendingWork) {
@@ -73,7 +80,27 @@ export class SessionAgents extends EventEmitter {
       this.emit('runtimePatch', patch);
       this.emit('attention', agent.runtime);
     });
-    agent.on('state', (state) => {
+    agent.on('state', (state, force?: boolean) => {
+      const signature = JSON.stringify({
+        ...state,
+        sessions: state.sessions.map((session: import('../shared/types').Session) => ({
+          id: session.id,
+          projectId: session.projectId,
+          title: session.title,
+          unread: session.unread,
+          lastStatus: session.lastStatus,
+          pinned: session.pinned,
+          updatedAt: busy(session.lastStatus) ? 0 : session.updatedAt,
+          // Preference changes must also reach sessions without a connected runtime.
+          model: session.model,
+          thinking: session.thinking,
+          approvalMode: session.approvalMode,
+          // Goal actions change the editor while the list status can stay running.
+          draftGoal: session.draftGoal,
+        })),
+      });
+      if (!force && signature === this.sentState) return;
+      this.sentState = signature;
       this.emit('state', state);
     });
     return agent;
@@ -187,7 +214,7 @@ export class SessionAgents extends EventEmitter {
     );
   }
   async inWorkspace<T>(root: string, write: boolean, action: () => Promise<T>): Promise<T> {
-    if (this.closing) throw new Error('应用正在关闭，请稍后重新打开');
+    if (this.closing) throw new Error('应用正在关闭，请等关闭完成后再打开。');
     const real = await canonicalWritePath(root);
     const overlaps = (other: string) => isWithinDirectory(real, other) || isWithinDirectory(other, real);
     if (

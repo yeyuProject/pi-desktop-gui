@@ -2,7 +2,7 @@ import fs from 'node:fs/promises';
 import path from 'node:path';
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
-import { createHash } from 'node:crypto';
+import { createHash, randomUUID } from 'node:crypto';
 import { computeDiff } from './diff-compute';
 import ignore from 'ignore';
 import type { Changes, Change, FileDiff, FileItem, FilePreview, Project } from '../shared/types';
@@ -308,24 +308,28 @@ export async function snapshotStorageBytes(
   directory: string,
   onFile?: (file: string, size: number) => void,
 ): Promise<number> {
-  let entries;
-  try {
-    entries = await fs.readdir(directory, { withFileTypes: true });
-  } catch (error) {
-    if ((error as NodeJS.ErrnoException).code === 'ENOENT') return 0;
-    throw error;
+  const directories = [directory];
+  let total = 0;
+  while (directories.length) {
+    const current = directories.pop()!;
+    const entries = await fs.readdir(current, { withFileTypes: true }).catch((error) => {
+      if (error.code === 'ENOENT') return [];
+      throw error;
+    });
+    for (let at = 0; at < entries.length; at += 16)
+      await Promise.all(
+        entries.slice(at, at + 16).map(async (entry) => {
+          const file = path.join(current, entry.name);
+          if (entry.isDirectory()) directories.push(file);
+          else if (entry.isFile()) {
+            const size = (await fs.stat(file)).size;
+            total += size;
+            onFile?.(file, size);
+          }
+        }),
+      );
   }
-  const sizes = await Promise.all(
-    entries.map(async (entry) => {
-      const file = path.join(directory, entry.name);
-      if (entry.isDirectory()) return snapshotStorageBytes(file, onFile);
-      if (!entry.isFile()) return 0;
-      const size = (await fs.stat(file)).size;
-      onFile?.(file, size);
-      return size;
-    }),
-  );
-  return sizes.reduce((sum, size) => sum + size, 0);
+  return total;
 }
 /**
  * Classify files for snapshotting with one lstat per path component. Symbolic links, non-regular
@@ -376,6 +380,51 @@ export async function snapshotCandidates(root: string, names: string[]) {
 }
 type Baseline = SnapshotData;
 export class Workspace {
+  private restoreCopies = new Map<
+    string,
+    { baseline: SnapshotData; changes: Change[]; paths: string[]; revision: string }
+  >();
+  private restoreDirectories = new Set<string>();
+  async disposeRestoreCopies() {
+    const root = path.resolve(this.dataDir, 'restore-backups');
+    for (const directory of this.restoreDirectories)
+      if (path.dirname(path.resolve(directory)) === root)
+        await fs.rm(directory, { recursive: true, force: true });
+    this.restoreDirectories.clear();
+    this.restoreCopies.clear();
+  }
+  async undoLastRestore(project: Project, remove: (file: string) => Promise<void>) {
+    const copy = this.restoreCopies.get(project.id);
+    if (!copy) throw new Error('这次恢复前的副本已不存在，请重新查看文件。');
+    const current = await this.checkpoints.scan(project, copy.paths);
+    if (checkpointRevision(current, copy.paths) !== copy.revision)
+      throw new Error('恢复后文件又被修改了，为避免覆盖，不能直接还原。请先保留当前修改。');
+    const restored = await this.revert(
+      project,
+      copy.changes.map((file) => file.path),
+      remove,
+      undefined,
+      copy,
+    );
+    this.restoreCopies.delete(project.id);
+    return restored;
+  }
+  async legacyPreview(project: Project, sessionId: string): Promise<CheckpointPreview> {
+    const changes = await this.changes(project, 'run', { sessionId });
+    if (changes.error) throw new Error(changes.error);
+    const names = changes.files.map((file) => file.path);
+    return {
+      id: 'legacy',
+      sessionId,
+      turn: 1,
+      time: 0,
+      available: changes.baselineAvailable,
+      includesCommitted: false,
+      omitted: changes.omitted,
+      files: changes.files.map((file) => ({ ...file, manual: false, selected: true })),
+      revision: checkpointRevision(await this.checkpoints.scan(project, names), names),
+    };
+  }
   private baselines = new Map<string, Baseline>();
   private checkpoints: Checkpoints;
   private currentHashes = new Map<
@@ -384,6 +433,18 @@ export class Workspace {
   >();
   constructor(private dataDir: string) {
     this.checkpoints = new Checkpoints(dataDir);
+  }
+  watchProject(id?: string) {
+    this.checkpoints.watchProject(id);
+  }
+  changedPaths(id: string, paths?: string[]) {
+    this.checkpoints.changedPaths(id, paths);
+  }
+  releaseSession(id: string) {
+    return this.checkpoints.releaseSession(id);
+  }
+  flush() {
+    return this.checkpoints.flush();
   }
   nextCheckpointTurn(sessionId: string) {
     return this.checkpoints.nextTurn(sessionId);
@@ -454,7 +515,7 @@ export class Workspace {
     } catch {
       return;
     }
-    const changes = await this.changes(project);
+    const changes = await this.changes(project, 'all', undefined, meta);
     const inventory = await fileInventory(project);
     const { files, omitted } = await snapshotCandidates(project.path, inventory.files);
     const time = Date.now();
@@ -482,7 +543,7 @@ export class Workspace {
     await fs.writeFile(path.join(dir, `${project.id}.json`), JSON.stringify(baseline), { mode: 0o600 });
     await this.cleanup();
     if (!this.baselines.has(project.id))
-      throw new Error('本轮快照超过 200 MiB 的保留上限，请缩小项目范围或减少需保存的文件后重试');
+      throw new Error('本轮检查点超过 200 MiB 的保留上限，请缩小项目范围或减少需保存的文件后重试');
   }
   cleanup() {
     return this.checkpoints.cleanup(() => this.cleanupBaselines());
@@ -589,6 +650,7 @@ export class Workspace {
     project: Project,
     mode: 'all' | 'run' = 'all',
     context?: CheckpointContext,
+    metadata?: Awaited<ReturnType<typeof info>>,
   ): Promise<Changes> {
     if (!project.trusted)
       return {
@@ -599,9 +661,9 @@ export class Workspace {
         checkpoints: [],
         error: '请先信任并启用项目，再读取 Git 状态',
       };
-    let meta;
+    let meta = metadata;
     try {
-      meta = await info(project);
+      meta ??= await info(project);
     } catch {
       return {
         git: false,
@@ -724,13 +786,16 @@ export class Workspace {
     only: string[] | null,
     remove: (file: string) => Promise<void> = (file) => fs.rm(file),
     context?: CheckpointContext,
+    recovery?: { baseline: SnapshotData; changes: Change[]; paths: string[]; revision: string },
   ): Promise<string[]> {
     const meta = await info(project);
     if (context) await this.checkpoints.list(project, context.sessionId, meta);
-    const baseline = await this.baseline(project.id, context);
+    const baseline = recovery?.baseline ?? (await this.baseline(project.id, context));
     if (!baseline || !this.validBaseline(baseline, meta))
       throw new Error('运行基线不可用或 Git 分支已经变化，无法撤销');
-    const changes = await this.changes(project, 'run', context);
+    const changes = recovery
+      ? { files: recovery.changes, error: undefined }
+      : await this.changes(project, 'run', context);
     if (changes.error) throw new Error(`无法确认本轮文件变化，未执行撤销：${changes.error}`);
     const changed = changes.files.map((f) => f.path);
     const targets = only ? changed.filter((p) => only.includes(p)) : changed;
@@ -769,6 +834,59 @@ export class Workspace {
         }
       }
     }
+    let copy: { baseline: SnapshotData; changes: Change[]; paths: string[]; revision: string } | undefined;
+    if (!recovery) {
+      const paths = [...new Set(targets.flatMap((name) => [name, previousName(name)]))];
+      const before = await this.checkpoints.scan(project, paths);
+      const { files, omitted } = await snapshotCandidates(project.path, paths);
+      if (omitted.length) throw new Error('部分文件无法备份，恢复没有开始。请检查文件权限。');
+      const directory = path.join(this.dataDir, 'restore-backups', randomUUID());
+      this.restoreDirectories.add(directory);
+      await createSnapshotRepo(directory, project.path);
+      const ids = await storeBlobs(
+        directory,
+        project.path,
+        files.map((file) => file.name),
+      );
+      if (
+        checkpointRevision(before, paths) !==
+        checkpointRevision(await this.checkpoints.scan(project, paths), paths)
+      )
+        throw new Error('文件在备份时又被修改了，恢复没有开始，请重新查看清单。');
+      copy = {
+        baseline: {
+          version: 3,
+          projectId: project.id,
+          time: Date.now(),
+          fingerprint: meta.fingerprint,
+          repo: path.relative(path.join(this.dataDir, 'baselines'), directory),
+          files: Object.fromEntries(files.map((file, index) => [file.name, ids[index]])),
+          modes: Object.fromEntries(files.map((file) => [file.name, file.mode])),
+          dirty: [],
+          omitted: [],
+          inventoryComplete: true,
+        },
+        changes: targets.map((name) => ({
+          path: originals.has(name) ? previousName(name) : name,
+          oldPath: previousName(name) !== name ? name : undefined,
+          status: '恢复',
+          staged: false,
+          unstaged: true,
+          existedBeforeRun: true,
+        })),
+        paths,
+        revision: '',
+      };
+      if (
+        context?.revision &&
+        context.revision !== checkpointRevision(await this.checkpoints.scan(project, changed), changed)
+      )
+        throw new Error('确认后文件又被修改了，恢复没有开始，请重新查看清单。');
+    } else if (
+      checkpointRevision(await this.checkpoints.scan(project, recovery.paths), recovery.paths) !==
+      recovery.revision
+    )
+      throw new Error('文件又被修改了，还原没有开始，请先保留当前修改。');
     const reverted: string[] = [];
     for (const name of targets) {
       if (baseline.omitted.includes(name) || sensitive(name)) continue;
@@ -790,10 +908,14 @@ export class Workspace {
         reverted.push(name);
       } catch (error) {
         throw new Error(
-          `撤销在“${name}”处中断。已恢复 ${reverted.length} 个文件${reverted.length ? `（${reverted.slice(0, 5).join('、') + (reverted.length > 5 ? '等' : '')}）` : ''}；当前文件也可能已部分改变，其余文件尚未处理。文件列表已刷新，请检查后重新选择要恢复的文件。原因：${error instanceof Error ? error.message : String(error)}`,
+          `撤销在“${name}”处中断。已恢复 ${reverted.length} 个文件（${reverted.join('、')}）；当前文件也可能已部分改变，其余文件尚未处理。请检查文件权限，重新选择要恢复的文件，详情已记入诊断。`,
           { cause: error },
         );
       }
+    }
+    if (copy) {
+      copy.revision = checkpointRevision(await this.checkpoints.scan(project, copy.paths), copy.paths);
+      this.restoreCopies.set(project.id, copy);
     }
     return reverted;
   }

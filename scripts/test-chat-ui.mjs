@@ -234,7 +234,7 @@ try {
   const standaloneOutput = page.getByRole('button', { name: '查看会话输出', exact: true });
   assert.equal(await standaloneOutput.isVisible(), true);
   assert.equal(await standaloneOutput.isEnabled(), true);
-  assert.equal(await page.getByRole('button', { name: '查看工作区变更', exact: true }).count(), 0);
+  assert.equal(await page.getByRole('button', { name: '查看项目变更', exact: true }).count(), 0);
   assert.equal(await page.getByRole('textbox', { name: '任务输入' }).isEnabled(), true);
   await page.evaluate(() => document.fonts.ready);
   await page.screenshot({ path: path.join(output, 'standalone-empty.png'), animations: 'disabled' });
@@ -315,7 +315,7 @@ try {
   await page.getByRole('button', { name: '关闭', exact: true }).last().click();
   const input = page.getByRole('textbox', { name: '任务输入' });
   const first = (await waitForSaved((state) => !!state.sessions[0]?.id)).sessions[0];
-  assert.equal(first.title, '新对话');
+  assert.equal(first.title, '新会话');
   const firstPrompt = '@普通消息：不打开工作区也能聊。';
   await input.fill(firstPrompt);
   assert.equal(await page.locator('.file-picker').count(), 0);
@@ -421,17 +421,17 @@ try {
   assert.equal(await page.locator('.trust-banner').count(), 1);
 
   const standaloneFromProjectId = await newStandalone(() =>
-    page.getByRole('button', { name: /^新建对话/ }).click(),
+    page.getByRole('button', { name: /^新建会话/ }).click(),
   );
   await page.getByText('有什么想聊的？', { exact: true }).waitFor();
   assert.equal(await page.locator('.trust-banner').count(), 0);
   const newStandaloneOutput = page.getByRole('button', { name: '查看会话输出', exact: true });
   assert.equal(await newStandaloneOutput.isVisible(), true);
   assert.equal(await newStandaloneOutput.isEnabled(), true);
-  assert.equal(await page.getByRole('button', { name: '查看工作区变更', exact: true }).count(), 0);
+  assert.equal(await page.getByRole('button', { name: '查看项目变更', exact: true }).count(), 0);
   await expectSelectedModel(baseModel, standaloneFromProjectId);
   assert.equal(await page.locator('.readiness').count(), 0);
-  await page.getByRole('textbox', { name: '任务输入' }).fill('从项目中直接新建独立对话');
+  await page.getByRole('textbox', { name: '任务输入' }).fill('从项目中直接新建会话');
   assert.equal(await page.getByRole('button', { name: '发送任务', exact: true }).isEnabled(), true);
   assert.equal(await page.locator('.project-row').count(), 1);
   await page.getByRole('button', { name: '发送任务', exact: true }).click();
@@ -491,7 +491,7 @@ try {
   await waitForView({ id: projectEmptyId, scope: 'project', projectId });
   console.log('PASS IME session search and deletion after the session file is missing');
 
-  const continuationId = await newStandalone(() => page.getByRole('button', { name: /^新建对话/ }).click());
+  const continuationId = await newStandalone(() => page.getByRole('button', { name: /^新建会话/ }).click());
   await expectSelectedModel(baseModel, continuationId);
   await page.getByRole('textbox', { name: '任务输入' }).fill('E2E_SLOW 新会话不能中断当前回复');
   await page.getByRole('button', { name: '发送任务', exact: true }).click();
@@ -499,7 +499,7 @@ try {
   const active = await page.evaluate(() => window.chatUiRuntimes.get(window.chatUiState.selectedSessionId));
   assert.equal(provider.heldSlowResponseCount, 1, 'The response gate must be held before creating B');
   const requestsDuringReply = provider.requests.length;
-  const parallelId = await newStandalone(() => page.getByRole('button', { name: /^新建对话/ }).click());
+  const parallelId = await newStandalone(() => page.getByRole('button', { name: /^新建会话/ }).click());
   await page.getByText('有什么想聊的？', { exact: true }).waitFor();
   // Model metadata loads without connecting the new chat while A keeps streaming.
   await expectSelectedModel(baseModel, parallelId);

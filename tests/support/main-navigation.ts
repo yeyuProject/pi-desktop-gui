@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import path from 'node:path';
 import * as ts from 'typescript/unstable/ast';
+import { describeSystemError } from '../../shared/errors';
 import { API } from 'typescript/unstable/sync';
 import { transformSync } from 'esbuild';
 import { handlerSource } from './ipc-handler-source';
@@ -43,7 +44,8 @@ function handler(name: string) {
   return handlerSource(name, true);
 }
 const { code } = transformSync(
-  `const create = (store, service, publish, isReusableSession, showAppDialog) => {
+  `const create = (store, service, publish, isReusableSession, showAppDialog, describeSystemError) => {
+    const flushRendererDraft = async () => {};
     const appDialogs = { size: 0 }, updates = { state: { installing: false } };
     let closing = false, quitting = false, activeOperations = 0;
     let stateRevision = 0;
@@ -67,7 +69,14 @@ const { code } = transformSync(
 );
 const factory = new Function(`${code}\nreturn create;`)();
 export function createMainNavigation(store: Store, agents: SessionAgents, send: (event: AppEvent) => void) {
-  return factory(store, agents, send, isReusableSession, async () => ({ response: 0 })) as {
+  return factory(
+    store,
+    agents,
+    send,
+    isReusableSession,
+    async () => ({ response: 0 }),
+    describeSystemError,
+  ) as {
     create: (projectId?: string) => Promise<Session>;
     select: (id: string) => Promise<Message[]>;
     nativeCreate: () => Promise<void>;

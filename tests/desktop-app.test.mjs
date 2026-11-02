@@ -32,7 +32,12 @@ test('desktop launcher preserves explicit fixtures and packaged args while colle
     return app;
   });
   const errors = [];
-  const result = await launchApp({ dataDir: 'fixture-data', executablePath: 'packaged.exe', errors });
+  const result = await launchApp({
+    dataDir: 'fixture-data',
+    executablePath: 'packaged.exe',
+    errors,
+    clipboardMode: 'native',
+  });
   assert.equal(result.app, app);
   assert.equal(result.page, page);
   assert.deepEqual(options.args, []);
@@ -47,6 +52,7 @@ test('desktop launcher preserves explicit fixtures and packaged args while colle
   await launchApp({
     args: ['custom-entry.cjs'],
     pageTimeout: 25000,
+    clipboardMode: 'native',
     env: { PI_DESKTOP_DEV_URL: 'http://fixture' },
   });
   assert.deepEqual(options.args, ['custom-entry.cjs']);
@@ -70,7 +76,10 @@ test('a failed first window closes the launched app and reports the original err
     },
   };
   t.mock.method(electron, 'launch', async () => app);
-  await assert.rejects(launchApp({ dataDir: 'fixture-data' }), (error) => error === failure);
+  await assert.rejects(
+    launchApp({ dataDir: 'fixture-data', clipboardMode: 'native' }),
+    (error) => error === failure,
+  );
   assert.equal(closed, 1);
   await closeApp(undefined);
   app.process = () => {
@@ -78,4 +87,23 @@ test('a failed first window closes the launched app and reports the original err
   };
   await closeApp(app);
   assert.equal(closed, 1);
+});
+
+test('memory clipboard is opt-in and replaces only text transport in the owned test app', async (t) => {
+  const nativeRead = () => {};
+  const clipboard = {
+    writeText: () => assert.fail('must not write the OS clipboard'),
+    readText: () => assert.fail('must not read the OS clipboard'),
+    read: nativeRead,
+  };
+  const app = {
+    process: () => ({ exitCode: 0 }),
+    evaluate: async (callback) => callback({ clipboard }),
+    firstWindow: async () => ({ setDefaultTimeout() {}, on() {} }),
+  };
+  t.mock.method(electron, 'launch', async () => app);
+  await launchApp({ clipboardMode: 'memory' });
+  await clipboard.writeText('copied fixture');
+  assert.equal(await clipboard.readText(), 'copied fixture');
+  assert.equal(clipboard.read, nativeRead);
 });

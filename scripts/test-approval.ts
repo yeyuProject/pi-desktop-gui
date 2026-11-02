@@ -153,7 +153,8 @@ try {
     throw new Error('snapshot unavailable');
   };
   try {
-    await assert.rejects(s.send(second.id, 'Must not start', [], 'steer'), /snapshot unavailable/);
+    await assert.rejects(s.send(second.id, 'Must not start', [], 'steer'), /无法为这一轮建立检查点/);
+    assert.ok(s.runtime.diagnostic.some((entry) => entry.includes('snapshot unavailable')));
     assert.equal(s.runtime.status, 'error', 'snapshot failure must not leave the task stuck in starting');
   } finally {
     s.workspace.captureCheckpoint = capture;

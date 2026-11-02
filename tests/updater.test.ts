@@ -549,6 +549,28 @@ test('failed preparation never starts the installer, and checksum errors forbid 
   assert.match(service.state.error!, /校验失败/);
 });
 
+test('installer preparation keeps original errors for diagnostics and publishes a readable reason', async (t) => {
+  for (const error of [
+    Object.assign(new Error('spawn installer EACCES'), { code: 'EACCES' }),
+    new TypeError('unexpected installer failure'),
+  ]) {
+    const driver = new Driver();
+    const service = new UpdateService({
+      ...options(driver),
+      beforeInstall: async () => {
+        throw error;
+      },
+    });
+    t.after(() => service.dispose());
+    await service.check();
+    await service.download();
+    await assert.rejects(service.install(), (actual) => actual === error);
+    assert.doesNotMatch(service.state.error!, /spawn|EACCES|unexpected|TypeError/);
+    assert.match(service.state.error!, /权限|无法准备/);
+    assert.equal(driver.installs, 0);
+  }
+});
+
 test('accepted service operations block updates even before their runtime status changes', async (t) => {
   const agent = new AgentService({} as never, {} as never);
   let release!: () => void;
@@ -597,7 +619,7 @@ test('installer errors are recorded without incorrectly blaming the network', as
   );
   assert.match(service.state.error!, /安装程序/);
   assert.doesNotMatch(service.state.error!, /检查网络/);
-  assert.match(updateInstallNotice(service.state)!, /无法启动更新安装程序/);
+  assert.match(updateInstallNotice(service.state)!, /上次更新到.*没有成功/);
 });
 test('a receipt persistence failure prevents launching an unrecorded installer and permits retry', async (t) => {
   const driver = new Driver();

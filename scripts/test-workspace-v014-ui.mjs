@@ -127,7 +127,7 @@ try {
     'manual change stays\n',
   );
   await assert.rejects(fs.access(path.join(fixture.projectDir, '输出结果.txt')));
-  await page.getByRole('button', { name: '同时回到这条消息之前的对话', exact: true }).click();
+  await page.getByRole('button', { name: '同时把对话退回到这条消息之前', exact: true }).click();
   await page.waitForFunction(() => document.querySelector('[aria-label="任务输入"]')?.value === 'E2E_FILES');
   assert.equal(
     await page.locator('.thread .tool-card').count(),

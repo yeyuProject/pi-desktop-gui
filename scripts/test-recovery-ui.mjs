@@ -42,7 +42,7 @@ try {
   await launch(fixture.dataDir);
   const banner = page.getByRole('alert', { name: '本地数据状态' });
   await banner.waitFor();
-  assert.match(await banner.innerText(), /已恢复到/);
+  assert.match(await banner.innerText(), /已用.*的备份恢复/);
   const input = page.getByRole('textbox', { name: '任务输入' });
   assert.equal(await input.inputValue(), '恢复后的草稿');
   assert.ok((await fs.readdir(fixture.dataDir)).some((name) => name.startsWith('state.corrupt-')));
@@ -62,8 +62,8 @@ try {
   await card.waitFor({ timeout: 5000 });
   await card.getByRole('button', { name: '本轮已修改 1 个文件，查看变更' }).waitFor();
   assert.match(await card.innerText(), /退出前正在调用/);
-  await card.getByText('无法确认残留命令已结束', { exact: false }).waitFor();
-  assert.equal(await card.getByRole('button', { name: '重新连接', exact: true }).isDisabled(), true);
+  await card.getByText('不确定上次的命令是否已结束', { exact: false }).waitFor();
+  assert.equal(await card.getByRole('button', { name: '重新连接并继续', exact: true }).isDisabled(), true);
   await assert.rejects(
     page.evaluate((id) => window.desktop.invoke('recover', id), fixture.sessionId),
     /无法确认/,
@@ -74,7 +74,7 @@ try {
   );
   await page.reload();
   await card.waitFor();
-  assert.equal(await card.getByRole('button', { name: '重新连接', exact: true }).isDisabled(), true);
+  assert.equal(await card.getByRole('button', { name: '重新连接并继续', exact: true }).isDisabled(), true);
   await page.screenshot({ path: path.join(output, 'recovery-crash.png') });
   console.log('PASS unconfirmed tool cleanup blocks recovery and undo, including after a window reload');
   // The fixture explicitly ended the complete tree above, so a fresh application is now safe.
@@ -150,7 +150,7 @@ try {
   await launch(missing.dataDir);
   const missingBanner = page.getByRole('alert', { name: '本地数据状态' });
   await missingBanner.waitFor();
-  assert.match(await missingBanner.innerText(), /索引缺失.*已恢复到/);
+  assert.match(await missingBanner.innerText(), /会话列表数据缺失了.*备份恢复/);
   await missingBanner.getByRole('button', { name: '知道了' }).click();
   assert.equal(await missingBanner.count(), 0);
   await page.evaluate((id) => window.desktop.invoke('connect', id), missing.sessionId);

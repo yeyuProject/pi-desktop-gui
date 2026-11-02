@@ -269,9 +269,7 @@ export function SettingsForm({
                 role="radio"
                 aria-checked={local === scope}
                 disabled={disabled || loading || dirty || (scope && !projectEnabled)}
-                title={
-                  scope && !projectEnabled ? '请先在工作区信任并启用项目' : dirty ? '请先保存或放弃修改' : ''
-                }
+                title={scope && !projectEnabled ? '请先先启用这个项目' : dirty ? '请先保存或放弃修改' : ''}
                 onClick={() => void load(scope)}
               >
                 {title}

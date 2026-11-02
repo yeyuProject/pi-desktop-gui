@@ -35,7 +35,7 @@
     color-mix(in srgb, var(--signal) 35%, transparent) 75%,
     transparent 100%
   );
-  background-size: 35% 100%;
+  background-size: 100% 100%;
   background-repeat: no-repeat;
   -webkit-mask-image: linear-gradient(90deg, transparent, #000 14%, #000 86%, transparent);
   mask-image: linear-gradient(90deg, transparent, #000 14%, #000 86%, transparent);
@@ -43,10 +43,10 @@
 }
 @keyframes scan {
   from {
-    background-position: -65% 0;
+    transform: translateX(-32.5%) scaleX(0.35);
   }
   to {
-    background-position: 165% 0;
+    transform: translateX(32.5%) scaleX(0.35);
   }
 }
 .composer textarea {
@@ -374,8 +374,7 @@
 }
 
 .modal-backdrop {
-  background: #0c16124d;
-  backdrop-filter: blur(3px);
+  background: #0c161280;
 }
 .modal {
   border-radius: 16px;

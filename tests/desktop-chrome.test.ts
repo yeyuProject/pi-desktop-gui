@@ -41,7 +41,7 @@ assert.ok(finishOperation, 'Expected current operation completion helper');
 const menuFactory = helper(
   'newSessionFromMenu',
   'store, updates, appDialogs, newSession, showAppDialog, closing = false, quitting = false',
-  `let activeOperations = 0; const operationWaiters = new Set(); ${finishOperation.getText(source)}`,
+  `let activeOperations = 0; const operationWaiters = new Set(); const flushRendererDraft = async () => {}; const describeSystemError = () => undefined; ${finishOperation.getText(source)}`,
   '{ invoke: newSessionFromMenu, pending: () => activeOperations }',
 );
 const themeFactory = helper('updateWindowTheme', 'window, nativeTheme, isMac, windowTheme, store');

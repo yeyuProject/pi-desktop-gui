@@ -17,6 +17,7 @@ export function ThinkingBlock({
   collapseKey?: number;
 }) {
   const details = useRef<HTMLDetailsElement>(null);
+  const [open, setOpen] = useState(defaultExpanded || Boolean(match));
   const previousCollapseKey = useRef(collapseKey);
   useLayoutEffect(() => {
     if (details.current) details.current.open = defaultExpanded || Boolean(match);
@@ -58,26 +59,28 @@ export function ThinkingBlock({
     });
     observer.observe(element);
     return () => observer.disconnect();
-  }, []);
+  }, [open]);
 
   return (
-    <details ref={details} className="thinking">
+    <details ref={details} className="thinking" onToggle={(event) => setOpen(event.currentTarget.open)}>
       <summary>思考过程</summary>
-      <pre
-        ref={output}
-        onScroll={(event) => {
-          const element = event.currentTarget;
-          if (!element.clientHeight) return;
-          const atBottom = element.scrollHeight - element.scrollTop - element.clientHeight < 24;
-          const sameViewport =
-            element.clientWidth === viewport.current.width &&
-            element.clientHeight === viewport.current.height;
-          if (atBottom || sameViewport) following.current = atBottom;
-          setPaused(!following.current);
-        }}
-      >
-        <SearchHighlight text={text} activeStart={match?.start} query={match?.query} />
-      </pre>
+      {open && (
+        <pre
+          ref={output}
+          onScroll={(event) => {
+            const element = event.currentTarget;
+            if (!element.clientHeight) return;
+            const atBottom = element.scrollHeight - element.scrollTop - element.clientHeight < 24;
+            const sameViewport =
+              element.clientWidth === viewport.current.width &&
+              element.clientHeight === viewport.current.height;
+            if (atBottom || sameViewport) following.current = atBottom;
+            setPaused(!following.current);
+          }}
+        >
+          <SearchHighlight text={text} activeStart={match?.start} query={match?.query} />
+        </pre>
+      )}
       {streaming && paused && !match && (
         <button
           className="thinking-latest"

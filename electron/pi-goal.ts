@@ -314,6 +314,7 @@ export function registerDesktopGoal(pi: ExtensionAPI) {
       throw new Error('当前没有执行中的 Goal，请由用户先开始或恢复目标。');
     if (params.goal_id !== goal.id) throw new Error('Goal ID 与当前目标不一致，请重新读取当前 Goal 信息。');
     if (params.revision !== goal.revision)
+      // eslint-disable-next-line pi-desktop/user-copy -- Model-only validation identifies the stale tool argument.
       throw new Error('Goal revision 已过期，请用 desktop_goal_get 核对修改后的目标。');
     return goal;
   };
