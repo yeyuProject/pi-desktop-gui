@@ -73,8 +73,14 @@ test('native template CRUD preserves unknown frontmatter, rejects stale edits an
   await assert.rejects(savePromptTemplate(context, input), /同名模板/);
   const raw = await fs.readFile(created.path, 'utf8');
   await fs.writeFile(created.path, raw.replace('description:', 'custom-field: keep-me\ndescription:'));
-  await assert.rejects(savePromptTemplate(context, { ...input, body: 'changed' }, created), /外部修改/);
-  await assert.rejects(deletePromptTemplate(context, created.path, created.revision), /外部修改/);
+  await assert.rejects(
+    savePromptTemplate(context, { ...input, body: 'changed' }, created),
+    /在你编辑时被别处改过了/,
+  );
+  await assert.rejects(
+    deletePromptTemplate(context, created.path, created.revision),
+    /在你编辑时被别处改过了/,
+  );
   const fresh = await readPromptTemplate(context, created.path);
   const updated = await savePromptTemplate(context, { ...input, body: 'Changed $2' }, fresh);
   assert.match(await fs.readFile(created.path, 'utf8'), /custom-field: keep-me/);

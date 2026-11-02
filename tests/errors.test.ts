@@ -1,6 +1,30 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { classifyModelError, redact, type ModelErrorKind } from '../shared/errors';
+import { describeSystemError } from '../shared/errors';
+import { readableError } from '../src/lib/format';
+test('system error messages explain the cause without exposing errno or English stacks', () => {
+  for (const code of [
+    'ENOENT',
+    'EACCES',
+    'EPERM',
+    'ENOSPC',
+    'EBUSY',
+    'ETIMEDOUT',
+    'ECONNREFUSED',
+    'ENOTFOUND',
+  ]) {
+    const error = Object.assign(new Error(`${code}: synthetic failure`), { code });
+    assert.ok(describeSystemError(error));
+    assert.doesNotMatch(
+      readableError(error),
+      /synthetic|ENOENT|EACCES|EPERM|ENOSPC|EBUSY|ETIMEDOUT|ECONNREFUSED|ENOTFOUND/,
+    );
+  }
+  assert.equal(describeSystemError(new Error('unrecognized')), undefined);
+  assert.equal(readableError(new Error('TypeError: synthetic failure')), '操作没有完成，详情已记入诊断。');
+  assert.match(readableError(new Error('InvalidRequestError: malformed')), /内部错误/);
+});
 
 // Synthetic messages in provider/SDK formats; no credentials or user requests are recorded here.
 const samples: [ModelErrorKind, string][] = [

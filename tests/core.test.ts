@@ -346,14 +346,14 @@ test('real subprocess protocol lifecycle: settled, retry, cancellation, queue, e
     await waitFor(() => service.runtime.status === 'completed');
     assert.ok(statuses.includes('compacting'));
     await fs.writeFile(path.join(agentDir, 'control.json'), JSON.stringify({ cancelSwitch: true }));
-    await assert.rejects(service.connect(other), /取消了会话切换/);
+    await assert.rejects(service.connect(other), /拦截了这次切换/);
     assert.equal(service.runtime.sessionId, id);
     await service.send(id, 'hold', [], 'steer');
     await service.send(id, '补充要求', [], 'steer');
     await service.send(id, '后续任务', [], 'followUp');
     assert.deepEqual(service.runtime.steering, ['补充要求']);
     assert.deepEqual(service.runtime.followUp, ['后续任务']);
-    await assert.rejects(service.send(other, '不应该发送', [], 'steer'), /已有会话/);
+    await assert.rejects(service.send(other, '不应该发送', [], 'steer'), /另一个会话正在运行/);
     await service.stop();
     assert.equal(service.runtime.status, 'stopped');
     assert.match(store.session(id).draft, /补充要求\n\n后续任务/);

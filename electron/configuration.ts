@@ -102,7 +102,8 @@ export class Configuration {
   }
   private async saveLocked(file: string, kind: ConfigKind, document: ConfigDocument) {
     const raw = await this.raw(file);
-    if (document.revision !== revision(raw)) throw new Error('配置已被其他程序修改，请重新读取后再保存');
+    if (document.revision !== revision(raw))
+      throw new Error('这份配置在你编辑时被别处改过了。点“重新读取”看最新内容，再改一次。');
     let parsed: any;
     try {
       parsed = parseConfig(document.text);
@@ -133,7 +134,8 @@ export class Configuration {
     await fs.mkdir(path.dirname(file), { recursive: true });
     await fs.writeFile(file + '.desktop-backup', raw, { mode: 0o600 });
     await fs.writeFile(file + '.desktop-tmp', JSON.stringify(value, null, 2) + '\n', { mode: 0o600 });
-    if (revision(await this.raw(file)) !== revision(raw)) throw new Error('保存前配置发生了变化，请重新读取');
+    if (revision(await this.raw(file)) !== revision(raw))
+      throw new Error('这份配置在你编辑时被别处改过了。点“重新读取”看最新内容，再改一次。');
     await fs.rename(file + '.desktop-tmp', file);
   }
 }

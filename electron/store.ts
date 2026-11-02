@@ -171,7 +171,7 @@ export class Store extends EventEmitter {
           this.storage = {
             writable: false,
             problem:
-              '无法完整读取本地索引或草稿图片，已停止写入以保留原数据。请检查数据目录中的 state.json 和 draft-images，恢复缺失文件后重启。',
+              '本地数据读取不完整，为避免覆盖，已暂停保存。请检查数据目录里的 state.json 和草稿图片目录 draft-images 是否缺失，补回后重启应用。',
           };
           return this.storage;
         }
@@ -283,7 +283,7 @@ export class Store extends EventEmitter {
   }
   private async parseStoredState(raw: any) {
     if (raw?.version !== 2) return parseState(raw);
-    if (!Array.isArray(raw.sessions)) throw new Error('本地索引格式不受支持');
+    if (!Array.isArray(raw.sessions)) throw new Error('本地数据格式不受支持，请检查应用版本或从备份恢复。');
     for (const session of raw.sessions) {
       if (!Array.isArray(session?.images)) continue;
       if (session.images.length > MAX_IMAGE_COUNT) throw new Error('草稿图片数量无效');
@@ -291,7 +291,7 @@ export class Store extends EventEmitter {
       for (let index = 0; index < session.images.length; index++) {
         const { file, ...metadata } = session.images[index];
         if (typeof file !== 'string' || !/^[a-f0-9]{64}\.bin$/.test(file))
-          throw new Error('草稿图片索引无效，原文件已保留');
+          throw new Error('草稿图片记录损坏，原文件已保留');
         const imagePath = this.file(path.join('draft-images', file));
         const stat = await fs.stat(imagePath);
         if (!stat.isFile() || !stat.size || stat.size > MAX_IMAGE_BYTES)
@@ -325,7 +325,7 @@ export class Store extends EventEmitter {
       for (const image of images) {
         if (image.data !== undefined) result.push({ ...image, data: image.data });
         else {
-          if (!image.file || !/^[a-f0-9]{64}\.bin$/.test(image.file)) throw new Error('草稿图片索引无效');
+          if (!image.file || !/^[a-f0-9]{64}\.bin$/.test(image.file)) throw new Error('草稿图片记录损坏');
           const file = this.file(path.join('draft-images', image.file));
           if ((await fs.stat(file)).size > MAX_IMAGE_BYTES) throw new Error('草稿图片超过大小限制');
           const bytes = await fs.readFile(file);
@@ -383,7 +383,7 @@ export class Store extends EventEmitter {
     session.images = [...current, ...images];
   }
   /** Coalesce typing, while save/flush remain immediate durability barriers. */
-  scheduleSave() {
+  scheduleSave(delay = 300) {
     if (!this.deferredSave) {
       let resolve!: () => void, reject!: (error: unknown) => void;
       const promise = new Promise<void>((yes, no) => {
@@ -392,7 +392,7 @@ export class Store extends EventEmitter {
       });
       const timer = setTimeout(() => {
         void this.save().catch(() => {});
-      }, 300);
+      }, delay);
       this.deferredSave = { timer, promise, resolve, reject };
     }
     return this.deferredSave.promise;
@@ -425,28 +425,24 @@ export class Store extends EventEmitter {
     // state and backups must describe the same acknowledged save, not later mutations.
     const images = new Map<string, string>();
     const state = this.persistentState();
-    const contents = JSON.stringify(
-      {
-        ...state,
-        version: 2,
-        sessions: state.sessions.map((session) => ({
-          ...session,
-          images: session.images?.map((image) => {
-            let file = image.data === undefined ? image.file : this.imageFiles.get(image);
-            if (!file) {
-              if (image.data === undefined) throw new Error('草稿图片索引无效');
-              file = createHash('sha256').update(Buffer.from(image.data, 'base64')).digest('hex') + '.bin';
-              this.imageFiles.set(image, file);
-            }
-            if (image.data !== undefined) images.set(file, image.data);
-            const { data: _data, ...metadata } = image;
-            return { ...metadata, file };
-          }),
-        })),
-      },
-      null,
-      2,
-    );
+    const contents = JSON.stringify({
+      ...state,
+      version: 2,
+      sessions: state.sessions.map((session) => ({
+        ...session,
+        images: session.images?.map((image) => {
+          let file = image.data === undefined ? image.file : this.imageFiles.get(image);
+          if (!file) {
+            if (image.data === undefined) throw new Error('草稿图片记录损坏');
+            file = createHash('sha256').update(Buffer.from(image.data, 'base64')).digest('hex') + '.bin';
+            this.imageFiles.set(image, file);
+          }
+          if (image.data !== undefined) images.set(file, image.data);
+          const { data: _data, ...metadata } = image;
+          return { ...metadata, file };
+        }),
+      })),
+    });
     const write = async () => {
       if (!retry || !this.storage.retryable) this.assertWritable();
       try {
@@ -576,7 +572,10 @@ export class Store extends EventEmitter {
     const session: Session = {
       id: randomUUID(),
       projectId,
-      title: projectId ? '新会话' : '新对话',
+      title: projectId ? '新会话' : '新会话',
+      ...(projectId && this.project(projectId).approvalMode
+        ? { approvalMode: this.project(projectId).approvalMode }
+        : {}),
       draft: '',
       attachments: [],
       updatedAt: Date.now(),

@@ -1,3 +1,4 @@
+import { readableError } from '../../lib/format';
 import { planProgress } from '../../lib/plan-progress';
 import { useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { Check, ChevronDown, ChevronRight, LoaderCircle, Pause, X, CircleAlert } from 'lucide-react';
@@ -108,7 +109,7 @@ export function GoalCard({
     try {
       await action(operation);
     } catch (error) {
-      setError(error instanceof Error ? error.message : String(error));
+      setError(readableError(error));
     } finally {
       setPending(false);
     }

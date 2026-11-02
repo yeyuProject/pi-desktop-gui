@@ -175,7 +175,17 @@ export function ComposerFooter(props: ComposerProps) {
             <>
               <Badge
                 status={runtime.status}
-                label={connecting && runtime.status === 'starting' ? '正在连接 Pi' : undefined}
+                label={
+                  runtime.status === 'waiting'
+                    ? runtime.dialogs.some((dialog) => dialog.approval)
+                      ? '等待批准'
+                      : runtime.dialogs.some((dialog) => dialog.ask)
+                        ? '等待你回答'
+                        : undefined
+                    : connecting && runtime.status === 'starting'
+                      ? '正在连接 Pi'
+                      : undefined
+                }
               />
               {ownRunning && !connecting && Boolean(runtime.startedAt) && (
                 <span className="elapsed" aria-hidden="true">

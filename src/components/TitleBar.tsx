@@ -1,3 +1,4 @@
+import { readableError } from '../lib/format';
 import { useEffect, useRef, useState } from 'react';
 import type { AppMenuId } from '../../shared/app-dialogs';
 import { topLayer } from '../hooks/useLayer';
@@ -32,7 +33,7 @@ export function TitleBar() {
     try {
       await window.desktop.invoke('showAppMenu', menus[index].id, rect.left, rect.bottom);
     } catch (error) {
-      setError(error instanceof Error ? error.message : String(error));
+      setError(readableError(error));
     } finally {
       setActive(undefined);
       if (keyboard) restoreFocus();

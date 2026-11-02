@@ -14,8 +14,8 @@ export function HelpTab({ runtime, source }: Pick<FeatureModel, 'runtime' | 'sou
       </p>
       <h3>快捷键</h3>
       <p>
-        Enter 发送 · Shift+Enter 换行 · ↑↓ 翻看发送过的提问 · Esc 连按两次停止 · {shortcut('N')} 新建独立对话
-        ·{shortcut('K')} 搜索历史 · {shortcut(',')} 设置 · {shortcut('G')} 外部编辑器 · {shortcut('/')}{' '}
+        Enter 发送 · Shift+Enter 换行 · ↑↓ 翻看发送过的提问 · Esc 连按两次停止 · {shortcut('N')} 新建会话 ·
+        {shortcut('K')} 搜索历史 · {shortcut(',')} 设置 · {shortcut('G')} 外部编辑器 · {shortcut('/')}{' '}
         全部快捷键 · / 命令菜单 · @ 项目文件（也可拖入）
       </p>
       <p>

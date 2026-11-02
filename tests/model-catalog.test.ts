@@ -239,7 +239,8 @@ export default function(pi) {
       } else {
         await assert.rejects(probe.readModels(imported.id), (error) => error === failure);
         assert.equal(probe.runtime.modelsLoaded, false);
-        assert.match(probe.runtime.error ?? '', new RegExp(code));
+        assert.match(probe.runtime.error ?? '', code === 'EACCES' ? /没有读写权限/ : /详情已记入诊断/);
+        assert.ok(probe.runtime.diagnostic.some((entry) => entry.includes(code)));
       }
       assert.equal(probe.runtime.modelsLoading, false);
       assert.equal(probe.runtime.connected, false);

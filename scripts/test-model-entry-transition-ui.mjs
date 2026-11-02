@@ -167,7 +167,7 @@ try {
     });
   });
   const button = page.getByRole('button', { name: '选择模型', exact: true });
-  const newChat = () => page.getByRole('button', { name: /^新建对话/ }).click();
+  const newChat = () => page.getByRole('button', { name: /^新建会话/ }).click();
   const clickDisabled = async () => {
     await expect(button).toBeDisabled();
     const connectionButtons = page.locator('.run-meta').getByRole('button', { name: /连接|重连/ });
@@ -216,7 +216,7 @@ try {
       const win = BrowserWindow.getAllWindows()[0];
       Menu.getApplicationMenu()
         .getMenuItemById('file')
-        .submenu.items.find((item) => item.label === '新建对话')
+        .submenu.items.find((item) => item.label === '新建会话')
         .click({}, win, win.webContents);
     });
   await expect(button).toBeDisabled();
@@ -311,7 +311,7 @@ try {
   await entered('cancel-new');
   await clickDisabled();
   await release('cancel-new', true);
-  await page.locator('.error-banner').filter({ hasText: 'TEST_NAVIGATION_CANCELLED' }).waitFor();
+  await page.locator('.error-banner').filter({ hasText: '操作没有完成，详情已记入诊断' }).waitFor();
   await expect(button).toBeEnabled();
   assert.equal(await selected(), b);
   assert.equal((await modelReadCalls()).length, 3);

@@ -2,7 +2,7 @@ import { X, CheckCircle2, AlertCircle, Info, TriangleAlert } from 'lucide-react'
 import { IconButton } from './IconButton';
 import type { Workbench } from '../hooks/useWorkbench';
 
-export function Toasts(props: Pick<Workbench, 'notice' | 'setDismissed' | 'toasts'>) {
+export function Toasts(props: Pick<Workbench, 'notice' | 'noticeAction' | 'setDismissed' | 'toasts'>) {
   const { notice, setDismissed, toasts } = props;
 
   return (
@@ -28,6 +28,9 @@ export function Toasts(props: Pick<Workbench, 'notice' | 'setDismissed' | 'toast
             <div className="toast" role="status">
               <CheckCircle2 size={16} />
               <span>{notice}</span>
+              {props.noticeAction?.text === notice && (
+                <button onClick={props.noticeAction.run}>{props.noticeAction.label}</button>
+              )}
             </div>
           )}
         </div>

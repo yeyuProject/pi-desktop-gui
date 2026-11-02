@@ -34,10 +34,11 @@ const publish = async (marker) => {
     globalThis.scrollRuntime = runtime;
     BrowserWindow.getAllWindows()[0].webContents.send('desktop:event', { type: 'runtime', runtime });
   }, runtime);
-  await page.waitForFunction(
-    (marker) => document.querySelector('.thread')?.textContent.includes(marker),
-    marker,
-  );
+  if (marker)
+    await page.waitForFunction(
+      (marker) => document.querySelector('.thread')?.textContent.includes(marker),
+      marker,
+    );
   await frames();
 };
 const atBottom = async (selector) => {
@@ -182,7 +183,8 @@ try {
   );
   await find.press('Escape');
   runtime.status = 'completed';
-  await publish('SEARCH_STAYS_VISIBLE');
+  await publish();
+  assert.equal(await thinking.count(), 0, 'collapsed thinking releases its content');
   await page.reload();
   await page.getByRole('textbox', { name: '任务输入' }).waitFor();
   await page.locator('.thinking summary').click();

@@ -92,6 +92,9 @@ jobs:
       - name: Test streaming performance and bounded conversation navigation
         if: matrix.os == 'ubuntu-latest'
         run: xvfb-run -a -s "-screen 0 1920x1080x24" npm run test:performance-ui
+      - name: Test draft saves, approvals and optimization controls
+        if: matrix.os == 'ubuntu-latest'
+        run: xvfb-run -a -s "-screen 0 1920x1080x24" npm run test:optimizations-ui
       - name: Test feature panels and approvals
         if: matrix.os == 'ubuntu-latest'
         run: xvfb-run -a -s "-screen 0 1920x1080x24" npm run test:features-ui

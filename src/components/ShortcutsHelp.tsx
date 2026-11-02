@@ -33,7 +33,7 @@ export const shortcutGroups: [string, [string[], string][]][] = [
         ['mod' in binding ? modKey : 'Alt', workbenchKeyLabel(binding.key)],
         binding.label,
       ]),
-      [['Esc'], '关闭弹窗或工作区面板'],
+      [['Esc'], '关闭弹窗或变更面板'],
     ],
   ],
 ];

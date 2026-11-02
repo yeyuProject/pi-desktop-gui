@@ -6,7 +6,7 @@ export function hasSessionData(session: Session): boolean {
     session.lastStatus !== 'idle' ||
     session.cwd ||
     session.unread ||
-    session.title !== (session.projectId ? '新会话' : '新对话') ||
+    session.title !== (session.projectId ? '新会话' : '新会话') ||
     session.model ||
     session.thinking !== undefined ||
     session.approvalMode !== undefined ||

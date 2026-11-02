@@ -56,7 +56,7 @@ try {
     '真实 Pi 工具执行成功\n',
   );
   await page.screenshot({ path: path.join(output, 'workspace-conversation.png'), animations: 'disabled' });
-  await page.getByRole('button', { name: '查看工作区变更', exact: true }).click();
+  await page.getByRole('button', { name: '查看项目变更', exact: true }).click();
   await page.getByRole('button', { name: '刷新变更', exact: true }).click();
   await page.locator('.change-row').filter({ hasText: '输出结果.txt' }).click();
   await page
@@ -120,15 +120,15 @@ try {
       sendBounds.y >= 0 &&
       sendBounds.y + sendBounds.height <= (await page.evaluate(() => innerHeight)),
   );
-  await page.getByRole('button', { name: '查看工作区变更', exact: true }).click();
-  const drawer = page.getByRole('dialog', { name: '工作区检查', exact: true });
+  await page.getByRole('button', { name: '查看项目变更', exact: true }).click();
+  const drawer = page.getByRole('dialog', { name: '变更面板', exact: true });
   await drawer.waitFor();
   await drawer.locator('.change-row').filter({ hasText: '输出结果.txt' }).click();
   await drawer.getByRole('button', { name: '继续提问', exact: true }).click();
   await page.waitForFunction(() => document.activeElement?.getAttribute('aria-label') === '任务输入');
   assert.equal(await drawer.count(), 0);
   assert.match(await page.getByRole('textbox', { name: '任务输入' }).inputValue(), /请检查 输出结果/);
-  await page.getByRole('button', { name: '查看工作区变更', exact: true }).click();
+  await page.getByRole('button', { name: '查看项目变更', exact: true }).click();
   await drawer.waitFor();
   await page.getByRole('button', { name: '关闭面板', exact: true }).focus();
   // Tab must stay inside the compact inspector, even after its final action.
@@ -146,7 +146,7 @@ try {
   assert.equal(await drawer.count(), 0);
   assert.equal(
     await page
-      .getByRole('button', { name: '查看工作区变更', exact: true })
+      .getByRole('button', { name: '查看项目变更', exact: true })
       .evaluate((e) => e === document.activeElement),
     true,
   );

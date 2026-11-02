@@ -11,12 +11,7 @@ import type { ReactNode } from 'react';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { SessionSearch } from '../lib/session-search';
 import { messagePageSize, messageWindow, windowConversation } from '../lib/message-window';
-import {
-  conversationTurns,
-  groupConversation,
-  placeRuntimeTools,
-  turnThinking,
-} from '../lib/conversation-layout';
+import { placeRuntimeTools, turnThinking } from '../lib/conversation-layout';
 import { ToolGroupCard } from './conversation/ToolGroupCard';
 import { TurnOutline } from './conversation/TurnOutline';
 import { RetryErrorGroup } from './conversation/RetryErrorGroup';
@@ -25,6 +20,8 @@ import { sessionModelState } from '../lib/session-model';
 import '../styles/conversation-v014.css';
 import { SelectionMenu } from './conversation/SelectionMenu';
 import { quoteMessageIndex, type DraftQuote } from '../../shared/message-content';
+import { APPROVAL_ALWAYS, grantLabel } from '../../shared/approval';
+import { ConversationDeriver } from '../lib/conversation-derive';
 
 function turnScrollTop(container: HTMLElement, target: HTMLElement) {
   const bounds = (target.querySelector('.message.user') ?? target).getBoundingClientRect();
@@ -66,11 +63,13 @@ export function Conversation(
     | 'selectSession'
     | 'openSettings'
     | 'connect'
+    | 'openModelPicker'
     | 'inspectFile'
     | 'toggleTool'
     | 'messageContext'
     | 'addQuote'
     | 'setNotice'
+    | 'setNoticeAction'
   > & { state: AppState; recovery: ReactNode },
 ) {
   const {
@@ -117,6 +116,32 @@ export function Conversation(
   const findInput = useRef<HTMLInputElement>(null);
   const threadContent = useRef<HTMLDivElement>(null);
   const threadViewport = useRef({ width: 0, height: 0 });
+  const [projectApproval, setProjectApproval] = useState<'auto' | 'confirm'>('auto');
+  const [approvalVisible, setApprovalVisible] = useState(false);
+  const focusApproval = () => {
+    showLatest();
+    requestAnimationFrame(() => {
+      const card = thread.current?.querySelector<HTMLElement>('.approval-card');
+      card?.scrollIntoView({ block: 'center' });
+      card?.querySelector<HTMLButtonElement>('button[data-allow]')?.focus({ preventScroll: true });
+    });
+  };
+  useEffect(() => {
+    const focus = () => focusApproval();
+    window.addEventListener('pi:focus-approval', focus);
+    const card = thread.current?.querySelector('.approval-card button[data-allow]');
+    const observer = new IntersectionObserver(
+      (entries) =>
+        setApprovalVisible(entries.some((entry) => entry.isIntersecting && entry.intersectionRatio >= 1)),
+      { root: thread.current, threshold: 1 },
+    );
+    if (card) observer.observe(card);
+    else setApprovalVisible(false);
+    return () => {
+      observer.disconnect();
+      window.removeEventListener('pi:focus-approval', focus);
+    };
+  }, [approvals, selected?.id]);
   const tools = ownRuntime ? runtime.tools : [];
   const placedTools = useMemo(
     () => placeRuntimeTools(messages, tools),
@@ -147,13 +172,11 @@ export function Conversation(
     () => turnThinking(messages, startIndex, endIndex),
     [messages, startIndex, endIndex],
   );
-  const items = useMemo(
-    () => groupConversation(messages, messageContext.toolFor, expanded),
-    [messages, messageContext.toolFor, expanded],
-  );
-  const turns = useMemo(
-    () => conversationTurns(messages, messageContext.toolFor, ownRuntime && running),
-    [messages, messageContext.toolFor, ownRuntime, running],
+  const conversationDeriver = useMemo(() => new ConversationDeriver(), [selected?.id]);
+  const { items, turns } = useMemo(
+    () =>
+      conversationDeriver.derive(messages, tools, messageContext.toolFor, expanded, ownRuntime && running),
+    [conversationDeriver, messages, runtime.tools, messageContext.toolFor, expanded, ownRuntime, running],
   );
   const replyIndices = useMemo(
     () => new Set(turns.flatMap((turn) => (turn.replyIndex === undefined ? [] : [turn.replyIndex]))),
@@ -535,6 +558,7 @@ export function Conversation(
       className={activeMatch?.toolId === tool.id ? 'search-active' : undefined}
     >
       <ToolCard
+        sessionId={selected?.id}
         tool={tool}
         expanded={expanded.includes(tool.id)}
         onToggle={(v) => toggleTool(tool.id, v)}
@@ -638,7 +662,23 @@ export function Conversation(
             <strong>在这个项目中启用 Pi</strong>
             <p>Pi 可以读取、修改项目文件并执行本机命令。</p>
           </div>
-          <button onClick={() => void attempt(() => api.invoke('trustProject', project.id))}>启用项目</button>
+          <label>
+            审批方式
+            <select
+              aria-label="新项目审批方式"
+              value={projectApproval}
+              onChange={(event) => setProjectApproval(event.target.value as 'auto' | 'confirm')}
+            >
+              <option value="auto">全自动</option>
+              <option value="confirm">确认修改</option>
+            </select>
+          </label>
+          <button
+            id="enable-project"
+            onClick={() => void attempt(() => api.invoke('trustProject', project.id, projectApproval))}
+          >
+            启用项目
+          </button>
         </div>
       )}
       <div
@@ -711,6 +751,7 @@ export function Conversation(
               checkEnvironment={() => openSettings('environment')}
               connect={() => void connect()}
               providers={() => setFeatureTab('providers')}
+              chooseModel={props.openModelPicker}
             />
             {!project ? (
               <div className="suggestions">
@@ -830,7 +871,25 @@ export function Conversation(
                 dialog={d}
                 first={i === 0}
                 respond={(value) =>
-                  selected && void attempt(() => api.invoke('respond', selected.id, d.id, { value }))
+                  selected &&
+                  void attempt(async () => {
+                    await api.invoke('respond', selected.id, d.id, { value });
+                    const grant = d.approval?.grant;
+                    if (value === APPROVAL_ALWAYS && grant) {
+                      const text = `已放行 ${grantLabel(grant)}`;
+                      props.setNotice(text);
+                      props.setNoticeAction({
+                        text,
+                        label: '撤销',
+                        run: () =>
+                          void attempt(async () => {
+                            await api.invoke('revokeApproval', selected.id, grant.id);
+                            props.setNoticeAction(undefined);
+                            props.setNotice('已撤销这条放行规则');
+                          }),
+                      });
+                    }
+                  })
                 }
               />
             ))}
@@ -862,10 +921,14 @@ export function Conversation(
           notice={props.setNotice}
         />
       )}
-      {(newContent || endIndex < messages.length) && (
-        <button className="new-content" title="滚到底部并继续跟随输出" onClick={showLatest}>
+      {(newContent || endIndex < messages.length || (approvals.length > 0 && !approvalVisible)) && (
+        <button
+          className={'new-content' + (approvals.length && !approvalVisible ? ' approval-attention' : '')}
+          title="滚到底部并继续跟随输出"
+          onClick={approvals.length && !approvalVisible ? focusApproval : showLatest}
+        >
           <ArrowDown size={14} />
-          回到最新
+          {approvals.length && !approvalVisible ? `有 ${approvals.length} 项待审批` : '回到最新'}
         </button>
       )}
     </>

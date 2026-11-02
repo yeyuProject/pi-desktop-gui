@@ -63,7 +63,7 @@ export async function resolvePi(
     const { stdout } = await exec(node, ['--version'], { windowsHide: true, timeout: 5000 });
     const [major, minor] = stdout.trim().replace(/^v/, '').split('.').map(Number);
     if (major < 22 || (major === 22 && minor < 19))
-      throw new Error('运行此 Pi 入口需要 Node.js 22.19 或更高版本。');
+      throw new Error('Pi 需要 Node.js 22.19 或更高版本，请在设置 → 运行环境中选择合适的 Node。');
     return { entry, node, spec: { command: node, args: [entry] } };
   }
   return { entry, spec: { command: entry, args: [] } };
@@ -162,7 +162,15 @@ async function inspectEnvironment(settings: Settings, developmentRoot?: string):
         `${compatibilityMessage(result.version, result.compatibility)}\n${PI_INSTALL_COMMAND}`,
       );
   } catch (e) {
-    result.errors.push((e as Error).message);
+    const message = (e as Error).message;
+    console.error('Pi environment:', e);
+    result.errors.push(
+      /[\u3400-\u9fff]/.test(message) && !/\b(?:ENOENT|EACCES|EPERM)\b/.test(message)
+        ? message
+        : /node/i.test(message)
+          ? '无法启动 Node.js，请在设置 → 运行环境中选择可用的 Node.js 入口。'
+          : '无法启动 Pi，请检查 Pi 入口是否存在，以及当前用户是否有运行权限。',
+    );
   }
   if (!result.bash)
     result.errors.push(

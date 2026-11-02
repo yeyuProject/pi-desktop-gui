@@ -1,6 +1,6 @@
 {
   "name": "pi-desktop-gui",
-  "version": "0.14.62",
+  "version": "0.14.63",
   "private": true,
   "description": "A local desktop workspace for the Pi coding agent",
   "author": "yeyuProject",
@@ -12,7 +12,7 @@
     "build": "tsc --noEmit && vite build && node scripts/build-main.mjs",
     "start": "electron .",
     "icons": "electron scripts/render-icon.cjs",
-    "test": "node --import tsx --test --test-timeout=120000 tests/*.test.ts tests/*.test.mjs",
+    "test": "node --import tsx --test --test-concurrency=4 --test-timeout=600000 tests/*.test.ts tests/*.test.mjs",
     "test:integration": "node --import tsx scripts/integration.ts && node --import tsx scripts/test-ask.ts",
     "test:goal": "node --import tsx scripts/test-goal.ts",
     "test:goal-ui": "node --import tsx scripts/test-goal-ui.mjs",
@@ -38,6 +38,9 @@
     "test:images-ui": "node --import tsx scripts/test-image-input-ui.mjs",
     "test:performance-ui": "node --import tsx scripts/test-performance-ui.mjs",
     "test:performance-core": "node --expose-gc --import tsx scripts/test-performance-core.ts",
+    "test:optimizations-ui": "node --import tsx scripts/test-optimizations-ui.mjs",
+    "test:performance-ipc": "node --import tsx scripts/test-streaming-main.ts && node --import tsx scripts/test-streaming-ipc.ts",
+    "test:checkpoint-scale": "node --import tsx scripts/test-checkpoint-scale.ts",
     "test:transcript-ui": "node --import tsx scripts/test-transcript-ui.mjs",
     "lint": "node tools/lint/run.mjs",
     "format:check": "prettier --check electron shared src tests scripts tools/lint vite.config.ts eslint.config.mjs"

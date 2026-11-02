@@ -4,6 +4,7 @@ import { retainAskDrafts } from './ask-drafts';
 export interface SessionActivity {
   status: Runtime['status'];
   pending: number;
+  waitingFor?: '审批' | '提问' | '扩展回复';
 }
 /** Token updates notify only the owning conversation; sidebar subscribers see activity changes. */
 export class RuntimeStore {
@@ -41,10 +42,25 @@ export class RuntimeStore {
     this.runtimes.set(id, runtime);
     for (const listener of this.listeners.get(id) ?? []) listener();
     const before = this.activities[id];
-    if (before?.status !== runtime.status || before.pending !== runtime.dialogs.length) {
+    const waitingFor = runtime.dialogs.some((dialog) => dialog.approval)
+      ? ('审批' as const)
+      : runtime.dialogs.some((dialog) => dialog.ask)
+        ? ('提问' as const)
+        : runtime.dialogs.length
+          ? ('扩展回复' as const)
+          : undefined;
+    if (
+      before?.status !== runtime.status ||
+      before.pending !== runtime.dialogs.length ||
+      before.waitingFor !== waitingFor
+    ) {
       this.activities = {
         ...this.activities,
-        [id]: { status: runtime.status, pending: runtime.dialogs.length },
+        [id]: {
+          status: runtime.status,
+          pending: runtime.dialogs.length,
+          ...(waitingFor ? { waitingFor } : {}),
+        },
       };
       for (const listener of this.activityListeners) listener();
     }

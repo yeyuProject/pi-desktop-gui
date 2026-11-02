@@ -103,7 +103,7 @@ const mock = () => {
       { id: 'p2', name: 'docs-site', path: '/home/dev/docs-site', trusted: true, createdAt: now - 2e8 },
     ],
     sessions: [
-      { ...mk('s1', '新对话', 'p1', 0), lastStatus: 'idle' },
+      { ...mk('s1', '新会话', 'p1', 0), lastStatus: 'idle' },
       mk('s2', '梳理路由与权限中间件', 'p1', 3.6e6),
       mk('s3', '为结算页补充 E2E 测试', 'p1', 8.6e7),
       mk('s4', '迁移到新版文档主题', 'p2', 2e8),
@@ -411,11 +411,8 @@ try {
   await page.goto(server.url);
   const composer = page.getByRole('textbox', { name: '任务输入' });
   await composer.waitFor();
-  await page
-    .getByRole('button', { name: /工作区/ })
-    .first()
-    .click();
-  await page.getByText('工作区干净').waitFor();
+  await page.getByRole('button', { name: '查看项目变更', exact: true }).first().click();
+  await page.getByText('项目没有未提交的修改').waitFor();
   await page.mouse.move(width * 0.55, height * 0.45);
   await page.waitForTimeout(300);
 
@@ -481,7 +478,7 @@ try {
   await page.getByText('文件已恢复').waitFor();
   await pause(1100);
   await clickOn(page.getByRole('dialog').getByRole('button', { name: '关闭' }));
-  await page.getByText('工作区干净').waitFor();
+  await page.getByText('项目没有未提交的修改').waitFor();
   await pause(2500);
   await cdp.send('Page.stopScreencast');
   if (errors.length) throw new Error(errors.join('; '));

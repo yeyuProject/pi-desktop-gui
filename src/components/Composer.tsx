@@ -22,7 +22,7 @@ import { ComposerFeedback, ComposerFooter } from './conversation/ComposerStatus'
 import { ComposerResize } from './conversation/ComposerResize';
 import { ModelPicker } from './ModelPicker';
 import { ApprovalSwitch } from './Approval';
-import { useEffect, useLayoutEffect, useRef, useState, type KeyboardEvent } from 'react';
+import { useMemo, useEffect, useLayoutEffect, useRef, useState, type KeyboardEvent } from 'react';
 import { Lightbox } from './Lightbox';
 import { Modal } from './Modal';
 import { SearchHighlight } from './conversation/SearchHighlight';
@@ -53,6 +53,7 @@ export type ComposerProps = Pick<
   | 'attachmentsPending'
   | 'selectionChanging'
   | 'selectionRevision'
+  | 'modelPickerRequest'
   | 'draft'
   | 'draftGoal'
   | 'openGoalComposer'
@@ -257,6 +258,9 @@ export function Composer(props: ComposerProps) {
     () => setModelPickerOpen(false),
     [selected?.id, selectionChanging, modelPickerDisabledReason],
   );
+  useEffect(() => {
+    if (props.modelPickerRequest) setModelPickerOpen(true);
+  }, [props.modelPickerRequest]);
   const [lightboxIndex, setLightboxIndex] = useState<number | null>(null),
     [snippetId, setSnippetId] = useState('');
   const [parameterError, setParameterError] = useState('');
@@ -335,12 +339,51 @@ export function Composer(props: ComposerProps) {
     void send();
   };
   const snippet = snippets.find((item) => item.id === snippetId);
-  const largest = [
-    ...attachmentInfo.map((info) => ({ name: info.spec, bytes: info.bytes })),
-    ...snippets.map((item) => ({ name: '粘贴片段', bytes: textBytes(item.text) })),
-    ...draftQuotes.map((item) => ({ name: '对话引用', bytes: textBytes(item.text) })),
-    { name: '草稿正文', bytes: textBytes(draft) },
-  ].sort((a, b) => b.bytes - a.bytes)[0];
+  const attachmentSizes = useMemo(
+    () => [
+      ...attachmentInfo.map((info) => ({ name: info.spec, bytes: info.bytes })),
+      ...snippets.map((item) => ({ name: '粘贴片段', bytes: textBytes(item.text) })),
+      ...draftQuotes.map((item) => ({ name: '对话引用', bytes: textBytes(item.text) })),
+    ],
+    [attachmentInfo, snippets, draftQuotes],
+  );
+  const largest = useMemo(
+    () =>
+      [...attachmentSizes, { name: '草稿正文', bytes: textBytes(draft) }].sort(
+        (a, b) => b.bytes - a.bytes,
+      )[0],
+    [attachmentSizes, draft],
+  );
+  const sendDisabledReason = !sessionEnabled
+    ? '这个项目还没启用，先点上方“启用项目”'
+    : !localGoalCommand && !environment?.supported && !runtime.connected
+      ? 'Pi 还没准备好，先完成开始前检查'
+      : runtime.status === 'stopping'
+        ? '正在停止，稍等一下'
+        : pending
+          ? '上一个操作还没完成'
+          : props.attachmentsPending
+            ? '附件还在读取'
+            : !editingGoal && attachmentBytes > 1024 * 1024
+              ? `内容超过 1 MiB，请移除“${largest.name}”或改为按行引用`
+              : goalEmpty
+                ? '请填写目标'
+                : goalError ||
+                  (!answering && parameterError) ||
+                  (!draft.trim() && !images.length && !snippets.length && !draftQuotes.length
+                    ? '先输入内容'
+                    : '');
+  const explainSend = () => {
+    const target = !sessionEnabled
+      ? document.getElementById('enable-project')
+      : !environment?.supported && !runtime.connected
+        ? document.querySelector<HTMLElement>('.readiness')
+        : parameterError
+          ? document.querySelector<HTMLElement>('.prompt-arguments [aria-invalid="true"]')
+          : input.current;
+    target?.scrollIntoView({ block: 'nearest' });
+    target?.focus();
+  };
   const handleModelError = async (action: ModelErrorAction) => {
     if (action === 'providers') setFeatureTab('providers');
     else if (action === 'proxy') setFeatureTab('prefs');
@@ -553,9 +596,13 @@ export function Composer(props: ComposerProps) {
               ? '也可以直接输入回答…'
               : goalMode
                 ? '描述你想达成的目标…'
-                : project
-                  ? '描述你想完成的任务，@ 引用文件…'
-                  : '给 Pi 发消息…'
+                : ownRunning
+                  ? sendMode === 'steer'
+                    ? 'Enter 立即补充…'
+                    : 'Enter 完成后执行…'
+                  : project
+                    ? '描述你想完成的任务，@ 引用文件…'
+                    : '给 Pi 发消息…'
           }
           value={draft}
           disabled={!selected || !storage.writable}
@@ -848,53 +895,79 @@ export function Composer(props: ComposerProps) {
                 {runtime.status === 'stopping' ? '停止中' : connecting ? '取消连接' : '停止任务'}
               </button>
             )}
-            <button
-              className={'send-button' + (goalMode && !localGoalCommand ? ' goal-send-button' : '')}
-              aria-label={
-                answering
-                  ? '发送回答'
-                  : editingGoal
-                    ? '保存修改'
-                    : goalMode && !localGoalCommand
-                      ? '开始 Goal'
-                      : '发送任务'
-              }
-              title={
-                answering
-                  ? '发送回答'
-                  : editingGoal
-                    ? '保存修改'
-                    : goalMode && !localGoalCommand
-                      ? '开始 Goal'
-                      : '发送任务'
-              }
-              disabled={
-                (!draft.trim() && !images.length && !snippets.length && !draftQuotes.length) ||
-                (!editingGoal && attachmentBytes > 1024 * 1024) ||
-                goalEmpty ||
-                Boolean(goalError) ||
-                (!answering && Boolean(parameterError)) ||
-                !selected ||
-                pending ||
-                props.attachmentsPending ||
-                !sessionEnabled ||
-                (!localGoalCommand && !environment?.supported && !runtime.connected) ||
-                runtime.status === 'stopping'
-              }
-              onClick={sendComposer}
+            <span
+              className="send-wrapper"
+              role={sendDisabledReason ? 'button' : undefined}
+              tabIndex={sendDisabledReason ? 0 : undefined}
+              aria-label={sendDisabledReason || undefined}
+              title={sendDisabledReason || undefined}
+              onClick={sendDisabledReason ? explainSend : undefined}
+              onKeyDown={(event) => {
+                if (sendDisabledReason && ['Enter', ' '].includes(event.key)) {
+                  event.preventDefault();
+                  explainSend();
+                }
+              }}
             >
-              {pending ? (
-                <LoaderCircle size={18} className="spin" />
-              ) : goalMode && !localGoalCommand ? (
-                editingGoal ? (
-                  '保存修改'
+              <span id="send-disabled-reason" hidden>
+                {sendDisabledReason}
+              </span>
+              <button
+                aria-describedby={sendDisabledReason ? 'send-disabled-reason' : undefined}
+                className={'send-button' + (goalMode && !localGoalCommand ? ' goal-send-button' : '')}
+                aria-label={
+                  answering
+                    ? '发送回答'
+                    : editingGoal
+                      ? '保存修改'
+                      : goalMode && !localGoalCommand
+                        ? '开始 Goal'
+                        : '发送任务'
+                }
+                title={
+                  sendDisabledReason ||
+                  (answering
+                    ? '发送回答'
+                    : editingGoal
+                      ? '保存修改'
+                      : goalMode && !localGoalCommand
+                        ? '开始 Goal'
+                        : '发送任务')
+                }
+                disabled={
+                  (!draft.trim() && !images.length && !snippets.length && !draftQuotes.length) ||
+                  (!editingGoal && attachmentBytes > 1024 * 1024) ||
+                  goalEmpty ||
+                  Boolean(goalError) ||
+                  (!answering && Boolean(parameterError)) ||
+                  !selected ||
+                  pending ||
+                  props.attachmentsPending ||
+                  !sessionEnabled ||
+                  (!localGoalCommand && !environment?.supported && !runtime.connected) ||
+                  runtime.status === 'stopping'
+                }
+                onClick={sendComposer}
+              >
+                {pending ? (
+                  <LoaderCircle size={18} className="spin" />
+                ) : goalMode && !localGoalCommand ? (
+                  editingGoal ? (
+                    '保存修改'
+                  ) : (
+                    '开始 Goal'
+                  )
+                ) : ownRunning ? (
+                  sendMode === 'steer' ? (
+                    '补充'
+                  ) : (
+                    '排队'
+                  )
                 ) : (
-                  '开始 Goal'
-                )
-              ) : (
-                <ArrowUp size={19} />
-              )}
-            </button>
+                  <ArrowUp size={19} />
+                )}
+              </button>
+            </span>
           </div>
         </div>
       </div>

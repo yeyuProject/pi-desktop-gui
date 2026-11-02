@@ -103,8 +103,9 @@ try {
   fixture.store.session(fixture.sessionId).draft = 'MUST_NOT_EXECUTE';
   await assert.rejects(
     service.send(fixture.sessionId, 'MUST_NOT_EXECUTE', [], 'steer'),
-    /SIMULATED_CHECKPOINT_DISK_FAILURE/,
+    /无法为这一轮建立检查点/,
   );
+  assert.ok(service.runtime.diagnostic.some((entry) => entry.includes('SIMULATED_CHECKPOINT_DISK_FAILURE')));
   assert.equal(provider.requests.length, previousRequests);
   assert.equal(fixture.store.session(fixture.sessionId).draft, 'MUST_NOT_EXECUTE');
   workspace.captureCheckpoint = capture;

@@ -22,10 +22,10 @@ export function piFeatureAvailability({
   const operationReason = pending
     ? '正在处理上一项操作，请稍候。'
     : !storage.writable
-      ? '本机数据目录当前只读。请关闭窗口，在工作区的存储提示中修复后重试。'
+      ? '本机数据目录当前只读。请关闭窗口，按主窗口的存储提示修复后重试。'
       : '';
   const prerequisiteReason = !projectEnabled
-    ? '当前项目尚未信任。请关闭此窗口，在工作区选择“信任并启用”后使用 Pi 功能。'
+    ? '当前项目尚未信任。请关闭此窗口，在主窗口选择“启用项目”后使用 Pi 功能。'
     : !environment?.supported && !runtime.connected
       ? '尚未检测到可用的 Pi。请到“设置 → 运行环境”检查 Pi 入口并重新检测。'
       : '';

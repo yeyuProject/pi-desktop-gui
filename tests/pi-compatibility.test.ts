@@ -121,7 +121,7 @@ test('a missing desktop extension never sends its internal slash command to the 
   rpc.start({ command: process.execPath, args: [path.resolve('tests/support/fixture-pi.mjs')] }, dir, [], {
     PI_CODING_AGENT_DIR: dir,
   });
-  await assert.rejects(rpc.bridge('options'), /扩展未加载/);
+  await assert.rejects(rpc.bridge('options'), /配套扩展没有响应/);
   const commands = (await fs.readFile(path.join(dir, 'commands.jsonl'), 'utf8'))
     .trim()
     .split('\n')

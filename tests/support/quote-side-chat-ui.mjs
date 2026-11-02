@@ -51,6 +51,12 @@ export async function verifyQuoteSideChatUI({ app, page, fixture, provider, outp
   await selectText(replies.nth(1));
   await menu.getByRole('button', { name: '引用', exact: true }).click();
   await expect(page.locator('.draft-quotes > span')).toHaveCount(2);
+  await expect
+    .poll(
+      async () =>
+        (await snapshot()).state.sessions.find((item) => item.id === session.id).draftQuotes?.length,
+    )
+    .toBe(2);
   await page.evaluate(() => window.desktop.invoke('flushDraft'));
   await page.reload();
   await input.waitFor();

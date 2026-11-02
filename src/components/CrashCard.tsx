@@ -23,6 +23,7 @@ export function CrashCard({
   undo: () => Promise<void>;
   diagnostic: () => void;
 }) {
+  const workDisabled = disabled;
   disabled ||= crash.cleanup !== 'confirmed';
   const [prompt, setPrompt] = useState(defaultPrompt);
   const [pending, setPending] = useState(false);
@@ -60,11 +61,8 @@ export function CrashCard({
   return (
     <section className="crash-card" aria-label="Pi 意外退出">
       <h3>
-        <AlertCircle size={18} /> Pi 意外退出
+        <AlertCircle size={18} /> Pi {crash.lastTool ? `在调用 ${crash.lastTool.name} 时` : ''}意外退出了
       </h3>
-      <p>
-        退出码：{crash.code ?? '无'} · 信号：{crash.signal ?? '无'}。没有自动重发上一条提问。
-      </p>
       {crash.lastTool && (
         <p>
           退出前正在调用 <strong>{crash.lastTool.name}</strong>，运行了 {crash.lastTool.seconds} 秒。
@@ -75,7 +73,7 @@ export function CrashCard({
         <button className="inline-link" onClick={inspect}>
           {changes && !changes.error && changes.baselineAvailable
             ? `本轮已修改 ${changes.files.length} 个文件，查看变更`
-            : '查看工作区与本轮变更'}
+            : '查看项目与本轮变更'}
         </button>
       )}
       {crash.repeated && (
@@ -85,11 +83,15 @@ export function CrashCard({
         <p className="inline-error" role="alert">
           {crash.cleanup === 'checking'
             ? '正在确认本轮命令是否结束，请稍候。'
-            : '无法确认残留命令已结束，重连和撤销已暂停。请在系统任务管理器或终端结束残留命令，再重新启动 Pi Desktop。仅重启应用不会结束这些命令。'}
+            : '不确定上次的命令是否已结束，所以暂时不能重连和撤销。请在任务管理器或终端结束它们，然后点“重新检查”。'}
         </p>
       )}
       <details>
         <summary>退出前的诊断日志（最后 20 行）</summary>
+        <p>
+          退出码：{crash.code ?? '无'} · 信号：{crash.signal ?? '无'}
+        </p>
+        <p>没有自动重发上一条提问。</p>
         <pre>{crash.log.join('\n') || '没有诊断输出。'}</pre>
       </details>
       <label>
@@ -104,9 +106,6 @@ export function CrashCard({
       </label>
       {error && <p className="inline-error">{error}</p>}
       <div className="button-row">
-        <button disabled={pending || disabled} onClick={() => void run(() => recover())}>
-          重新连接
-        </button>
         <button
           className="primary"
           disabled={pending || disabled || !prompt.trim()}
@@ -114,22 +113,36 @@ export function CrashCard({
         >
           重新连接并继续
         </button>
-        {projectId && (
+        {crash.cleanup === 'unconfirmed' && (
           <button
-            disabled={
-              pending || disabled || !changes?.baselineAvailable || !changes.files.length || !!changes.error
-            }
-            onClick={() =>
-              void run(async () => {
-                await undo();
-                setRevision((value) => value + 1);
-              })
-            }
+            disabled={pending || workDisabled}
+            onClick={() => void run(() => window.desktop.invoke('recheckCrash', sessionId))}
           >
-            撤销本轮修改
+            重新检查
           </button>
         )}
-        <button onClick={diagnostic}>打开诊断</button>
+        <details>
+          <summary>更多</summary>
+          <button disabled={pending || disabled} onClick={() => void run(() => recover())}>
+            重新连接
+          </button>
+          {projectId && (
+            <button
+              disabled={
+                pending || disabled || !changes?.baselineAvailable || !changes.files.length || !!changes.error
+              }
+              onClick={() =>
+                void run(async () => {
+                  await undo();
+                  setRevision((value) => value + 1);
+                })
+              }
+            >
+              撤销本轮修改
+            </button>
+          )}
+          <button onClick={diagnostic}>打开诊断</button>
+        </details>
       </div>
     </section>
   );

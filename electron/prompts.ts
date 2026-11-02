@@ -212,7 +212,8 @@ export async function savePromptTemplate(
   if (original) {
     const current = await readPromptTemplate(context, original.path);
     if (!samePath(current.path, target)) throw new Error('编辑时不能更改命令名或作用范围；请新建另一个模板');
-    if (current.revision !== original.revision) throw new Error('模板已在外部修改，请重新读取后再保存');
+    if (current.revision !== original.revision)
+      throw new Error('这份模板在你编辑时被别处改过了。点“重新读取”看最新内容，再改一次。');
     const { frontmatter } = parseTemplate(await readRaw(target));
     frontmatter.description = input.description;
     if (input.argumentHint) frontmatter['argument-hint'] = input.argumentHint;
@@ -250,6 +251,7 @@ export async function deletePromptTemplate(
   expectedRevision: string,
 ): Promise<void> {
   const current = await readPromptTemplate(context, file);
-  if (current.revision !== expectedRevision) throw new Error('模板已在外部修改，请重新读取后再删除');
+  if (current.revision !== expectedRevision)
+    throw new Error('这份模板在你编辑时被别处改过了。点“重新读取”看最新内容，再改一次。');
   await fs.unlink(current.path);
 }

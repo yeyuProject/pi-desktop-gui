@@ -92,7 +92,10 @@ export class PiRpc extends EventEmitter {
           try {
             this.emit('event', JSON.parse(record.message.slice('__PI_DESKTOP__'.length)));
           } catch {
-            this.emit('protocolError', new Error('桌面适配返回了无效数据'));
+            this.emit(
+              'protocolError',
+              new Error('Pi Desktop 的配套扩展没有响应。请在诊断中查看扩展错误，然后重新连接。'),
+            );
           }
           return;
         }
@@ -127,7 +130,8 @@ export class PiRpc extends EventEmitter {
     });
     this.child.on('exit', (code, signal) => {
       this.closed = true;
-      this.rejectAll(new Error(`Pi 进程已退出 (${code ?? signal})`));
+      this.emit('diagnostic', `Pi exited: code=${code}, signal=${signal}`);
+      this.rejectAll(new Error('Pi 意外退出了。可以重新连接，退出原因记在诊断里。'));
       this.emit('exit', code, signal);
     });
     this.child.stdin.on('error', (e) => this.rejectAll(e));
@@ -180,7 +184,7 @@ export class PiRpc extends EventEmitter {
   async bridge(method: string, params: unknown = {}, timeout = 600_000) {
     const { commands } = await this.request('get_commands');
     if (!commands.some((command) => command.name === DESKTOP_BRIDGE_COMMAND))
-      throw new Error('Pi 桌面适配扩展未加载，已停止调用。请打开诊断检查扩展错误并重新连接。');
+      throw new Error('Pi Desktop 的配套扩展没有响应。请在诊断中查看扩展错误，然后重新连接。');
     const id = randomUUID();
     let result: any;
     let received = false;
@@ -203,7 +207,7 @@ export class PiRpc extends EventEmitter {
         },
         timeout,
       );
-      if (!received) throw new Error('Pi 桌面适配未响应，请重新连接');
+      if (!received) throw new Error('Pi Desktop 的配套扩展没有响应。请在诊断中查看扩展错误，然后重新连接。');
       if (result.error) throw new Error(result.error);
       validateBridgeResult(method, result.data);
       return result.data;

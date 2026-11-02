@@ -18,6 +18,7 @@ export function PiFeatures({
   environment,
   storage,
   projectEnabled,
+  onAuthenticated,
 }: {
   session: Session;
   runtime: Runtime;
@@ -26,6 +27,7 @@ export function PiFeatures({
   environment?: Environment;
   storage: StorageStatus;
   projectEnabled: boolean;
+  onAuthenticated: (provider: string) => Promise<void>;
 }) {
   const model = usePiFeatures({ session, runtime, initialTab, close, environment, storage, projectEnabled });
   const { tab, setTab, pending, error, notice, setLocal, setKind, setDocument, dirty } = model;
@@ -102,7 +104,7 @@ export function PiFeatures({
             {tab === 'session' && <SessionTab {...model} />}
             {tab === 'tree' && <TreeTab {...model} />}
             {tab === 'resources' && <ResourcesTab {...model} />}
-            {tab === 'providers' && <ProvidersTab {...model} />}
+            {tab === 'providers' && <ProvidersTab {...model} onAuthenticated={onAuthenticated} />}
             {tab === 'mcp' && <McpTab {...model} />}
             {tab === 'prefs' && <PreferencesTab {...model} />}
             {tab === 'settings' && <ConfigurationTab {...model} />}

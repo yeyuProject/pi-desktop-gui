@@ -269,7 +269,7 @@ export default function desktopBridge(pi: ExtensionAPI) {
             data = { approvalMode, approvalGrants };
             break;
           case 'revoke_approval':
-            if (p.id !== undefined && typeof p.id !== 'string') throw new Error('要撤回的授权无效');
+            if (p.id !== undefined && typeof p.id !== 'string') throw new Error('要撤销的授权无效');
             approvalGrants = p.id === undefined ? [] : approvalGrants.filter((grant) => grant.id !== p.id);
             publishGrants(ctx);
             data = { approvalGrants };
@@ -346,12 +346,10 @@ export default function desktopBridge(pi: ExtensionAPI) {
             if (result.aborted) throw new Error('刷新模型已取消，请重试');
             const error = ctx.modelRegistry.getError();
             if (error) throw new Error(`刷新模型失败，请检查模型配置：${error}`);
-            if (result.errors.size)
-              throw new Error(
-                `部分供应商的模型刷新失败，请检查连接后重试：${[...result.errors]
-                  .map(([provider, error]) => `${provider}: ${error.message}`)
-                  .join('；')}`,
-              );
+            if (result.errors.size) {
+              console.error('Model catalog errors:', [...result.errors]);
+              throw new Error('部分供应商的模型刷新失败，请检查连接后重试，详情已记入诊断。');
+            }
             data = {};
             break;
           }

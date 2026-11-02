@@ -23,6 +23,7 @@ export function ToolCard({
   askHunk,
   rerun,
   canRerun,
+  sessionId,
 }: {
   tool: ToolActivity;
   expanded: boolean;
@@ -32,14 +33,22 @@ export function ToolCard({
   askHunk?: (attachment: string | undefined, prompt: string) => void;
   rerun?: (command: string, includeContext: boolean) => void;
   canRerun?: boolean;
+  sessionId?: string;
 }) {
   const [copyState, setCopyState] = useState<'idle' | 'copied' | 'error'>('idle');
+  const [showAll, setShowAll] = useState(false);
+  const [completeOutput, setCompleteOutput] = useState<string>();
+  const outputTail = useMemo(
+    () => tool.output.split('\n').slice(-300).join('\n').slice(-65536),
+    [tool.output],
+  );
   const copyTimer = useRef<ReturnType<typeof setTimeout>>(undefined);
   useEffect(() => () => clearTimeout(copyTimer.current), []);
   const copyOutput = async () => {
     clearTimeout(copyTimer.current);
     try {
-      await api.invoke('copy', stripAnsi(tool.output));
+      const text = sessionId ? await api.invoke('getToolOutput', sessionId, tool.id) : tool.output;
+      await api.invoke('copy', stripAnsi(text));
       setCopyState('copied');
     } catch {
       setCopyState('error');
@@ -203,7 +212,27 @@ export function ToolCard({
                   {shell ? String(tool.args.command ?? '') : JSON.stringify(tool.args, null, 2)}
                 </pre>
               )}
-              <AnsiOutput text={tool.output || '等待输出…'} />
+              {!showAll &&
+                (outputTail.length < tool.output.length ||
+                  tool.output.length >= 65536 ||
+                  tool.output.split('\n').length >= 200) && (
+                  <button
+                    onClick={() => {
+                      if (sessionId)
+                        void api
+                          .invoke('getToolOutput', sessionId, tool.id)
+                          .then((text) => {
+                            setCompleteOutput(text);
+                            setShowAll(true);
+                          })
+                          .catch(() => setCopyState('error'));
+                      else setShowAll(true);
+                    }}
+                  >
+                    显示全部
+                  </button>
+                )}
+              <AnsiOutput text={(showAll ? (completeOutput ?? tool.output) : outputTail) || '等待输出…'} />
             </>
           )}
           <div className="tool-actions">

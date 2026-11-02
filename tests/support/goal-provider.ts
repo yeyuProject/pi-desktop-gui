@@ -3,6 +3,7 @@ import { randomUUID } from 'node:crypto';
 
 type GoalScenario =
   | 'continue'
+  | 'performance'
   | 'mixed'
   | 'pause'
   | 'hold'
@@ -132,9 +133,11 @@ export async function createGoalProvider() {
       function: { name, arguments: JSON.stringify(args) },
     });
     const read = () => call('read', { path: '输入 文件.txt' });
+    if (entry.scenario === 'performance') await new Promise((resolve) => setTimeout(resolve, 50));
     const toolCalls =
       entry.scenario === 'budget' ||
       entry.scenario === 'budget-ignore' ||
+      (entry.scenario === 'performance' && entry.count < 200) ||
       (entry.scenario === 'long' && entry.count <= 60) ||
       (entry.scenario === 'cached' && entry.count < 10)
         ? [read()]

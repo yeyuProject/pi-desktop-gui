@@ -13,6 +13,32 @@ function service() {
   });
   return { s, view: () => view, patches };
 }
+test('block tails append only new text and resync still sends complete messages', () => {
+  const { s, view, patches } = service();
+  const publisher = (s as unknown as { publisher: { messageChanged(at: number): void } }).publisher;
+  const content = [
+    { type: 'text', text: 'a'.repeat(50000) },
+    { type: 'thinking', thinking: 'first' },
+  ];
+  s.runtime.sessionId = 'blocks';
+  s.runtime.messages = [{ role: 'assistant', content }];
+  s.publish(true);
+  content[0].text += 'next';
+  publisher.messageChanged(0);
+  s.publish(true);
+  assert.equal(patches.at(-1)?.messageTail?.blocks[0].block.text, 'next');
+  assert.ok(JSON.stringify(patches.at(-1)).length < 1000);
+  assert.deepEqual(view().messages, s.runtime.messages);
+  content[1].thinking = 'replacement';
+  publisher.messageChanged(1);
+  s.publish(true);
+  assert.deepEqual(view().messages, s.runtime.messages);
+  s.resync();
+  s.publish(true);
+  const sent = patches.at(-1)!.messages[0].content;
+  assert.ok(Array.isArray(sent));
+  assert.equal(sent[0].text, content[0].text);
+});
 
 test('runtime patches reproduce the full runtime through streaming, edits and session switches', () => {
   const { s, view, patches } = service();
@@ -174,6 +200,40 @@ test('plan scalar patches update, clear, resync and cannot leak across sessions'
   s.publish(true);
   assert.equal(view().plan, undefined);
   assert.equal(view().planUpdateRequest, undefined);
+});
+
+test('100 KB ANSI tool updates keep only a bounded tail and the latest line', () => {
+  const { s, view, patches } = service();
+  s.runtime.sessionId = 'logs';
+  s.runtime.tools = [{ id: 'logs', name: 'bash', args: {}, status: 'running', output: '', startedAt: 1 }];
+  const output = '\u001b[31mred\u001b[0m\n'.repeat(10000) + 'LATEST_LINE';
+  (s as any).onEvent({
+    type: 'tool_execution_update',
+    toolCallId: 'logs',
+    partialResult: { content: [{ type: 'text', text: output }] },
+  });
+  s.publish(true);
+  assert.ok(view().tools[0].output.length <= 65536);
+  assert.ok(view().tools[0].output.split('\n').length <= 200);
+  assert.ok(view().tools[0].output.endsWith('LATEST_LINE'));
+  assert.ok(JSON.stringify(patches.at(-1)).length < 10000);
+});
+
+test('hidden windows publish ordinary updates at most twice a second and restore immediately', (t) => {
+  t.mock.timers.enable({ apis: ['setTimeout'] });
+  const { s, view, patches } = service();
+  s.runtime.sessionId = 'hidden';
+  s.setVisible(false);
+  for (let i = 0; i < 20; i++) {
+    s.runtime.messages = [{ role: 'assistant', content: 'version ' + i }];
+    s.publish();
+    t.mock.timers.tick(50);
+  }
+  assert.equal(patches.length, 2);
+  s.runtime.messages = [{ role: 'assistant', content: 'latest' }];
+  s.setVisible(true);
+  assert.equal(patches.length, 3);
+  assert.equal(view().messages[0].content, 'latest');
 });
 
 test('live usage patches update and clear without leaking into another session', () => {

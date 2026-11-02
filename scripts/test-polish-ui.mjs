@@ -233,6 +233,14 @@ try {
     ipcMain.removeHandler('desktop:invoke');
     ipcMain.handle('desktop:invoke', async (event, method, args) => {
       if (method === 'readHistory') return globalThis.polishRuntime.messages;
+      if (method === 'getToolOutput') {
+        const message = globalThis.polishRuntime.messages.findLast(
+          (message) => message.role === 'toolResult' && message.toolCallId === args[1],
+        );
+        return typeof message?.content === 'string'
+          ? message.content
+          : (globalThis.polishRuntime.tools.find((tool) => tool.id === args[1])?.output ?? '');
+      }
       if (['messageAction', 'stop'].includes(method) && args[0] === globalThis.polishRuntime.sessionId) {
         globalThis.polishActions.push({ method, args });
         return;
@@ -338,6 +346,7 @@ try {
   await copy.click();
   await page.getByRole('status').filter({ hasText: '已复制' }).waitFor();
   assert.equal(await app.evaluate(({ clipboard }) => clipboard.readText()), 'read output');
+  await page.locator('.thinking summary').first().click();
   const font = await page
     .locator('.thinking pre')
     .first()

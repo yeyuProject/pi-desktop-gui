@@ -56,9 +56,10 @@ try {
     fixture.sessionId,
   );
   await page.keyboard.press(`${mod}+b`);
-  await page.getByRole('button', { name: '待回复 1', exact: true }).waitFor();
+  await page.getByText('待处理 1', { exact: true }).waitFor();
   if (process.platform === 'darwin') assert.equal(await app.evaluate(({ app }) => app.getBadgeCount()), 1);
-  await page.getByRole('button', { name: '待回复 1', exact: true }).click();
+  await page.getByText('待处理 1', { exact: true }).click();
+  await page.locator('.attention-menu [role="menuitem"]').click();
   await write.waitFor();
   assert.equal(await input.inputValue(), '这条草稿不应被审批卡片打断');
   console.log('PASS background approval remains reachable with collapsed sidebar and a native app badge');

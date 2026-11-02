@@ -15,6 +15,7 @@ import { Workspace } from '../electron/workspace';
 import { validateImages } from '../electron/images';
 import { PiRpc } from '../electron/rpc';
 import { composeDraftText, matchesDraft } from '../shared/draft';
+import { describeSystemError } from '../shared/errors';
 import { composeQuotedInput, isDraftQuote } from '../shared/message-content';
 import { SideChats } from '../electron/side-chats';
 import type { AppEvent, StateSnapshot } from '../shared/types';
@@ -192,7 +193,7 @@ test('empty draft autosaves, view saves and selection/history browsing keep plac
 });
 
 for (const [name, args] of [
-  ['renameSession', ['新对话']],
+  ['renameSession', ['新会话']],
   ['pinSession', [false]],
 ] as const)
   test(`explicit default-valued ${name} is durable before its first asynchronous continuation`, async (t) => {
@@ -247,10 +248,10 @@ test('failed native rename still preserves the explicitly chosen default title',
   t.mock.method(f.agents.get(blank.id), 'rename', async () => {
     throw new Error('rename failed');
   });
-  await assert.rejects(f.handlers.renameSession(blank.id, '新对话'), /rename failed/);
+  await assert.rejects(f.handlers.renameSession(blank.id, '新会话'), /rename failed/);
   const restarted = new Store(f.store.dir);
   await restarted.load();
-  assert.equal(restarted.session(blank.id).title, '新对话');
+  assert.equal(restarted.session(blank.id).title, '新会话');
   assert.equal(f.store.isTransientSession(blank.id), false);
 });
 
@@ -412,7 +413,7 @@ for (const kind of ['connect', 'send', 'recover', 'navigate'] as const)
     const replacement = await f.newSession();
     assert.notEqual(replacement.id, blank.id);
     release.resolve();
-    await assert.rejects(operation, /cancelled|没有等待恢复/);
+    await assert.rejects(operation, /cancelled|没有可继续的中断任务/);
     await f.store.flush();
     const restarted = new Store(f.store.dir);
     await restarted.load();
@@ -536,6 +537,34 @@ test('model selection write failure blocks disposable Pi startup and retains the
   assert.equal(f.store.storage.writable, false);
 });
 
+test('quit waits for renderer draft acknowledgment and rejects a timed-out renderer', async (t) => {
+  t.mock.timers.enable({ apis: ['setTimeout'] });
+  const sent: { type: string; id: string }[] = [];
+  const draftWaiters = new Map<string, () => void>();
+  const flush = compile(`${namedFunction('flushRendererDraft')}; return flushRendererDraft;`, {
+    window: { isDestroyed: () => false },
+    store: { storage: { writable: true } },
+    workbenchReady: true,
+    rendererResponsive: true,
+    randomUUID: () => 'pending-draft',
+    draftWaiters,
+    send: (event: { type: string; id: string }) => sent.push(event),
+  }) as () => Promise<void>;
+  let finished = false;
+  const first = flush().then(() => {
+    finished = true;
+  });
+  assert.deepEqual(sent, [{ type: 'flushDraft', id: 'pending-draft' }]);
+  assert.equal(finished, false);
+  draftWaiters.get(sent[0].id)!();
+  await first;
+  assert.equal(draftWaiters.size, 0);
+  const second = assert.rejects(flush(), /草稿未能及时保存/);
+  t.mock.timers.tick(10000);
+  await second;
+  assert.equal(draftWaiters.size, 0);
+});
+
 function closeBoundary(
   store: Store,
   service: SessionAgents,
@@ -567,9 +596,12 @@ function closeBoundary(
       sessionEnding: false,
       workspaceWatcher: undefined,
       workspaceCleanup,
+      flushRendererDraft: async () => {},
+      workspace: { flush: async () => {}, disposeRestoreCopies: async () => {} },
       configurationWrites: Promise.resolve(),
       writeWindowState,
       showAppDialog,
+      describeSystemError,
       waitForOperations,
     },
   ) as (event: { preventDefault: () => void }) => void;
@@ -588,6 +620,8 @@ for (const writable of [true, false])
     let visible = false,
       calls = 0,
       completed = false;
+    const timers: { run: () => void; delay: number }[] = [];
+    const service = { hasPendingWork: false };
     const window = { show: () => (visible = true), webContents: { setZoomFactor: () => {} } };
     const run = compile(
       `let workspaceCleanup;
@@ -598,6 +632,11 @@ for (const writable of [true, false])
         store: { storage: { writable } },
         closing: false,
         quitting: false,
+        service,
+        setTimeout: (run: () => void, delay: number) => {
+          timers.push({ run, delay });
+          return { unref: () => {} };
+        },
         workspace: {
           cleanup: () => {
             assert.equal(visible, true);
@@ -610,6 +649,16 @@ for (const writable of [true, false])
     ) as { show(): void; cleanup(): Promise<void> | undefined };
     run.show();
     assert.equal(visible, true);
+    assert.equal(calls, 0, 'startup does not immediately scan checkpoints');
+    assert.equal(timers[0].delay, 60000);
+    service.hasPendingWork = true;
+    timers[0].run();
+    assert.equal(calls, 0, 'active tasks postpone maintenance');
+    if (writable) {
+      assert.equal(timers[1].delay, 10000);
+      service.hasPendingWork = false;
+      timers[1].run();
+    }
     assert.equal(calls, writable ? 1 : 0);
     assert.equal(completed, false);
     cleanup.resolve();
@@ -824,6 +873,7 @@ test('SessionAgents disposal cancels a model-reader dialog before waiting for it
     await release.promise;
   });
   const reading = f.handlers.readModels(blank.id);
+  const rejected = assert.rejects(reading, /关闭/);
   await entered.promise;
   const disposing = f.agents.dispose();
   try {
@@ -835,7 +885,7 @@ test('SessionAgents disposal cancels a model-reader dialog before waiting for it
     );
   } finally {
     release.resolve();
-    await reading;
+    await rejected;
     await disposing;
   }
 });
@@ -1118,6 +1168,8 @@ test('side-only update asks before aborting, then saves the answer before discon
       return { response: 1 };
     },
     workspaceCleanup: undefined,
+    flushRendererDraft: async () => {},
+    workspace: { flush: async () => {}, disposeRestoreCopies: async () => {} },
     writeWindowState: async () => {},
   }) as () => Promise<void>;
   await run();
@@ -1144,6 +1196,8 @@ test('actual update persistence boundary waits for a promoted no-agent draft and
       closing: false,
       sessionEnding: false,
       workspaceCleanup: cleanup.promise,
+      flushRendererDraft: async () => {},
+      workspace: { flush: async () => {}, disposeRestoreCopies: async () => {} },
       writeWindowState: async () => {},
     },
   ) as () => Promise<void>;

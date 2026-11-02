@@ -41,7 +41,7 @@ try {
   await expect(settingsOnTop.getByRole('textbox', { name: 'Pi 入口', exact: true })).toBeFocused();
   await page.keyboard.press('Escape');
   await expect(settingsOnTop).toHaveCount(0);
-  await expect(page.getByRole('dialog', { name: '工作区检查' })).toBeVisible();
+  await expect(page.getByRole('dialog', { name: '变更面板' })).toBeVisible();
   await page.keyboard.press(mod + '+j');
   await expect(inspector).toHaveCount(0);
   console.log('PASS Escape closes only the menu and Ctrl+J closes the narrow panel');

@@ -81,6 +81,22 @@ export async function createLocalProvider(options: { holdSlowResponses?: boolean
       done('tool_calls');
     };
     const results = body.messages.slice(lastUser + 1).filter((m: any) => m.role === 'tool');
+    if (prompt.startsWith('E2E_STREAMING_PF') && results.length === 0) {
+      const args = JSON.stringify({ path: 'streamed-200kb.txt', content: 'x'.repeat(200000) });
+      chunk({
+        role: 'assistant',
+        tool_calls: [
+          { index: 0, id: 'streamed-write', type: 'function', function: { name: 'write', arguments: '' } },
+        ],
+      });
+      for (let at = 0; at < args.length; at += 1000) {
+        if (res.destroyed) return;
+        chunk({ tool_calls: [{ index: 0, function: { arguments: args.slice(at, at + 1000) } }] });
+        await new Promise((resolve) => setTimeout(resolve, 10));
+      }
+      done('tool_calls');
+      return;
+    }
     if (prompt.includes('E2E_MCP') && results.length === 0) return tool('mcp__desktop__ping', {});
     if (prompt.includes('E2E_EDIT') && results.length === 0)
       return tool('edit', { path: '输入 文件.txt', edits: [{ oldText: '输入文件', newText: '已编辑文件' }] });

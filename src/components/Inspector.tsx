@@ -302,7 +302,7 @@ export function Inspector(
         <button
           className="inspector-scrim"
           tabIndex={-1}
-          aria-label="关闭工作区面板"
+          aria-label="关闭变更面板"
           onClick={() => setInspector(false)}
         />
       )}
@@ -312,7 +312,7 @@ export function Inspector(
           className={'inspector ' + (maximized && selectedFile ? 'preview-maximized' : '')}
           style={{ '--inspector-split': `${splitValue}%` } as CSSProperties}
           id="workspace-inspector"
-          aria-label="工作区检查"
+          aria-label="变更面板"
           role={compact ? 'dialog' : undefined}
           aria-modal={compact || undefined}
         >
@@ -424,7 +424,7 @@ export function Inspector(
               {!changes ? (
                 <div className="inspector-empty">
                   <LoaderCircle size={23} className="spin" />
-                  <p>正在读取工作区状态…</p>
+                  <p>正在读取项目状态…</p>
                 </div>
               ) : !changes.git ? (
                 <div className="inspector-empty">
@@ -469,7 +469,7 @@ export function Inspector(
                     {changes.files.length === 0 ? (
                       <div className="clean-state">
                         <CheckCircle2 size={25} />
-                        <h3>工作区干净</h3>
+                        <h3>项目没有未提交的修改</h3>
                         <p>文件有变化时，会显示在这里。</p>
                       </div>
                     ) : (

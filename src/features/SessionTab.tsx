@@ -216,7 +216,7 @@ export function SessionTab({
               导出 HTML
             </button>
             <button disabled={disabled} onClick={() => void exportFile('jsonl')}>
-              导出 JSONL
+              导出 Pi 会话文件（.jsonl）
             </button>
             <button
               disabled={disabled}

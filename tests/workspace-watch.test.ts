@@ -49,8 +49,8 @@ async function waitForChangedPaths(
   }
 }
 
-async function fakeWatcher(t: TestContext) {
-  t.mock.timers.enable({ apis: ['setTimeout'] });
+async function fakeWatcher(t: TestContext, options: Parameters<typeof WorkspaceWatcher.watch>[3] = {}) {
+  t.mock.timers.enable({ apis: ['setTimeout', 'Date'], now: 100000 });
   const project: Project = {
     id: randomUUID(),
     path: path.resolve('work', 'watcher-unit'),
@@ -75,7 +75,7 @@ async function fakeWatcher(t: TestContext) {
     };
   });
   const events: WorkspaceChangedEvent[] = [];
-  const watcher = await WorkspaceWatcher.watch(project, (event) => events.push(event), factory);
+  const watcher = await WorkspaceWatcher.watch(project, (event) => events.push(event), factory, options);
   t.after(() => watcher.dispose());
   assert.equal(factory.mock.callCount(), 1);
   return {
@@ -104,6 +104,17 @@ test('watcher filters generated paths but retains Git HEAD/index/refs', () => {
     '.git/objects/ab/cd',
     'src/.git/HEAD',
     'src\\node_modules\\b',
+    ...[
+      'target',
+      'build',
+      'out',
+      'coverage',
+      '.turbo',
+      '.gradle',
+      '.idea',
+      '.pytest_cache',
+      '.mypy_cache',
+    ].map((name) => `src/${name}/generated`),
   ])
     assert.equal(watchedPath(name), false, name);
   for (const name of ['src/a.ts', '.git/HEAD', '.git/index', '.git/refs/heads/main'])
@@ -197,6 +208,33 @@ test('a native watcher error closes its handle without starting another watcher 
   t.mock.timers.tick(60_000);
   assert.deepEqual(events, []);
   assert.equal(factory.mock.callCount(), 1);
+});
+
+test('continuous file events notify within two seconds and active-task refreshes stay one second apart', async (t) => {
+  const f = await fakeWatcher(t, { running: () => true });
+  for (let i = 0; i < 20; i++) {
+    f.emit(`src/file-${i}.ts`);
+    t.mock.timers.tick(100);
+  }
+  assert.equal(f.events.length, 1);
+  assert.equal(f.events[0].changedPaths?.length, 20);
+  f.emit('src/next.ts');
+  t.mock.timers.tick(999);
+  assert.equal(f.events.length, 1);
+  t.mock.timers.tick(1);
+  assert.equal(f.events.length, 2);
+});
+
+test('ignored output and failed native watchers invalidate checkpoint tracking without repeated UI refreshes', async (t) => {
+  const changed = t.mock.fn(),
+    failed = t.mock.fn();
+  const f = await fakeWatcher(t, { changed, failed });
+  for (let i = 0; i < 100; i++) f.emit(`build/file-${i}.js`);
+  t.mock.timers.tick(2000);
+  assert.equal(f.events.length, 0);
+  assert.ok(changed.mock.calls.every((call) => call.arguments.length === 0));
+  f.error();
+  assert.equal(failed.mock.callCount(), 1);
 });
 
 test('native coverage wait requires both exact file paths or a matching full invalidation', async () => {

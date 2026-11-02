@@ -9,6 +9,7 @@ import { useSideChat } from './useSideChat';
 import { useShortcuts } from './useShortcuts';
 import { useWorkspace } from './useWorkspace';
 import { useEffect, useMemo, useRef, useState } from 'react';
+import { TranscriptIndex } from '../lib/transcript-index';
 import { builtinCommands } from '../lib/commands';
 import {
   busy,
@@ -54,6 +55,9 @@ export function useWorkbench() {
     error?: string;
   }>();
   const [featureTab, setFeatureTab] = useState('');
+  const [noticeAction, setNoticeAction] = useState<{ text: string; label: string; run: () => void }>();
+  const [modelPickerRequest, setModelPickerRequest] = useState(0);
+  const openModelPicker = () => setModelPickerRequest((value) => value + 1);
   const [sidebar, setSidebar] = useState(() => localStorage.getItem('pi.sidebar') !== 'hidden'),
     [compact, setCompact] = useState(false),
     [inspector, setInspector] = useState(false);
@@ -196,18 +200,9 @@ export function useWorkbench() {
   const lastAssistant = messages.findLast((m) => m.role === 'assistant');
   const actionsLocked = pending || running || !sessionEnabled;
   const visibleMessages = useMemo(() => messages.slice(-messageLimit), [messages, messageLimit]);
-  const sentPrompts = useMemo(
-    () =>
-      messages
-        .filter((m) => m.role === 'user')
-        .map((m) => {
-          const t = messageText(m),
-            cut = t.indexOf('\n\n<project_file path=');
-          return (cut < 0 ? t : t.slice(0, cut)).trim();
-        })
-        .filter((t, i, all) => t && t !== all[i - 1]),
-    [messages],
-  );
+  const transcriptIndex = useMemo(() => new TranscriptIndex(), [selected?.id]);
+  const transcript = useMemo(() => transcriptIndex.derive(messages), [transcriptIndex, messages]);
+  const sentPrompts = transcript.prompts;
 
   useLayer(inspectorPanel, inspector, () => setInspector(false), { kind: 'panel', trapFocus: compact });
   async function attempt<T>(fn: () => Promise<T>, sessionId = selected?.id ?? ''): Promise<T | undefined> {
@@ -573,6 +568,22 @@ export function useWorkbench() {
     setError('');
     await action(() => api.invoke('readModels', selected.id));
   }
+  async function onAuthenticated(provider: string) {
+    if (!selected) return;
+    const id = selected.id;
+    const models = await api.invoke('readModels', id);
+    if (stateRef.current?.selectedSessionId !== id) return;
+    if (models.length === 1) {
+      await api.invoke('setSessionModel', id, models[0].provider, models[0].id);
+      if (stateRef.current?.selectedSessionId !== id) return;
+      setFeatureTab('');
+      focusComposer();
+      setNotice(`已连接 ${provider}，可以开始提问了`);
+    } else if (models.length > 1) {
+      setFeatureTab('');
+      openModelPicker();
+    }
+  }
   async function chooseSettingPath(kind: 'pi' | 'node' | 'agent' | 'editor') {
     const p = await attempt(() => api.invoke('choosePath', kind));
     if (p)
@@ -692,10 +703,7 @@ export function useWorkbench() {
   const historyTools = useRef(new WeakMap<Message, { call: ContentBlock | undefined; tool: ToolActivity }>());
   const toolLookup = useMemo(() => {
     const byId = new Map(liveTools.map((t) => [t.id, t]));
-    const calls = new Map<string, ContentBlock>();
-    for (const m of messages)
-      if (Array.isArray(m.content))
-        for (const b of m.content) if (b.type === 'toolCall' && b.id) calls.set(String(b.id), b);
+    const calls = transcript.calls;
     return (message: Message): ToolActivity => {
       const observed = byId.get(message.toolCallId ?? '');
       if (observed) return observed;
@@ -721,22 +729,17 @@ export function useWorkbench() {
       }
       return t;
     };
-  }, [liveTools, messages]);
+  }, [liveTools, transcript.calls]);
   const canRerun =
     !actionsLocked && (ownRuntime ? runtime.approvalMode : selected?.approvalMode) !== 'readonly';
-  const quoteSourceKey = [
-    ...messages.flatMap((m) => [
-      ...(m.timestamp === undefined
-        ? []
-        : [`${m.role === 'bashExecution' ? 'toolResult' : m.role}:${m.timestamp}`]),
-      ...(m.role === 'toolResult' && m.toolCallId ? [`tool:${m.toolCallId}`] : []),
-    ]),
-    ...liveTools.map((tool) => `tool:${tool.id}`),
-  ].join('|');
-  const quoteSources = useMemo(() => new Set(quoteSourceKey.split('|')), [quoteSourceKey]);
+  const quoteSources = useMemo(
+    () => new Set([...transcript.sources, ...[...liveToolIds].map((id) => `tool:${id}`)]),
+    [transcript.sources, liveToolIds],
+  );
   const messageContext: MessageContext = useMemo(
     () => ({
       running: ownRunning,
+      sessionId: selected?.id,
       locked: actionsLocked,
       expanded,
       liveToolIds,
@@ -818,11 +821,17 @@ export function useWorkbench() {
       openSettings,
       connect,
       readModels,
+      onAuthenticated,
+      openModelPicker,
+      modelPickerRequest,
+      flushDraft,
       toggleTool,
       messageContext,
       error,
       setError,
       setNotice,
+      noticeAction,
+      setNoticeAction,
       setShortcutsOpen,
       stopArmed,
       dragging,

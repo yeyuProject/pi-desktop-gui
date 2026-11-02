@@ -1,4 +1,5 @@
 import { memo, useEffect, useMemo, useRef, useState } from 'react';
+import { readableError } from '../lib/format';
 import { alignHunk, hunkPrompt, parseDiffHunks, type DiffCell, type DiffHunk } from '../../shared/diff';
 import '../styles/diff-view.css';
 
@@ -63,7 +64,8 @@ export const DiffView = memo(function DiffView({
       setResult({ request, ...value });
     };
     const timer = setTimeout(() => finish({ error: '差异计算耗时过长，请在编辑器中查看完整内容' }), 8000);
-    worker.onmessage = (event) => finish(event.data);
+    worker.onmessage = (event) =>
+      finish(event.data.error ? { error: readableError(event.data.error) } : event.data);
     worker.onerror = () => finish({ error: '无法显示差异，请重试或在编辑器中查看' });
     worker.postMessage(request);
     return () => {

@@ -8,6 +8,14 @@ const parse = (text: string) =>
   fromMarkdown(text, { extensions: [gfm()], mdastExtensions: [gfmFromMarkdown()] }).children;
 const clean = (value: unknown) =>
   JSON.parse(JSON.stringify(value, (key, item) => (key === 'position' ? undefined : item)));
+test('ordinary brackets, task lists and fenced definitions keep streaming blocks', () => {
+  for (const line of ['arr[i]', '- [x] done', '[1, 2]', '```js\n[x]: value\n```']) {
+    const text = ('Paragraph.\n\n' + line + '\n\n').repeat(180);
+    const result = streamingMarkdown(text);
+    assert.ok(result.blocks.length, line);
+    assert.deepEqual(clean([...result.blocks.flatMap(parse), ...parse(result.tail)]), clean(parse(text)));
+  }
+});
 
 test('incremental Markdown preserves root syntax through lists, tables, fences and setext headings', () => {
   const prefix = 'A **formatted** paragraph with [a link](https://example.invalid).\n\n'.repeat(160);

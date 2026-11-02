@@ -660,6 +660,7 @@ test('parallel tool completions serialize attribution updates and preserve all t
   const completed = await Promise.allSettled(
     names.map((name) => workspace.endTool(project, sessionId, name)),
   );
+  await workspace.endSessionTools(project, sessionId);
   assert.ok(
     completed.every((result) => result.status === 'fulfilled'),
     JSON.stringify(completed),
@@ -667,6 +668,102 @@ test('parallel tool completions serialize attribution updates and preserve all t
   const preview = await new Workspace(data).checkpointPreview(project, sessionId, first.id);
   assert.equal(preview.files.length, 12);
   assert.ok(preview.files.every((file) => file.selected && !file.manual));
+});
+test('restore keeps a reversible copy and refuses to overwrite later edits', async (t) => {
+  const { project, workspace, sessionId, write, directory } = await fixture(t);
+  await write('a.txt', 'before');
+  const first = (await workspace.captureCheckpoint(project, sessionId, 1))!;
+  await workspace.beginTool(project, sessionId, 'edit-a', 'write', { path: 'a.txt' });
+  await write('a.txt', 'after');
+  await workspace.endTool(project, sessionId, 'edit-a');
+  const preview = await workspace.checkpointPreview(project, sessionId, first.id);
+  await workspace.revert(project, ['a.txt'], undefined, {
+    sessionId,
+    checkpointId: first.id,
+    revision: preview.revision,
+  });
+  assert.equal(await fs.readFile(path.join(directory, 'a.txt'), 'utf8'), 'before');
+  await workspace.undoLastRestore(project, (file) => fs.rm(file));
+  assert.equal(await fs.readFile(path.join(directory, 'a.txt'), 'utf8'), 'after');
+  const next = await workspace.checkpointPreview(project, sessionId, first.id);
+  await workspace.revert(project, ['a.txt'], undefined, {
+    sessionId,
+    checkpointId: first.id,
+    revision: next.revision,
+  });
+  await write('a.txt', 'external edit');
+  await assert.rejects(
+    workspace.undoLastRestore(project, (file) => fs.rm(file)),
+    /又被修改/,
+  );
+  assert.equal(await fs.readFile(path.join(directory, 'a.txt'), 'utf8'), 'external edit');
+  await workspace.disposeRestoreCopies();
+});
+test('dirty-path scans preserve manual ownership, fall back after uncertainty and release caches', async (t) => {
+  const { project, workspace, sessionId, write } = await fixture(t);
+  await write('a.txt', 'before');
+  const first = (await workspace.captureCheckpoint(project, sessionId, 1))!;
+  workspace.watchProject(project.id);
+  await workspace.beginTool(project, sessionId, 'warm', 'bash', { command: 'echo hi' });
+  await workspace.endTool(project, sessionId, 'warm');
+  await write('a.txt', 'manual');
+  workspace.changedPaths(project.id, ['a.txt']);
+  await workspace.beginTool(project, sessionId, 'command', 'bash', { command: 'echo hi' });
+  await write('new.txt', 'Pi');
+  workspace.changedPaths(project.id, ['new.txt']);
+  await workspace.endTool(project, sessionId, 'command');
+  const preview = await workspace.checkpointPreview(project, sessionId, first.id);
+  assert.equal(preview.files.find((file) => file.path === 'a.txt')?.manual, true);
+  assert.equal(preview.files.find((file) => file.path === 'new.txt')?.manual, false);
+  workspace.changedPaths(project.id);
+  await workspace.beginTool(project, sessionId, 'fallback', 'bash', { command: 'echo hi' });
+  await workspace.endTool(project, sessionId, 'fallback');
+  await workspace.releaseSession(sessionId);
+  const reopened = await workspace.checkpointPreview(project, sessionId, first.id);
+  assert.deepEqual(reopened.files, preview.files);
+});
+
+test('checkpoint caches keep at most eight sessions and released tracking reloads from disk', async (t) => {
+  const { workspace, project } = await fixture(t);
+  for (let index = 0; index < 30; index++) await workspace.captureCheckpoint(project, 'cache-' + index, 1);
+  const cache = (workspace as any).checkpoints;
+  assert.ok(cache.tracking.size <= 8);
+  assert.ok(cache.scanHashes.size <= 8);
+  assert.ok(cache.hashes.size <= 8);
+  assert.equal(await workspace.nextCheckpointTurn('cache-0'), 2);
+  for (let index = 0; index < 30; index++) await workspace.releaseSession('cache-' + index);
+  assert.equal(cache.tracking.size, 0);
+  assert.equal(cache.scanHashes.size, 0);
+  assert.equal(cache.hashes.size, 0);
+  assert.equal(await workspace.nextCheckpointTurn('cache-29'), 2);
+});
+test('undoing a restore preserves renamed, deleted and newly created files', async (t) => {
+  const { project, workspace, sessionId, directory, write, git } = await fixture(t);
+  await write('old.txt', 'baseline rename');
+  await write('deleted.txt', 'baseline deletion');
+  await git(['add', '.']);
+  await git(['commit', '-m', 'restore fixture']);
+  const checkpoint = (await workspace.captureCheckpoint(project, sessionId, 1))!;
+  await git(['mv', 'old.txt', 'new.txt']);
+  await write('new.txt', 'modified rename');
+  await fs.rm(path.join(directory, 'deleted.txt'));
+  await write('created.txt', 'new content');
+  const preview = await workspace.checkpointPreview(project, sessionId, checkpoint.id);
+  const remove = (file: string) => fs.rm(file, { force: true });
+  await workspace.revert(project, null, remove, {
+    sessionId,
+    checkpointId: checkpoint.id,
+    revision: preview.revision,
+  });
+  assert.equal(await fs.readFile(path.join(directory, 'old.txt'), 'utf8'), 'baseline rename');
+  assert.equal(await fs.readFile(path.join(directory, 'deleted.txt'), 'utf8'), 'baseline deletion');
+  await workspace.undoLastRestore(project, remove);
+  assert.equal(await fs.readFile(path.join(directory, 'new.txt'), 'utf8'), 'modified rename');
+  assert.equal(await fs.readFile(path.join(directory, 'created.txt'), 'utf8'), 'new content');
+  await assert.rejects(fs.stat(path.join(directory, 'old.txt')), { code: 'ENOENT' });
+  await assert.rejects(fs.stat(path.join(directory, 'deleted.txt')), { code: 'ENOENT' });
+  await workspace.disposeRestoreCopies();
+  assert.deepEqual(await fs.readdir(path.join(workspace['dataDir'], 'restore-backups')), []);
 });
 
 test('switching away and back between observations still invalidates checkpoints', async (t) => {
@@ -727,7 +824,7 @@ test('replacing an unchanged directory with a junction cannot reuse an unsafe ca
     }
     throw error;
   }
-  await assert.rejects(workspace.beginTool(project, sessionId, 'unsafe', 'bash', {}), /部分文件无法读取/);
+  await assert.rejects(workspace.beginTool(project, sessionId, 'unsafe', 'bash', {}), /有文件读不了/);
   const unsafe = await workspace.changes(project, 'run', { sessionId, checkpointId: first.id });
   assert.ok(unsafe.omitted.includes('src') || unsafe.omitted.includes('src/a.txt'));
   const second = (await workspace.captureCheckpoint(project, sessionId, 2))!;

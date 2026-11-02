@@ -1,3 +1,4 @@
+import { readableError } from '../lib/format';
 import { useEffect, useRef, useState } from 'react';
 import type { AppDialog } from '../../shared/app-dialogs';
 import { Modal } from './Modal';
@@ -34,7 +35,7 @@ export function AppDialogs() {
       await window.desktop.invoke('respondAppDialog', dialog.id, response);
       setQueue((items) => items.filter((item) => item.id !== dialog.id));
     } catch (error) {
-      setError(error instanceof Error ? error.message : String(error));
+      setError(readableError(error));
     } finally {
       responding.current.delete(dialog.id);
       setPendingId((current) => (current === dialog.id ? undefined : current));

@@ -93,7 +93,7 @@ export function ApprovalSwitch({
                   <span title={grantLabel(grant)}>{grantLabel(grant)}</span>
                   <button
                     disabled={!revoke}
-                    aria-label={`撤回 ${grantLabel(grant)}`}
+                    aria-label={`撤销 ${grantLabel(grant)}`}
                     onClick={() => revoke?.(grant.id)}
                   >
                     <X size={14} />
@@ -210,6 +210,7 @@ export function ApprovalCard({
         <div className="approval-actions">
           <button
             ref={allow}
+            data-allow
             className="primary"
             aria-keyshortcuts="Control+Shift+A Meta+Shift+A"
             title="⌘/Ctrl+Shift+A：先定位审核，再按一次允许"

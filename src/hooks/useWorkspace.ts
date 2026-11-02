@@ -296,18 +296,14 @@ export function useWorkspace(options: WorkspaceOptions) {
         setCheckpointPreview(
           only ? { ...preview, files: preview.files.filter((file) => only.includes(file.path)) } : preview,
         );
-      } else
-        await current.action(async () => {
-          const reverted = await api.invoke('revertChanges', current.project!.id, only, {
-            sessionId: current.selected!.id,
-          });
-          if (reverted.length) {
-            current.setNotice(`已撤销 ${reverted.length} 个文件的修改`);
-            await refreshChanges();
-            setSelectedFile('');
-            setFileDiff(undefined);
-          }
-        });
+      } else {
+        const preview = await api.invoke('revertPreview', current.selected!.id);
+        if (latest.current.selected?.id !== current.selected!.id) return;
+        setCheckpointRestoredCount(undefined);
+        setCheckpointPreview(
+          only ? { ...preview, files: preview.files.filter((file) => only.includes(file.path)) } : preview,
+        );
+      }
     });
   }
   async function confirmCheckpoint(paths: string[], revision: string) {
@@ -317,7 +313,10 @@ export function useWorkspace(options: WorkspaceOptions) {
     await action(async () => {
       let restored: string[];
       try {
-        restored = await api.invoke('revertCheckpoint', sessionId, preview.id, paths, revision);
+        restored =
+          preview.id === 'legacy' && project
+            ? await api.invoke('revertChanges', project.id, paths, { sessionId, revision })
+            : await api.invoke('revertCheckpoint', sessionId, preview.id, paths, revision);
       } catch (error) {
         const current = await api.invoke('checkpointPreview', sessionId, preview.id).catch(() => undefined);
         if (latest.current.selected?.id === sessionId) {
@@ -391,6 +390,15 @@ export function useWorkspace(options: WorkspaceOptions) {
     checkpointRestoredCount,
     openCheckpoint,
     confirmCheckpoint,
+    undoLastRestore: async () => {
+      if (!project) return;
+      await action(async () => {
+        await api.invoke('undoLastRestore', project.id);
+        setCheckpointPreview(undefined);
+        setNotice('已还原到恢复前');
+        await refreshChanges();
+      });
+    },
     closeCheckpoint: () => setCheckpointPreview(undefined),
     returnToCheckpointMessage,
     refreshChanges,

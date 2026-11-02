@@ -14,6 +14,7 @@ export async function launchApp({
   env = {},
   errors = [],
   pageTimeout = DESKTOP_TIMEOUTS.action,
+  clipboardMode = process.env.PI_DESKTOP_TEST_CLIPBOARD,
   ...options
 } = {}) {
   const app = await electron.launch({
@@ -27,6 +28,16 @@ export async function launchApp({
   // Keep the owned child while the application is still connected.
   processes.set(app, app.process());
   try {
+    // Explicit opt-in for machines without an OS clipboard. Normal runs still
+    // exercise the native clipboard; this mode proves only the text IPC path.
+    if (clipboardMode === 'memory')
+      await app.evaluate(({ clipboard }) => {
+        let text = '';
+        clipboard.writeText = async (value) => {
+          text = value;
+        };
+        clipboard.readText = async () => text;
+      });
     const page = await app.firstWindow({ timeout: DESKTOP_TIMEOUTS.launch });
     page.setDefaultTimeout(pageTimeout);
     page.on('pageerror', (error) => errors.push(error.message));

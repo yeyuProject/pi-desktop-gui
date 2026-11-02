@@ -30,7 +30,11 @@ const summary = (a) => {
 let app;
 try {
   const start = performance.now();
-  const launched = await launchApp({ dataDir: fixture.dataDir, pageTimeout: 60000 });
+  const launched = await launchApp({
+    dataDir: fixture.dataDir,
+    pageTimeout: 60000,
+    ...(process.env.PI_PERF_APP_ROOT ? { args: [process.env.PI_PERF_APP_ROOT] } : {}),
+  });
   app = launched.app;
   const page = launched.page;
 
@@ -107,6 +111,14 @@ try {
     ipcMain.removeHandler('desktop:invoke');
     ipcMain.handle('desktop:invoke', async (event, method, args) => {
       if (method === 'readHistory' && globalThis.auditRuntime) return globalThis.auditRuntime.messages;
+      if (method === 'getToolOutput' && globalThis.auditRuntime) {
+        const message = globalThis.auditRuntime.messages.findLast(
+          (message) => message.role === 'toolResult' && message.toolCallId === args[1],
+        );
+        return typeof message?.content === 'string'
+          ? message.content
+          : (globalThis.auditRuntime.tools.find((tool) => tool.id === args[1])?.output ?? '');
+      }
       const value = await original(event, method, args);
       if (method === 'changes' || method === 'checkpoints') globalThis.auditWorkspaceCalls.push(method);
       return method === 'bootstrap' && globalThis.auditRuntime
@@ -121,6 +133,7 @@ try {
     { messages: 5000, activeChars: 100, expand: false },
     { messages: 500, activeChars: 100, expand: true },
     { messages: 500, activeChars: 50000, expand: false },
+    { messages: 500, activeChars: 10000, expand: false, brackets: true },
     { messages: 5000, activeChars: 100, expand: false, patchLines: 500 },
   ]) {
     const runtime = { ...emptyRuntime(), sessionId: fixture.sessionId, connected: true, status: 'running' };
@@ -155,8 +168,9 @@ try {
         };
       }
     }
-    const block =
-      'A **formatted** paragraph with [a link](https://example.invalid).\n\n- first item\n- second item\n\n';
+    const block = spec.brackets
+      ? 'Access arr[i] and [1, 2].\n\n- [x] checked\n- [ ] next\n\n'
+      : 'A **formatted** paragraph with [a link](https://example.invalid).\n\n- first item\n- second item\n\n';
     runtime.messages.at(-1).content =
       (spec.activeChars === 50000 ? '```ts\nconst finalization = "preserve";\n```\n\n' : '') +
       block.repeat(Math.ceil(spec.activeChars / block.length)) +

@@ -20,9 +20,15 @@ registerHooks({
 });
 const { default: tseslint } = await import('typescript-eslint');
 import globals from 'globals';
+import userCopy from './user-copy.mjs';
 
 // The parser has its own supported TypeScript runtime. Application builds retain TypeScript 7.
 export default defineConfig(
+  {
+    files: ['src/**/*.{ts,tsx}', 'electron/**/*.ts', 'shared/**/*.ts'],
+    plugins: { 'pi-desktop': { rules: { 'user-copy': userCopy } } },
+    rules: { 'pi-desktop/user-copy': 'error' },
+  },
   {
     ignores: [
       'node_modules/**',

@@ -1,6 +1,5 @@
-import { PiFeatures } from '../PiFeatures';
+import { PiFeatures, QuickSwitch } from '../lib/lazy-dialogs';
 import { Modal } from './Modal';
-import { QuickSwitch } from './QuickSwitch';
 import { ExtensionPrompt } from './ExtensionPrompt';
 import { ShortcutsHelp } from './ShortcutsHelp';
 const api = window.desktop;
@@ -26,6 +25,7 @@ export function WorkbenchDialogs(
     | 'setShortcutsOpen'
     | 'selected'
     | 'prompts'
+    | 'onAuthenticated'
     | 'attempt'
     | 'selectSession'
   > & { state: AppState; settings: ReactNode },
@@ -118,6 +118,7 @@ export function WorkbenchDialogs(
             !selected.projectId || Boolean(state.projects.find((p) => p.id === selected.projectId)?.trusted)
           }
           initialTab={featureTab}
+          onAuthenticated={props.onAuthenticated}
           close={() => setFeatureTab('')}
         />
       )}

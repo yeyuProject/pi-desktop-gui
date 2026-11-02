@@ -82,7 +82,12 @@ try {
   assert.equal(await secret.getAttribute('type'), 'password');
   await secret.fill('local-ui-test-key');
   await page.getByRole('dialog').last().getByRole('button', { name: '提交回复', exact: true }).click();
-  await modal.locator('.feature-notice').filter({ hasText: '凭据已保存' }).waitFor({ timeout: 30000 });
+  await page.getByRole('dialog', { name: '模型与推理级别' }).waitFor({ timeout: 30000 });
+  assert.equal(await modal.count(), 0, 'successful login opens model selection');
+  await page.keyboard.press('Escape');
+  await page.getByRole('button', { name: 'Pi 功能', exact: true }).click();
+  await modal.getByRole('button', { name: '供应商与登录', exact: true }).click();
+  await modal.getByRole('combobox', { name: '登录供应商' }).selectOption('openai');
   assert.ok(!(await modal.innerText().then((t) => t.includes('local-ui-test-key'))));
   await modal.getByRole('button', { name: '退出登录', exact: true }).click();
   await page

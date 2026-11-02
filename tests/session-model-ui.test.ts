@@ -15,7 +15,7 @@ const { ModelPicker } = await import('../src/components/ModelPicker');
 const { ComposerFooter } = await import('../src/components/conversation/ComposerStatus');
 const session: Session = {
   id: 'new-chat',
-  title: '新对话',
+  title: '新会话',
   draft: '',
   attachments: [],
   updatedAt: 1,
@@ -55,6 +55,7 @@ const checklist = (selection: ReturnType<typeof sessionModelState>, ownRuntime =
       checkEnvironment() {},
       connect() {},
       providers() {},
+      chooseModel() {},
     }),
   );
 const picker = (selection: ReturnType<typeof sessionModelState>) =>

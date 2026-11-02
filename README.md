@@ -38,7 +38,7 @@ Sessions and workspaces stay on your machine. Model requests go to whichever pro
 
 ## Features
 
-- **Responsive long conversations** — Reuse completed Markdown sections during streaming and after replies finish. Browse and search history in pages, type without rerendering the conversation, and load draft image contents only for the selected chat. Environment setup and snapshot cleanup run after the window opens; idle chats stop updating their timers.
+- **Responsive long conversations** — Send only changed streaming content, reuse completed Markdown sections and calculate history incrementally. Draft edits save after a short pause, with a final save before switching chats or quitting. Large repositories reuse file-change tracking between commands; hidden windows refresh less often, and snapshot cleanup waits until the app is idle.
 - **Compact conversation history** — Thinking from one user turn shares a single collapsible section. Completed turns start collapsed by default (or stay expanded when **默认展开思考过程** is enabled in Settings); search reveals the original text, and you can collapse all thinking at once.
 - **Turn outline** — From three turns onward, aligned markers stay in place as the outline expands. Clean question titles and skill labels make it easier to scan; current, running and failed turns are marked, and line counts appear only for actual additions or deletions. From ten turns, filter the outline to modified or failed turns.
 - **Visible agent workflow** — Streamed thinking, tool calls with arguments and exit status, inline diffs for every edit, plus estimated current context/window capacity, clearly labeled cumulative session tokens, cache breakdown and estimated cost. Live token estimates are labeled and reconciled with Pi's reported usage after each model response. Completed replies show average TPS in a labeled, colored badge when Pi provides output tokens and response duration; this includes response waiting time and excludes tool execution.
@@ -72,7 +72,7 @@ Sessions and workspaces stay on your machine. Model requests go to whichever pro
 
 <p align="center"><img src="docs/assets/screenshots/ask-panel.png" width="900" alt="Pi asks for a database choice above the composer while the conversation remains visible" /></p>
 
-See the [release notes](docs/releases/) for what changed in each version.
+See the [release notes](docs/releases/) for what changed in each version, and the [UI terminology](docs/glossary.md) for interface wording.
 
 <table>
   <tr>
@@ -121,7 +121,7 @@ Get the installer for your platform from the [latest release](https://github.com
 | **macOS**   | Apple Silicon · Intel | `.dmg` · `.zip`                                                      |
 | **Linux**   | x86_64                | `.AppImage` (auto-updates) · `.deb`                                  |
 
-The Windows installer, macOS app and Linux AppImage support in-app updates. Downloads are manual by default; enable automatic downloads in **Settings → About & Updates**. Installation starts only after clicking Restart now. Other formats notify you when a new version is available. On Mac, run the app from a writable directory, preferably Applications. Versions through v0.14.30 need one manual install of v0.14.31 or later to enable Mac updates. Active tasks and approvals block restart.
+The Windows installer, macOS app and Linux AppImage support in-app updates. Downloads are manual by default; enable automatic downloads in **Settings → About & Updates**. Restart manually, or opt in to restart after tasks finish with a cancelable five-second countdown. Other formats notify you when a new version is available. On Mac, run the app from a writable directory, preferably Applications. Versions through v0.14.30 need one manual install of v0.14.31 or later to enable Mac updates. Active tasks and approvals block restart.
 
 View the package size before downloading. During download, the app shows bytes received, progress, average speed over the last five seconds and estimated time remaining. Incremental updates show the smaller transfer size separately. After ten seconds without new data, a waiting message replaces the estimate. Once the download completes, the app shows verification status and, on Mac, update preparation.
 
@@ -199,7 +199,7 @@ macOS builds use ad-hoc signing and pass a signature integrity check during pack
 xattr -dr com.apple.quarantine "/Applications/Pi Desktop.app"
 ```
 
-The Windows installer is also unsigned for now, so SmartScreen may warn on first launch. Updates require an Ed25519 publisher signature verified against the bundled public key, followed by SHA-512 verification of the installer. Downloads are manual by default; installation requires an explicit restart. An update-only proxy or HTTPS mirror can be configured in Settings. See [release signing](docs/update-signing.md).
+The Windows installer is also unsigned for now, so SmartScreen may warn on first launch. Updates require an Ed25519 publisher signature verified against the bundled public key, followed by SHA-512 verification of the installer. Downloads are manual by default. Restart manually, or opt in to restart after tasks finish with a cancelable five-second countdown. An update-only proxy or HTTPS mirror can be configured in Settings. See [release signing](docs/update-signing.md).
 </details>
 
 <details>

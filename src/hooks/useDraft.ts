@@ -6,7 +6,15 @@ import {
   type GoalDraft,
 } from '../../shared/goal-input';
 import type { GoalSnapshot } from '../../shared/goal';
-import { useEffect, useRef, useState, type RefObject, type Dispatch, type SetStateAction } from 'react';
+import {
+  useEffect,
+  useLayoutEffect,
+  useRef,
+  useState,
+  type RefObject,
+  type Dispatch,
+  type SetStateAction,
+} from 'react';
 import {
   type AppState,
   type Runtime,
@@ -77,6 +85,10 @@ export function useDraft({
   const draftRevision = useRef(0);
   const savingDraft = useRef(Promise.resolve<unknown>(undefined));
   const pendingDrafts = useRef(0);
+  const draftTimer = useRef<ReturnType<typeof setTimeout>>(undefined);
+  const queuedSave = useRef<(() => void) | undefined>(undefined);
+  const editedSession = useRef<string | undefined>(undefined);
+  const dirtyParts = useRef({ id: '', images: false, snippets: false, quotes: false });
   const loadedDraft = useRef<string | undefined>(undefined);
   const imageRequest = useRef(0);
   const imageSession = useRef<string | undefined>(undefined);
@@ -185,6 +197,11 @@ export function useDraft({
     }
     draftRevision.current++;
     const picturesChanged = pictures !== composerDraft.current.images;
+    if (dirtyParts.current.id !== selected.id)
+      dirtyParts.current = { id: selected.id, images: false, snippets: false, quotes: false };
+    dirtyParts.current.images ||= picturesChanged;
+    dirtyParts.current.snippets ||= pieces !== composerDraft.current.snippets;
+    dirtyParts.current.quotes ||= quotes !== composerDraft.current.quotes;
     if (picturesChanged) {
       imageRequest.current++;
       loadingImages.current = undefined;
@@ -196,20 +213,51 @@ export function useDraft({
     setImages(pictures);
     setSnippets(pieces);
     setDraftQuotes(quotes);
-    pendingDrafts.current++;
-    savingDraft.current = attempt(() =>
-      api.invoke(
-        'saveDraft',
-        selected.id,
-        value,
-        files,
-        picturesChanged ? pictures : undefined,
-        pieces,
-        quotes,
-      ),
-    ).finally(() => {
-      pendingDrafts.current--;
-    });
+    const save = () => {
+      const changed = dirtyParts.current;
+      dirtyParts.current = { id: selected.id, images: false, snippets: false, quotes: false };
+      pendingDrafts.current++;
+      savingDraft.current = api
+        .invoke(
+          'saveDraft',
+          selected.id,
+          value,
+          files,
+          changed.images ? pictures : undefined,
+          changed.snippets ? pieces : undefined,
+          changed.quotes ? quotes : undefined,
+        )
+        .catch((error) => {
+          if (dirtyParts.current.id === selected.id) {
+            dirtyParts.current.images ||= changed.images;
+            dirtyParts.current.snippets ||= changed.snippets;
+            dirtyParts.current.quotes ||= changed.quotes;
+          }
+          setError(readableError(error));
+          throw error;
+        })
+        .finally(() => {
+          pendingDrafts.current--;
+        });
+      void savingDraft.current.catch(() => {});
+    };
+    clearTimeout(draftTimer.current);
+    // The first edit must reach Store before a quick clear or native navigation
+    // can mistake this session for an untouched, reusable placeholder.
+    if (
+      editedSession.current !== selected.id &&
+      (value || files.length || pictures.length || pieces.length || quotes.length)
+    ) {
+      editedSession.current = selected.id;
+      queuedSave.current = undefined;
+      save();
+      return;
+    }
+    queuedSave.current = save;
+    draftTimer.current = setTimeout(() => {
+      queuedSave.current = undefined;
+      save();
+    }, 200);
   };
   const persistDraftGoal = (value: GoalDraft | undefined) => {
     if (!selected || stateRef.current?.selectedSessionId !== selected.id) return;
@@ -261,6 +309,10 @@ export function useDraft({
     persistDraftGoal({ kind: 'start', tokenBudget });
   };
   const flushDraft = async () => {
+    clearTimeout(draftTimer.current);
+    const save = queuedSave.current;
+    queuedSave.current = undefined;
+    save?.();
     // invoke calls from this renderer are ordered. Flush the accepted save now,
     // before waiting for its acknowledgment, rather than waiting out the debounce.
     if (pendingDrafts.current) await api.invoke('flushDraft');
@@ -275,6 +327,7 @@ export function useDraft({
       composerDraft.current.quotes,
     );
   const addQuote = (quote: DraftQuote) => {
+    // User input is persisted before navigation, quit and update barriers.
     const current = composerDraft.current;
     const added = truncateQuote(quote);
     persistDraft(
@@ -461,9 +514,31 @@ export function useDraft({
   useEffect(() => {
     localStorage.setItem('pi.composerMaxHeight', String(inputMaxHeight));
   }, [inputMaxHeight]);
+  const flushCurrent = useRef(flushDraft);
+  flushCurrent.current = flushDraft;
+  useEffect(
+    () =>
+      window.desktop.onEvent((event) => {
+        if (event.type === 'flushDraft')
+          void flushCurrent
+            .current()
+            .then(() => api.invoke('draftFlushed', event.id))
+            .catch((error) => setError(readableError(error)));
+      }),
+    [],
+  );
   useEffect(() => {
+    setSendMode(localStorage.getItem('pi.sendMode.' + selected?.id) === 'followUp' ? 'followUp' : 'steer');
+  }, [selected?.id]);
+  useLayoutEffect(() => {
     if (!selected) return;
-    if (pendingDrafts.current && selected.id === loadedDraft.current) return;
+    if (loadedDraft.current !== selected.id && queuedSave.current) {
+      clearTimeout(draftTimer.current);
+      const save = queuedSave.current;
+      queuedSave.current = undefined;
+      save();
+    }
+    if ((pendingDrafts.current || queuedSave.current) && selected.id === loadedDraft.current) return;
     loadedDraft.current = selected.id;
     composerDraft.current = {
       ...composerDraft.current,
@@ -479,6 +554,7 @@ export function useDraft({
     setSnippets(selected.draftSnippets ?? []);
     setDraftQuotes(selected.draftQuotes ?? []);
   }, [
+    selected,
     selected?.id,
     selected?.draft,
     selected?.draftGoal,
@@ -488,7 +564,7 @@ export function useDraft({
   ]);
   // Text/state broadcasts must not cancel an in-flight image read. A separate
   // effect owns image identity; its result merges into the latest typed draft.
-  useEffect(() => {
+  useLayoutEffect(() => {
     if (!selected) return;
     if (pendingDrafts.current && selected.id === imageSession.current) return;
     const currentImages = composerDraft.current.images;
@@ -589,7 +665,10 @@ export function useDraft({
     attachments,
     images,
     sendMode,
-    setSendMode,
+    setSendMode: (value: 'steer' | 'followUp') => {
+      if (selected) localStorage.setItem('pi.sendMode.' + selected.id, value);
+      setSendMode(value);
+    },
     fileQuery,
     setFileQuery,
     fileResults,
