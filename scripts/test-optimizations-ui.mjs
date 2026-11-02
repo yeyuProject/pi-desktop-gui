@@ -380,6 +380,12 @@ try {
     node.dispatchEvent(new ClipboardEvent('paste', { clipboardData: data, bubbles: true, cancelable: true }));
   });
   await input.pressSequentially('a'.repeat(50), { delay: 5 });
+  await expect(input).toHaveValue('a'.repeat(50));
+  assert.equal(
+    await input.evaluate((node) => node.selectionStart),
+    50,
+    'Paste must not move the caret after typing',
+  );
   await page.waitForTimeout(600);
   const saves = await app.evaluate(() =>
     globalThis.optimizationCalls.filter((call) => call.method === 'saveDraft'),

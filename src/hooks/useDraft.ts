@@ -83,6 +83,7 @@ export function useDraft({
   const recall = useRef(-1);
   const composerDraft = useRef({ draft, attachments, images, snippets, quotes: draftQuotes });
   const draftRevision = useRef(0);
+  const pasteCaret = useRef<{ sessionId: string | undefined; revision: number; offset: number }>(undefined);
   const savingDraft = useRef(Promise.resolve<unknown>(undefined));
   const pendingDrafts = useRef(0);
   const draftTimer = useRef<ReturnType<typeof setTimeout>>(undefined);
@@ -358,8 +359,16 @@ export function useDraft({
     const pieces = moveSnippetOffsets(draft, value, snippets);
     // Stable array order preserves repeated pastes at the same caret position.
     persistDraft(value, attachments, images, [...pieces, { id: crypto.randomUUID(), text, offset: start }]);
-    requestAnimationFrame(() => input.current?.setSelectionRange(start, start));
+    pasteCaret.current = { sessionId: selected?.id, revision: draftRevision.current, offset: start };
   };
+  // Set the caret with the committed paste, before another key can arrive.
+  useLayoutEffect(() => {
+    const caret = pasteCaret.current;
+    if (!caret) return;
+    pasteCaret.current = undefined;
+    if (caret.sessionId === selected?.id && caret.revision === draftRevision.current)
+      input.current?.setSelectionRange(caret.offset, caret.offset);
+  }, [draft, snippets, selected?.id]);
   const removeSnippet = (id: string) =>
     persistDraft(
       draft,
