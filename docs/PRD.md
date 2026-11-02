@@ -2,6 +2,624 @@
 
 首版功能 页面与交互设计
 
+## 资源占用、交互与文案优化（待实现）
+
+基线为 v0.14.62（`bd752a7`）。本节合并三类优化，各自独立交付，可拆成多个 PR：
+
+- **PF1–PF5**：资源占用与性能。
+- **UX1–UX6**：交互。
+- **CW1–CW3**：文案。
+
+文中行号以基线为准。耗时、内存数字是按代码路径估算的，没有实测；每条实现前先跑一次基线测量，记入对应的测试记录。
+
+**通用约定。**
+
+- 撤销归属、草稿不丢失、检查点 revision 校验、导航状态序号都是既有的安全属性。任何优化都不能放宽它们，需要回退时一律回退到现有的全量路径。
+- 能复用现有结构就复用，例如 `WorkspaceWatcher` 的变更路径、`flushDraft`、`describeModelError`、`updater.ts:43-51` 的错误映射，不新建平行机制。
+- 每条完成后，在 `docs/testing/` 新增或补充测试记录，写明测量环境、改前和改后的数字。
+
+**建议顺序。** 先做改动量 S 的条目：
+
+1. PF3-1 流式 Markdown 的方括号判定
+2. PF3-4 懒加载
+3. UX1 发送按钮原因
+4. UX2 检查清单
+5. CW1 第一步（收口两个出口）
+6. PF2-3 检查点内存表上限
+7. PF2-4 监听忽略目录
+8. PF1-3 `partialJson` 上限
+
+PF1-1、PF1-2、PF2-1、PF2-2 改动较大，先测基线再排期。
+
+---
+
+### PF1 流式输出期间的主进程开销
+
+**背景与问题。**
+
+1. **最后一条回复和最近 8 个工具每 40 ms 整体重发。**
+   - `electron/runtime-publisher.ts:41-66` 把最后一条 assistant 消息，以及 `index >= r.tools.length - 8` 的工具都当作可变对象，每次 flush 都要 `JSON.stringify` 一遍。
+   - 发送时又 `messages.slice(from).map(JSON.parse)`（`:95-98`），整条重发。
+   - 只有一个字符变化时也是整条重发，而且窗口隐藏、最小化时同样按 40 ms 全速发送。
+2. **工具调用参数在流式阶段最多保留 200 KB，但界面只显示 160 个字符。**
+   - `toolcall_delta` 把 `partialJson` 累加到 200000 字符（`electron/agent.ts:519-522`）。
+   - 界面只渲染末尾 160 个字符（`src/components/conversation/ChatMessage.tsx:291`）。
+   - 模型写一个 200 KB 的文件时，主进程每秒对 200 KB 序列化、解析、复制 25 次，渲染进程再收一份。
+3. **工具输出只限行数，不限字符数。**
+   - `tool_execution_update` 和 `tool_execution_end` 只保留最后 200 行（`agent.ts:552-573`）。
+   - minified 文件这类单行超长的输出会整条通过。
+4. **每次保存都广播完整状态。**
+   - 每个消息、工具边界都会 `activity()` → `save()`（`agent.ts:279-285`）。
+   - `store.save()` 用带缩进的 JSON 序列化全部会话（`electron/store.ts:428-448`）。
+   - 写完后 `emit('state')`（`agent.ts:238-247`），`main.ts:130-141` 再对整个 `visibleState` 做 `structuredClone` 并发给界面。
+   - 后台会话的 Goal 每调用一次工具，就重写一次 `state.json`，并把全部会话发给界面一次。
+
+**目标。**
+
+- 流式期间 IPC 发送量与新增内容大致成正比，不随回复总长度增长。
+- 窗口不可见时降低发送频率。
+- 忙碌期间减少整份索引的写入和广播。
+
+**不做。**
+
+- 不改 Pi RPC 协议。
+- 不改 `state.json` 的格式版本。
+- 不改 300 ms 草稿合并和"保存成功后再广播"的语义。
+
+**方案。**
+
+1. **块级补丁**（M）
+   - `RuntimePatch`（`shared/types.ts:398-406`）新增可选字段 `messageTail?: { index: number; blocks: { at: number; block: ContentBlock }[] }`。
+   - 当最后一条 assistant 消息只是某些内容块发生变化时，只发送这些块；`applyRuntimePatch`（`shared/types.ts:422-438`）按 `at` 替换对应块。
+   - 判断哪些块变了：`onEvent` 在 `message_update` 时已知道 `contentIndex`（`agent.ts:505-523`），在 publisher 中记录本次 flush 之间被改动的块下标。
+   - 无法确定时（换会话、`resync`、消息数变化）回退到现有的整条发送。
+   - 工具的"可变"判定从"最近 8 个"改为"本次 flush 之间被事件改过，或 `status === 'running'`"。
+2. **窗口不可见时降频**（S）
+   - `main.ts` 在窗口 `hide`、`minimize` 时通知 `SessionAgents`，把各 publisher 的合并间隔从 40 ms 调到 500 ms；`show`、`restore` 时恢复，并立即 flush 一次。
+   - 状态变化（`publish(true)`）仍立即发送，审批、提问、完成通知不受影响。
+3. **`partialJson` 只保留界面需要的部分**（S）
+   - 推荐方案：发送给界面时，只发 `partialJson` 的末尾 2000 个字符，另带 `partialJsonLength` 字段。
+   - 主进程内部是否仍保留 200 KB 原文，由实现时检查 `live-usage.ts` 和 `toolcall_end` 的依赖后决定。`toolcall_end` 会用完整的 `toolCall` 替换整块（`agent.ts:523`），不依赖 `partialJson`。
+4. **工具输出加字符上限**（S）
+   - 运行中的 `t.output` 在 200 行的基础上再加 64 KiB 字符上限，保留末尾。
+   - 完整输出不受影响，仍可从会话文件读取，或通过"复制输出"、导出拿到。
+5. **忙碌期间少写、少广播**（M）
+   - 忙碌期间 `activity()` 只更新内存，把 `scheduleSave` 的合并窗口放宽到 2 s；状态切到空闲、完成、出错、中断时仍立即保存。
+   - `store.save()` 去掉 `null, 2` 缩进，读取端不受影响。
+   - 保存完成后，只有会话列表可见的字段（标题、`unread`、`lastStatus`、`pinned`、排序用的 `updatedAt`）相对上次广播有变化时，才 `emit('state')`。
+   - 忙碌期间 `updatedAt` 的变化合并到忙碌结束时再广播。
+   - 导航完成确认使用的 revision 序号（见 `docs/architecture.md` 导航一节）保持现有语义。
+
+**验收标准。**
+
+1. 本地模型模拟输出 200 KB 的 `write` 参数：
+   - 主进程每秒 IPC 字节数下降 90% 以上。
+   - `flush` P95 小于 2 ms。
+   - 界面显示的"正在准备 write"末尾内容与改前一致。
+2. 文字回复流式输出到 50 KB：每次 patch 的大小与新增文字量同一量级，不随总长度线性增长。
+3. 窗口最小化时 `runtimePatch` 不超过每秒 2 次；恢复窗口后立即显示最新内容。
+4. 跑 200 次工具调用的 Goal：
+   - 忙碌期间 `state.json` 写入不超过每 2 秒 1 次。
+   - `state` 广播次数下降 80% 以上。
+   - 侧栏的未读、状态、排序与改前一致。
+5. 现有 `tests/runtime-patch.test.ts`、`tests/runtime-state-revisions.test.ts`、`tests/store.test.ts` 和 `npm run test:ui` 全部通过。
+
+**测试。**
+
+- `tests/runtime-patch.test.ts`：补充块级补丁的应用与回退、工具改动标记，以及 `resync` 后整条发送。
+- 新增 `scripts/test-streaming-ipc.ts`：用本地模型桩记录 IPC 字节数和 flush 耗时，结果写入 `test-results/streaming-ipc.json`。
+- `tests/store.test.ts`：补充"忙碌期间合并保存、结束时立即保存"，以及"仅可见字段变化才广播"。
+
+### PF2 大仓库与多会话下的检查点、文件监听开销
+
+**背景与问题。**
+
+1. **每次 bash/powershell 前后各全量扫描一次项目。**
+   - `beginToolUnlocked`、`endToolUnlocked`（`electron/checkpoints.ts:555-618`）对命令类工具调用 `scanSession(project, sessionId, undefined)`。
+   - `scanSession`（`:296-322`）先 `allFiles`（`git ls-files`，最多 20000 个文件，`electron/workspace.ts:235-249`），再对每个文件 `lstat`，并对 stamp 变化的文件计算哈希。
+   - 所有会话共用 `serialize()` 串行队列，Pi 要等这一步返回才继续执行工具。
+   - 有变化时 `observe()` 会把整个 `known` 表（最多 2 万条）重写到磁盘（`:265-283`、`:170-177`）。
+   - 2 万文件的仓库估计每条命令多 0.5–3 s。Goal 跑 500 条命令，就是 1000 次全量扫描。
+2. **启动后立即做全量清理，并展开所有检查点。**
+   - `main.ts:902-903` 在 `ready-to-show` 时调用 `workspace.cleanup()`。
+   - full 清理时，`records(undefined)`（`checkpoints.ts:182-231`）读入所有会话、所有轮次的检查点，把增量记录展开成完整的文件表（`:219`）。
+   - `snapshotStorageBytes`（`workspace.ts:307-329`）递归 `Promise.all` 对整个目录 `stat`，没有并发上限。
+3. **检查点内存表没有上限。**
+   - `hashes` 有 8 项上限（`checkpoints.ts:437`），但 `scanHashes`（`:438`）和 `tracking`（`:158-167`）不淘汰。
+   - 只在删除会话时清理（`:644-647`）。`SessionAgents` 空闲回收 Pi 进程时，不会通知 `Checkpoints` 释放。
+   - 大仓库每个用过的会话常驻约 3–6 MB。
+4. **文件监听的忽略范围窄，也没有最长等待时间。**
+   - `workspace-watch.ts:6-16` 只忽略 9 个目录名，缺少 `target`、`build`、`out`、`coverage`、`.turbo`、`.gradle`、`.idea`、`.pytest_cache`、`.mypy_cache` 等常见产物目录。
+   - 去抖是纯尾部 300 ms（`:76-86`），事件持续不断时通知会被一直推迟。
+   - 每次通知触发 `info()`，同时起两个 git 进程（`workspace.ts:68-79`）。
+5. **其他。**
+   - `fullOutput` 是最多 10 MB 的字符串，每次工具结束都要拼接再切片（`agent.ts:577-579`），只在导出时使用（`agent.ts:2424`）。
+   - 当前选中会话的 Pi 进程永不回收（`session-agents.ts:301-306`），窗口最小化几个小时也一直常驻。
+
+**目标。**
+
+- 命令类工具的边界开销与"变化的文件数"成正比，不随项目大小增长。
+- 启动不再因清理而卡顿。
+- 检查点内存不随历史会话数线性增长。
+
+**不做。**
+
+- 不改检查点的磁盘格式和保留策略（20 轮、7 天、200 MiB）。
+- 不改撤销预览的归属规则。
+- 选中会话的回收（第 5 点后半）本节不做，只记录为后续的体验取舍。
+
+**方案。**
+
+1. **增量边界扫描**（M–L）
+   - `Checkpoints` 按项目保存一个"脏路径集合"，由 `WorkspaceWatcher` 的 `changedPaths` 填充。只要监听过这个项目，就记录；监听由 `main.ts` 的 `watchSelectedProject` 建立。
+   - 边界扫描只对"脏路径 + `state.known` 中已知但本次被删除的路径"做 `lstat` 和哈希，其余沿用 `scanHashes`。
+   - 以下任一情况发生时，回退到现有的全量扫描：
+     - watcher 不存在或已进入 fallback；
+     - 收到 `changedPaths === undefined`；
+     - 项目不是当前被监听的项目（例如后台会话的项目）；
+     - 距离上次全量扫描已超过 10 分钟。
+   - Windows 已有的私有 index 路径 `changedSnapshotFiles`（`checkpoints.ts:358-372`）也可以作为备选，实现时二选一，并在测试记录中说明理由。
+   - `known` 的落盘从"每次有变化"改为"轮次捕获、会话结束、关闭应用时"。崩溃后用现有的全量扫描重建。
+2. **启动清理延后、分批**（M）
+   - 启动后 60 秒，并且没有运行中任务时，才做首次 full 清理。
+   - full 清理按会话逐个读取、计算、释放，不再一次持有全部会话的完整文件表。
+   - `snapshotStorageBytes` 的并发上限设为 16。
+3. **内存表上限**（S）
+   - `scanHashes`、`tracking` 与 `hashes` 一样，按 LRU 保留 8 个会话。
+   - `SessionAgents` 发出 `runtimeRemoved` 时调用 `workspace.releaseSession(id)` 释放；`tracking` 下次使用时从 `session-*.state` 重新读取。
+4. **监听**（S）
+   - 忽略名单补充上面列出的目录。
+   - 去抖加 2 s 的最长等待：事件持续时，最迟 2 s 也要通知一次。
+   - 本项目有任务运行时，通知间隔不小于 1 s。
+   - `info()` 在同一次 `changes()`、`capture()` 调用内只执行一次，结果复用。
+5. **`fullOutput`**（S）
+   - 改为分块数组，按总长度从头部丢弃，或者不再常驻内存，导出时从会话文件重建。实现时看哪种更简单。
+
+**验收标准。**
+
+1. 在 2 万文件的仓库里连续执行 100 次 `echo hi`：
+   - 单次边界耗时 P95 小于 100 ms。
+   - `lstat` 次数与变化的文件数成正比。
+   - 撤销预览的文件列表与改前一致。
+2. 把 watcher 设为 fallback，同样的场景走全量扫描，结果正确。
+3. 构造 50 个会话 × 20 轮 × 5000 个文件的数据目录：
+   - 启动后 10 秒内主进程 RSS 峰值增量小于 100 MB。
+   - 事件循环单次阻塞小于 50 ms。
+4. 打开 30 个会话各跑一轮，全部空闲回收后，`Checkpoints` 内存中的会话表不超过 8 个。
+5. 在监听中的项目里执行 `npm ci`，期间 git 进程不超过 2 个；构建期间界面刷新不超过每 2 秒 1 次。
+6. `tests/checkpoints.test.ts`、`tests/snapshot.test.ts`、`npm run test:features`（含 `test-checkpoints.ts`、`test-approval.ts`）全部通过。
+
+**测试。**
+
+- `tests/checkpoints.test.ts`：补充以下场景：
+  - 增量扫描的归属与全量扫描一致；
+  - watcher 丢失事件时回退；
+  - 后台会话的项目走全量扫描；
+  - LRU 淘汰后重新读取 `tracking`。
+- 新增 `scripts/test-checkpoint-scale.ts`：生成大仓库和多会话数据目录，输出边界耗时、启动清理峰值，写入 `test-results/checkpoint-scale.json`。
+- `tests/` 中 watcher 的单测补充忽略名单和最长等待。
+
+### PF3 渲染进程：流式渲染、长会话、输入和首屏
+
+**背景与问题。**
+
+1. **回复中出现方括号时，流式 Markdown 的分段缓存失效。**
+   - `src/lib/streaming-markdown.ts:17` 的 `/\[[^\]\n]*\](?!\()/` 会匹配任意 `[...]`。
+   - 代码里的 `arr[i]`、任务列表 `[x]`、`[1, 2]` 都会让整段回复每 40 ms 重新跑一次 react-markdown（`src/components/conversation/Markdown.tsx:99-105`）。
+   - 不含方括号时，也要到 8192 字符才开始分段（`:18`）。
+2. **长会话每次 patch 都对整段历史做 O(N) 派生。**
+   - `src/hooks/useHistory.ts:51-64`：map、`isGoalStartMessage`、filter、`hidePlanTools`、`hideRecoveredErrors`（`src/lib/conversation-layout.ts`，复制后反转数组）。
+   - `src/hooks/useWorkbench.ts:199` 的 `sentPrompts`、`:693-724` 的 `toolLookup` 重建 `calls`、`:727-735` 的 `quoteSourceKey` 拼接所有消息。
+   - `src/components/Conversation.tsx:121-165` 的 `placeRuntimeTools`、`groupConversation`、`conversationTurns`。
+   - `turnThinking`（`conversation-layout.ts:231-257`）从第 0 条扫到窗口末尾。
+3. **每次按键都走一次 IPC 保存草稿。**
+   - `persistDraft`（`src/hooks/useDraft.ts:174-212`）每次按键都会 `api.invoke('saveDraft', …)`，并带上全部粘贴片段和引用；主进程逐项校验后 `scheduleSave`（`electron/ipc/draft-handlers.ts:33-60`）。
+   - `src/components/Composer.tsx:338-343` 每次渲染都对草稿、全部片段、引用做 UTF-8 编码，只为找出最大的一项。
+   - 有 100 KB 粘贴片段时，每次按键都要编码两遍，并通过 IPC 发送 100 KB。
+4. **首屏只有一个 JS 包，没有懒加载。**
+   - 生产构建约 727 KB（gzip 约 230 KB），`src/` 中没有 `React.lazy` 或 `import()`。
+   - `src/App.tsx` 静态导入 `SettingsModal`、`Updates`、`SideChatPanel`、`CheckpointDialog`。
+   - `src/components/WorkbenchDialogs.tsx:1` 静态导入 `PiFeatures` 及其 8 个页签。
+5. **运行中的内容没有渲染上限。**
+   - 运行中和出错的工具卡始终展开（`src/components/conversation/ToolCard.tsx:61`），`AnsiOutput` 对全文 `parseAnsi`，每段一个 `<span>`。
+   - 思考内容整段放在一个 `<pre>` 中，每次 patch 都会更新。
+6. **其他。**
+   - 弹窗遮罩使用全屏 `backdrop-filter`（`src/styles/dialogs.css:10`、`src/styles/models.css:378`），流式期间打开设置时，GPU 要对整个窗口反复模糊。
+   - `models.css:42` 的 `scan` 动画改变的是 `background-position`，会触发重绘。
+
+**目标。**
+
+- 流式回复中单次 patch 的渲染不出现长任务。
+- 长会话中单次 patch 的派生开销与新增消息数成正比。
+- 流式期间打字不卡顿。
+- 首屏包体积下降。
+
+**不做。**
+
+- 不引入新的虚拟列表库。
+- 不改 80 条分页窗口和 60 个轮次按钮的现有设计。
+- 不拆分首屏必需的 Markdown、React 依赖。
+
+**方案。**
+
+1. **引用定义判定**（S）
+   - 只匹配引用定义行 `/^ {0,3}\[[^\]]+\]:\s*\S/m`，并跳过围栏代码块内的内容。
+   - 首次分段阈值从 8192 降到 2048。
+2. **增量派生**（M）
+   - `useHistory` 采用"稳定前缀 + 尾部"：前缀是除最后一条消息外的所有消息。只要 `messages[length - 2]` 的引用没变，就沿用上次前缀的派生结果，只重算尾部。
+   - `hideRecoveredErrors` 依赖后续消息，前缀只能复用到最后一条 user 消息之前。
+   - `turnThinking` 只计算窗口附近的轮次；已结束轮次的分组可以缓存。
+   - `sentPrompts`、`quoteSources`、`toolLookup` 的 `calls` 都按新增消息增量更新。
+3. **草稿保存防抖**（M）
+   - 输入时 `saveDraft` 改为 200 ms 尾部防抖，内存中的草稿仍然立即更新。
+   - 发送、切换会话、外部编辑、退出、安装更新前，沿用现有的 `flushDraft`（`useWorkbench.ts:332,376,516,531`）立即发送。
+   - 片段和引用只在变化时携带（与图片的处理方式相同，`useDraft.ts:186,202`）。
+   - `largest` 用 `useMemo`，依赖附件信息、片段、引用和草稿。
+4. **懒加载**（S）
+   - `SettingsModal`、`PiFeatures`、`UpdateDialog`、`QuickSwitch`、`SideChatPanel`、`CheckpointDialog` 改用 `React.lazy` 加 `Suspense fallback={null}`。
+   - 首屏就绪后用 `requestIdleCallback` 预加载，避免第一次点击时有延迟。
+   - 检查各组件中 `import '../styles/*.css'` 的加载顺序：被懒加载的样式不能覆盖首屏样式的优先级。
+5. **渲染上限**（S–M）
+   - 运行中的工具输出只渲染末尾 300 行，上方显示"显示全部"。
+   - 思考块在 `<details>` 折叠时不挂载内容。
+   - 会话内查找命中这些内容时，需要能正确展开（W2 的 `CSS.highlights` 依赖 DOM 文本）。
+6. **样式**（S）
+   - 去掉 `backdrop-filter`，改用稍深的纯色遮罩。
+   - `scan` 动画改为 `transform`。
+
+**验收标准。**
+
+1. 流式输出 10 KB 含 `arr[i]` 的回复：`RichText` 单次提交 P95 小于 8 ms，没有超过 50 ms 的长任务。
+2. 5000 条消息的会话中连续发 200 个 patch，渲染进程 JS 耗时 P95 降到改前的 1/3 以下。
+3. 流式期间连续按 50 次键：
+   - 按键到下一帧 P95 小于 16 ms。
+   - `saveDraft` 不超过每秒 5 次。
+   - 发送、切换会话、退出后草稿零丢失。
+4. 主 JS 包不大于 650 KB，冷启动的 `rendererReady` 时间不变慢。
+5. 持续输出 100 KB ANSI 日志的运行中工具，DOM 节点数有上限，单次 patch 提交小于 16 ms。
+6. `tests/streaming-markdown.test.ts`、`tests/draft-storage.test.ts`、`npm run test:ui`、`npm run test:performance-ui` 全部通过。
+
+**测试。**
+
+- `tests/streaming-markdown.test.ts`：补充 `arr[i]` 和任务列表仍能分段；真正的引用定义仍走全文语义；代码块中的 `[x]: y` 不算引用定义；表格和列表跨块不断裂。
+- 新增 `tests/history-derive.test.ts`：增量派生与全量派生的结果逐项相等，包括 `hideRecoveredErrors` 的边界。
+- `scripts/perf-ui.mjs` 增加"10 KB 含方括号的流式回复"和"流式期间输入"两组场景。
+- `tests/draft-storage.test.ts` 与相关 UI 测试：补充防抖期间切换会话、退出、安装更新时不丢草稿。
+
+---
+
+### UX1 发送按钮不可用时说明原因
+
+**背景。**
+
+- 发送按钮的 `disabled` 由 11 个条件组合而成（`src/components/Composer.tsx:871-883`），`title` 只会是"发送任务""开始 Goal"等（`:862-870`）。
+- 首次启动时 Pi 不可用、项目未启用，是最常见的两种卡点。此时按钮变灰，却没有任何说明。
+
+**目标。** 按钮不可用时，悬停和读屏都能得知第一个没满足的条件；点击后能直接到达解决的地方。
+
+**不做。** 不改发送门禁逻辑本身。
+
+**方案。**
+
+- 参照 `modelPickerDisabledReason`（`Composer.tsx:247`），新增 `sendDisabledReason`。按以下优先级返回第一条，同时作为 `title` 和 `aria-describedby` 的内容：
+
+  | 条件 | 文案 | 点击后 |
+  |---|---|---|
+  | `!sessionEnabled` | 这个项目还没启用，先点上方"启用项目" | 滚动并聚焦启用横幅 |
+  | `!environment?.supported && !runtime.connected` | Pi 还没准备好，先完成开始前检查 | 聚焦检查清单 |
+  | `runtime.status === 'stopping'` | 正在停止，稍等一下 | — |
+  | `pending` | 上一个操作还没完成 | — |
+  | `attachmentsPending` | 附件还在读取 | — |
+  | 附件超过 1 MiB | 内容超过 1 MiB，请移除"{largest.name}"或改为按行引用 | — |
+  | `goalEmpty` / `goalError` / `parameterError` | 显示对应的错误文字 | 聚焦对应输入框 |
+  | 内容为空 | 先输入内容 | — |
+
+- 按钮保持 `disabled`，但外层包一个可点击区域（或改用 `aria-disabled`），点击时执行上表"点击后"一列的动作。
+
+**验收标准。**
+
+1. Pi 不可用、项目未启用、附件超限、正在停止四种情况下，悬停提示和读屏读到的原因各不相同。
+2. 项目未启用时点击发送按钮，焦点移到"启用项目"按钮。
+3. `npm run test:chat-ui` 通过；新增断言覆盖上面四种情况。
+
+### UX2 开始前检查显示真实原因，并提供下一步
+
+**背景。**
+
+- `src/components/ReadinessChecklist.tsx:36-42` 在没读到 Pi 版本时，一律显示"未检测到 Pi，请安装或在设置中指定 cli.js"，不读取 `environment.errors`（`shared/types.ts:353`）。
+- 如果是 Node 版本过低（`electron/environment.ts:62,66`），用户会被引导去重装一个已经装好的 Pi。
+- 安装命令只在设置页的折叠区和 `PiCompatibilityNotice` 中出现。
+- "选择模型"用 `document.querySelector('.model-pill')?.click()` 模拟点击（`ReadinessChecklist.tsx:31`）。
+- 供应商登录成功后，只显示 3.5 秒的"登录成功"（`src/features/ProvidersTab.tsx:118`），不会刷新模型，也不会引导下一步。
+
+**目标。** 从零凭据到第一次成功对话，不在检查清单、设置、供应商页之间来回跳。
+
+**不做。** 不自动安装 Pi；不内置供应商注册流程。
+
+**方案。**
+
+1. **第 1 步说明真实原因**：Pi 未就绪且 `environment.errors` 不为空时，说明文字显示 `errors[0]`（先按 CW1 改写），并按类型给出动作：
+   - 找不到 Pi：显示 `PI_INSTALL_COMMAND` 和"复制安装命令"按钮。
+   - Node 缺失或版本过低：显示"选择 Node"按钮，打开设置的运行环境页并聚焦 Node 路径。
+   - 版本无法识别：保留现有的 `compatibilityMessage`。
+2. **"选择模型"不再查询 DOM**：改为受控回调，由 `useWorkbench` 提供 `openModelPicker()`。
+3. **登录后自动读取模型**：`ProvidersTab` 登录或保存 API Key 成功后，调用 `readModels`。
+   - 只有一个可用模型时，自动选中它，关闭 Pi 功能弹层，聚焦输入框，提示"已连接 {供应商}，可以开始提问了"。
+   - 有多个可用模型时，打开模型选择器。
+
+**验收标准。**
+
+1. 分别模拟 Node 过低、Pi 缺失、版本无法识别：第 1 步的文字各不相同，并且都能在清单内一键复制命令或打开路径选择。
+2. 从零凭据开始，用本地 OAuth 夹具登录后，无需其他点击，就能看到已选中的模型和已聚焦的输入框。
+3. `scripts/test-chat-ui.mjs` 中的模型就绪用例（见 `docs/testing/chat-ui-model-readiness.md`）补充以上两点，并且通过。
+
+### UX3 待审批不能被滚动藏起来
+
+**背景。**
+
+- 审批卡渲染在对话末尾（`src/components/Conversation.tsx:826-836`）。用户往上翻看历史时，只能看到"回到最新"按钮（`:865-869`），文案不会提示有待审批。
+- 状态名只有"等待你的回复"（`src/lib/status.ts:5`），审批和模型提问都显示这一个。
+- 在"确认修改"模式下，任务可能卡住好几分钟，用户却看不出来。
+
+**目标。** 不管对话滚到哪里，都能看到"有待审批"，并且一次点击就能到达"允许"。
+
+**不做。** 不自动批准；不改审批规则和 `Ctrl+Shift+A` 的现有行为。
+
+**方案。**
+
+- 当前会话有待审批（`approvals.length > 0`）且审批卡不在视口内时：
+  - "回到最新"按钮改为强调色，文案为"有 {n} 项待审批"；
+  - 点击后滚到第一张审批卡，并把焦点放到"允许"按钮。
+- `Badge` 区分两种等待：有审批时显示"等待批准"，有模型提问时显示"等待你回答"，其余保持"等待你的回复"。只改显示，不新增 `RunStatus`。
+- 系统通知点击后（`electron/main.ts:286-295`），如果该会话有待审批，渲染端把审批卡滚入视口并聚焦。实现方式：复用现有的 `action` 事件，新增 `focusApproval` 动作。
+
+**验收标准。**
+
+1. 对话滚到顶部、存在待审批时，强调的跳转按钮可见；点一次后，"允许"按钮位于视口内并获得焦点。
+2. 审批、提问两种等待时，`Badge` 文案不同。
+3. 点击审批通知后，审批卡在视口内。
+4. `scripts/test-approval-ui.mjs` 补充以上用例，并且通过。
+
+### UX4 侧栏区分后台会话的结果，"待处理"可选择
+
+**背景。**
+
+- `electron/agent.ts:283` 对完成、出错、中断一律置 `unread = true`，侧栏只有一种 5 px 圆点（`src/components/Sidebar.tsx:166`）。
+- 顶部"待回复 N"只统计弹窗（`src/components/WorkspaceHeader.tsx:34`），点击后跳到第一个不是当前会话的会话（`:68`），用户不能选择，也看不出是审批还是提问。
+- 同时跑 3 个会话时，失败的那个要逐个点开才能发现。
+
+**目标。** 一眼区分"完成 / 失败 / 等待你"，并能直接跳到想处理的那个。
+
+**不做。** 不新增常驻的通知中心页面。
+
+**方案。**
+
+- 未读圆点按 `lastStatus` 着色，并带 `aria-label`：
+  - `completed`：`--accent`，"已完成，未查看"；
+  - `error`、`interrupted`：`--red`，"出错，未查看"；
+  - `stopped`：`--muted`，"已停止，未查看"。
+- 顶部按钮改为"待处理 N"，统计范围是"有弹窗"加上"未读且出错或中断"。点击后展开下拉列表，每行显示会话名和原因（审批 / 提问 / 出错），单击跳转。
+- 项目折叠时的聚合圆点（`Sidebar.tsx:143-144`）用同样的颜色规则，失败优先。
+
+**验收标准。**
+
+1. 一个会话成功、一个失败、一个等待审批时，侧栏三种标记可以区分，读屏文案各不相同。
+2. 从"待处理"列表可以直接跳到任意一项。
+3. `scripts/test-session-ui.mjs` 或 `test-v014-ui` 中相关脚本补充以上用例，并且通过；三套外观的截图正常。
+
+### UX5 崩溃卡片与设置页的可操作性
+
+**背景。**
+
+1. **崩溃卡片。**
+   - 第一行是"退出码：… · 信号：…"（`src/components/CrashCard.tsx:66`），普通用户无法据此判断严重程度。
+   - 四个按钮并列（`:107-132`）。
+   - 残留命令无法确认结束时（`cleanup === 'unconfirmed'`），三个主按钮全部禁用（`:26`），只能按提示重启应用，没有"再检查一次"。
+2. **设置页。**
+   - 外观是即时预览；通知开关、路径要点"保存设置"；"自动下载更新"点一下就保存（`src/components/Updates.tsx:251-257`）。三种保存方式混在一起。
+   - 页脚在没有改动时始终显示"设置已保存"（`src/components/SettingsModal.tsx:631-633`）。
+   - "清除桌面本地数据…"放在"旧空会话"标题下（`:598-605`）。
+   - 取消"清理空会话"确认框时，主进程返回 0（`electron/ipc/session-handlers.ts:263`），界面却提示"未清理会话；有内容、自定义设置或正在使用的会话会保留"（`SettingsModal.tsx:614-617`），读起来像是清理已经执行过。
+
+**目标。** 出错时先说明发生了什么、能做什么；设置页让人分得清哪些已生效，危险操作单独放置。
+
+**不做。** 不自动重发上一条提问；不重写设置的存储结构。
+
+**方案。**
+
+1. **崩溃卡片**
+   - 第一行改为"Pi 在{调用 {工具名} 时}意外退出了"，如果本轮有修改，接着写"本轮改了 {n} 个文件"。退出码和信号移到"退出前的诊断日志"折叠区。
+   - 主按钮只保留"重新连接并继续"，其余三个收进"更多"菜单。
+   - `cleanup === 'unconfirmed'` 时增加"重新检查"按钮：主进程重新执行 `rpc.treeTerminationConfirmed()`（`electron/rpc.ts:255-263`），确认已结束后，更新为 `confirmed` 并解除禁用。
+2. **设置页**
+   - 每个设置项标明生效方式。即时生效的项（外观、自动下载更新）不需要保存；需要保存的项在有改动时，标签旁显示"未保存"。保存成功后，按钮旁显示"已保存"约 2 秒。
+   - "清除桌面本地数据…"移到页面底部独立的"危险操作"分组，标题用 `--red`。
+   - `cleanupEmptySessions` 返回值改为区分"已取消""没有可清理的会话""已清理 n 个"三种结果，界面分别处理：取消时不提示。
+
+**验收标准。**
+
+1. 模拟残留命令无法确认结束：卡片上有"重新检查"；进程实际已结束后，点击它会解除禁用。
+2. 崩溃卡片默认只有一个主按钮，退出码在折叠区中。
+3. 设置页中，修改通知开关后能看到"未保存"标记，保存后显示"已保存"。
+4. 取消清理空会话时不出现任何提示。
+5. `scripts/test-recovery-ui.mjs`、`scripts/test-pi-settings-ui.mjs` 补充以上用例，并且通过。
+
+### UX6 其他交互细节（P2，可分开做）
+
+1. **新项目的审批方式**
+   - 启用项目横幅（`src/components/Conversation.tsx:634-642`）只写了"Pi 可以读取、修改项目文件并执行本机命令"，新会话默认 `auto`（`electron/agent.ts:1134`）。
+   - 在横幅中加一行审批方式选择，复用 `Approval.tsx:16-17` 的"全自动 / 确认修改"，默认值不变。
+   - 验收：启用时可以直接选"确认修改"，选择后对该项目的新会话生效。
+2. **放行后可以撤回**
+   - 在审批卡上选"本会话允许 X 开头"等放行方式后，提示"已放行 {grantLabel}"，并带"撤回"按钮，调用现有的 `revokeApproval`（`Composer.tsx:772`）。
+   - `Toasts` 需要支持带一个操作按钮。
+   - 验收：点击"撤回"后，这条规则从授权列表中消失。
+3. **运行中 Enter 的含义写清楚**
+   - 运行中，发送按钮的文案随 `sendMode` 变化，分别为"补充"和"排队"；输入框的占位文字写明"Enter 立即补充"或"Enter 完成后执行"。
+   - `sendMode` 按会话记忆，不再每次重置为 `steer`（`src/hooks/useDraft.ts:62`）。
+4. **撤销前保留一份可还原的副本**
+   - `workspace.ts:776-790` 恢复时会直接覆盖文件。
+   - 恢复前，把被覆盖的当前内容存入检查点对象库，作为临时快照，应用退出前有效。恢复成功的弹层提供"还原到恢复前"。
+   - 没有检查点时的原生确认框（`electron/ipc/workspace-handlers.ts:108-120`）改为使用与 `CheckpointDialog` 相同的文件清单。
+   - 改动量 M–L，可以最后做。
+5. **任务结束后自动安装更新**
+   - 更新就绪但有任务在运行时，`Updates.tsx:141-143` 只提示"当前任务或审批结束后可重启更新"。
+   - 增加"任务结束后自动重启"勾选。勾选后，最后一个任务结束时，先保存草稿（沿用 `App.tsx:105-115`），再显示 5 秒可取消的倒计时，然后重启。
+
+---
+
+### CW1 错误提示：不再原样透传技术信息
+
+**背景。**
+
+1. **两个出口原样透传。**
+   - 主进程的 `errorText`（`electron/agent.ts:97`）只做 `e.message || String(e)`，渲染端的 `readableError`（`src/lib/format.ts:11-12`）只去掉 IPC 前缀。
+   - 结果是 `ENOENT`、`EACCES`、`spawn … ENOENT`、扩展的英文堆栈直接出现在错误条和提示中。主要位置：
+     - `agent.ts:251` 本地保存失败：${raw}
+     - `agent.ts:617` 上下文压缩失败：${record.errorMessage}
+     - `agent.ts:684` 扩展错误：${record.error}
+     - `agent.ts:1489` 无法建立本轮快照，任务未开始：${raw}
+     - `agent.ts:2004` 配置已保存，加载失败：${raw}
+     - `agent.ts:2234` 停止未完成：${raw}
+     - `agent.ts:2263` Pi 进程尚未确认退出…${raw}
+     - `rpc.ts:130` Pi 进程已退出 (${code ?? signal})
+     - `src/components/ModelPicker.tsx:156` 读取模型失败：${runtime.error}
+     - `src/components/SettingsModal.tsx:339` 连接失败：${readableError(e)}
+     - `electron/main.ts:175` 退出确认框末尾拼接 `error.message`
+     - `electron/updater.ts:317`、`electron/pi-side-chat.ts:42`、`src/lib/diff-worker.ts:24` 直接使用英文 message
+     - `src/components/AppDialogs.tsx:37`、`conversation/GoalCard.tsx:111`、`GoalBudgetPicker.tsx:69`、`TitleBar.tsx:35` 使用 `error.message`
+2. **只有模型请求错误有"发生了什么 + 怎么办"的映射。**
+   - `shared/errors.ts` 的 `classifyModelError`、`describeModelError` 和 `updater.ts:43-51` 已经是好的范例，但进程、文件、配置、检查点的错误没有类似映射。
+   - 设置页"测试连接"没有用 `describeModelError`。
+3. **约 40 处参数校验错误。**
+   - 例如"审批模式无效""消息无效""尺寸无效""无效 IPC 来源""草稿图片索引无效"。正常操作触发不到，真触发时用户也看不懂。
+
+**目标。** 用户看到的每条错误都回答两个问题：发生了什么、现在可以做什么。原始信息只进诊断，或放在"复制详情"中。
+
+**不做。** 不逐条改写所有参数校验类错误；不改诊断日志的内容和格式。
+
+**方案。**
+
+1. **常见系统错误映射**
+   - 在 `shared/errors.ts` 新增 `describeSystemError(error): string | undefined`，按 `code` 或 message 识别，映射为：
+
+     | 错误 | 文案 |
+     |---|---|
+     | `ENOENT` | 找不到文件或目录 |
+     | `EACCES` / `EPERM` | 没有读写权限 |
+     | `ENOSPC` | 磁盘空间不足 |
+     | `EBUSY` | 文件被其他程序占用 |
+     | `ETIMEDOUT` / `ECONNREFUSED` / `ENOTFOUND` | 网络连接失败 |
+
+   - 无法识别时返回 `undefined`。
+2. **收口主进程出口**
+   - 第一类：`errorText` 用于 `setError` 或 `notify` 时（上面列出的位置），改成"固定的中文说明 + `describeSystemError` 的结果（如果有）"，原始文本写入 `this.diagnostic()`。
+   - 第二类：仅用于 `diagnostic` 的调用点保持不变。
+3. **收口渲染端出口**
+   - `readableError` 保留去掉前缀的逻辑。
+   - 如果结果不包含中文，或者以 `Error:`、`TypeError:` 等开头，显示"操作没有完成，详情已记入诊断"。
+   - 把原文写入诊断：新增一个只写的 IPC `logRendererError`，在 `ipc/policy.ts` 补齐规则。
+   - 上面列出的 4 处 `error.message` 统一改用 `readableError`。
+4. **参数校验错误**
+   - 新增 `class InvalidRequestError extends Error`，用于 IPC 参数校验（`main.ts:1199-1206` 与各 handler 的 `text()`、`strings()` 校验）。
+   - 渲染端识别到这类错误时，统一显示"内部错误，已记入诊断。请重试，或在诊断中复制详情反馈。"
+5. **测试连接**
+   - `SettingsModal.tsx:339` 改为 `classifyModelError(message)` 后显示 `title + detail`，原文放在"复制详情"中。
+6. **`extension_error`**
+   - Pi 的事件包含 `extensionPath`（Pi `rpc-mode.js` 的 `output({ type: "extension_error", extensionPath, event, error })`）。
+   - 提示改为"扩展 {文件名} 出错了。如果反复出现，可以在 Pi 功能 → 资源中停用它。"，原始 `error` 写入诊断。
+
+**验收标准。**
+
+1. 用单测模拟 `ENOSPC`、`EACCES`、`ENOENT` 和任意英文 Error，经过各出口后，用户可见文本都不包含英文 message 或 errno 原文。
+2. 诊断导出中能找到原始错误文本。
+3. 扩展抛错时，提示中有扩展文件名和停用路径，没有英文堆栈。
+4. 设置页测试连接失败时，显示与 `ModelErrorCard` 相同的分类标题。
+5. `tests/errors.test.ts` 补充 `describeSystemError`；`npm test`、`npm run test:features-ui` 通过。
+
+### CW2 统一术语，去掉实现细节
+
+**背景。** 同一个概念在界面上有多种叫法，内部实现的术语也出现在用户可见的文案中：
+
+| 概念 | 现状（示例） | 统一为 |
+|---|---|---|
+| 一次 Pi 工作单元 | "新建对话"（`Sidebar.tsx:295`）、"会话"（234 处） | **会话**。"独立对话""侧边对话"是产品名，保留；"新建对话"改为"新建会话" |
+| 可回退的单位 | "检查点"、"本轮快照"（`agent.ts:1266,1489`）、"代码快照"（`main.ts:675`） | **检查点**。"快照"不再出现在用户可见文案中 |
+| 撤销 | "撤销修改"、"撤回授权"（`agent.ts:1765`） | 文件改动和授权都用**撤销**；数据备份用**从备份恢复** |
+| 停止 | "停止任务"、"终止"、"强制结束"（`agent-handlers.ts:423`） | 运行中的任务用**停止**；尚未开始的连接、登录用**取消**；**强制结束**只用于无响应时的最后手段 |
+| 文件夹 | "工作区面板"、"工作区干净"（`Inspector.tsx:472`）、"在工作区信任并启用项目"（`SettingsForm.tsx:273`） | 用户添加的文件夹叫**项目**；右侧面板叫**变更面板**；cwd 叫**工作目录** |
+| 推理强度 | "推理级别"（`ModelPicker.tsx:208`、`SettingsModal.tsx:304`）、"所选模型不支持这个推理级别"（`agent.ts:1673`） | 全部统一为**推理级别** |
+| 配套扩展 | "桌面适配""适配扩展""桥接""Pi 桌面适配扩展"（`rpc.ts:95,183,206`、`pi/protocol.ts:104`、`agent.ts:1087`） | **Pi Desktop 的配套扩展** |
+| 本地数据 | "会话索引""本地索引""写入"（`StorageBanner.tsx:33,42`、`store.ts:174`） | **会话列表数据**、**本地数据**、**保存** |
+
+**方案。**
+
+- 新建 `docs/glossary.md`，内容就是上表，README 和本 PRD 链接到它。
+- 按上表批量替换用户可见的字符串。快捷键标签 `shared/workbench-actions.ts` 中的"新建独立对话"、"查看工作区变更"同步修改。
+
+**验收标准。**
+
+1. 对 `src/`、`electron/`、`shared/` 的字符串字面量和 JSX 文本，按"不再使用"一列 grep，用户可见处为 0。注释、诊断、测试不计。
+2. 三套外观的截图中，侧栏、变更面板、设置页的用词与上表一致。
+3. 受影响的 UI 测试选择器同步更新，并且通过。
+
+### CW3 高频文案改写与文案检查
+
+**改写清单。** 以下都是用户高频可见的位置。改写时只能写代码实际会做的事。
+
+| 位置 | 现在 | 改为 |
+|---|---|---|
+| `electron/rpc.ts:130` | Pi 进程已退出 (1) | Pi 意外退出了。可以重新连接，退出原因记在诊断里。 |
+| `electron/agent.ts:1489` | 无法建立本轮快照，任务未开始：… | 无法为这一轮建立检查点，任务没有开始。请检查项目目录的读写权限。 |
+| `electron/agent.ts:251` | 本地保存失败：… | 会话数据没能保存，请检查磁盘空间和数据目录权限。 |
+| `electron/agent.ts:1266` | Pi 意外退出，已保留会话和本轮文件快照。请检查文件后重新连接。 | Pi 意外退出了。会话和本轮检查点都还在，先看看文件状态，再重新连接。 |
+| `electron/agent.ts:1452` | 已有会话运行中，请先等待完成或停止 | 另一个会话正在运行。等它结束，或先停止它。 |
+| `electron/agent.ts:930`、`main.ts:1209` | 应用正在关闭，请稍后重新打开 | 应用正在关闭，请等关闭完成后再打开。 |
+| `electron/agent.ts:1403` | 请先连接主会话，再管理 Goal。 | 请先连接会话，再设置 Goal。 |
+| `electron/agent.ts:1425` | 这个会话没有等待恢复的中断，请使用正常连接或等待当前操作结束 | 这个会话没有可继续的中断任务，直接重新连接即可。 |
+| `electron/agent.ts:1444,1460` | Pi 正在等待你的回答，请在回答面板中提交，或在输入框中重新发送文字回答。 | Pi 在等你回答。请在上方作答，或直接在输入框里输入回答。 |
+| `electron/agent.ts:1086-1087` | Pi 扩展取消了会话切换… / 桌面适配扩展未确认新会话已开始 | 有扩展拦截了这次切换，当前会话保持不变。 / 新会话没有成功启动，当前会话保持不变，请重试。 |
+| `electron/agent.ts:2315-2316` | 正在处理会话操作，请等待完成后再断开或修改运行环境。 | 会话正忙，请等当前操作结束后再修改。 |
+| `electron/pi/protocol.ts:104` | 适配扩展未正确加载或协议版本不一致 | Pi Desktop 的配套扩展没有加载，或者和当前 Pi 版本不匹配。 |
+| `electron/rpc.ts:95,183,206` | 三种说法 | 统一为：Pi Desktop 的配套扩展没有响应。请在诊断中查看扩展错误，然后重新连接。 |
+| `electron/configuration.ts:105,136`、`prompts.ts:215,253` | 四种说法 | 统一为：这份{配置/模板}在你编辑时被别处改过了。点"重新读取"看最新内容，再改一次。 |
+| `src/components/StorageBanner.tsx:33-34` | 本地会话索引已损坏，已恢复到 X 的备份。恢复时间之后的草稿改动可能未保存。 | 会话列表数据损坏了，已用 X 的备份恢复，之后的草稿改动可能丢失。 |
+| `src/components/StorageBanner.tsx:41-42` | 已忽略 N 个损坏的项目入口和 M 条损坏的会话索引；其余内容已保留。 | 有 N 个项目、M 个会话的记录损坏了，已跳过，其余内容正常。 |
+| `electron/store.ts:174` | 无法完整读取本地索引或草稿图片，已停止写入以保留原数据。… | 本地数据读取不完整，为避免覆盖，已暂停保存。请检查数据目录里的 state.json 和 draft-images 是否缺失，补回后重启应用。 |
+| `electron/main.ts:675` | 将永久清除 … 中的会话索引、草稿、草稿图片、备份、代码快照、桌面会话文件和独立对话工作目录。… | 将永久删除 Pi Desktop 的本地数据：会话列表、草稿、备份、检查点和独立对话的文件。项目源码、Pi 的历史记录和登录凭据不受影响。数据目录：{dir}。请先导出需要保留的内容。 |
+| `electron/ipc/agent-handlers.ts:406` | …通过 nohup、后台运行等方式脱离 Pi 的服务可能继续运行，请到终端停止这些服务并释放端口。 | 所有运行中的会话会立即停止，排队的消息退回各自草稿。在后台独立运行的服务不受影响，需要自己关闭。 |
+| `electron/ipc/agent-handlers.ts:423` | 会尝试终止 Pi 及其子进程…已脱离进程树的后台服务可能继续占用端口… | 会强制关闭 Pi 及它启动的命令，已写入的文件会保留。放到后台单独运行的服务不会被关闭，需要自己在终端停止。 |
+| `src/components/CrashCard.tsx:88` | 无法确认残留命令已结束，重连和撤销已暂停。… | 不确定上次的命令是否已结束，所以暂时不能重连和撤销。请在任务管理器或终端结束它们，然后点"重新检查"。（配合 UX5） |
+| `electron/snapshot.ts:119` | 快照写入不完整 | 这一轮的文件备份没有写完整，无法建立检查点，请重试。 |
+| `electron/snapshot.ts:139` | 快照内容已不存在（可能已被 Git 清理），无法撤销这个文件 | 这个文件的备份已经不存在（可能被 Git 清理过），无法撤销它。 |
+| `electron/checkpoints.ts:153,218` | 检查点对象目录无效… / 检查点文件列表不完整，无法安全恢复这一轮 | 检查点数据损坏了，暂时不能使用，请重新打开会话。 / 这一轮的检查点不完整，为避免误删文件，已禁止恢复。 |
+| `electron/checkpoints.ts:289,302` | 无法安全读取工具将修改的文件… / 部分文件无法读取，无法确认命令执行前后的文件变化… | 有文件读不了，已停止这次修改，以免无法撤销。请检查文件权限后重试。 / 有文件读不了，没法记录这条命令造成的文件变化。请检查权限后重试。 |
+| `electron/ipc/workspace-handlers.ts:83` | 请重新查看检查点并选择要撤销的文件 | 检查点内容已经更新，请重新选择要撤销的文件。 |
+| `electron/ipc/agent-handlers.ts:261` | 配置格式有误，请在完整 Pi 配置中修复：{path} | 配置文件格式有误，请修复后再试：{path} |
+| `electron/ipc/session-handlers.ts:317` | 只能打开 Pi 会话目录中的会话 | 只能打开 Pi 会话目录里的 .jsonl 会话文件。 |
+| `electron/agent.ts:763` | 扩展界面能力 {method} 暂不支持，请在终端使用该扩展。 | 这个扩展需要的界面功能暂不支持在 Pi Desktop 中使用，请在终端里使用它。 |
+| `electron/environment.ts:66` | 运行此 Pi 入口需要 Node.js 22.19 或更高版本。 | Pi 需要 Node.js 22.19 或更高版本，请在设置 → 运行环境中选择合适的 Node。 |
+| `shared/app-update.ts:69` | …无法启动更新安装程序，或安装程序报告了错误。请重试或下载完整安装包。 | 上次更新到 vX 没有成功，当前仍是 vY。请重试，或下载完整安装包。 |
+| `src/components/CrashCard.tsx:66` | 退出码：… · 信号：无。没有自动重发上一条提问。 | （配合 UX5，移入折叠区）没有自动重发上一条提问。 |
+| `src/components/CheckpointDialog.tsx:40` | 同时回到这条消息之前的对话 | 同时把对话退回到这条消息之前 |
+| `src/features/SessionTab.tsx:219`、`src/lib/commands.ts:12,14` | 导出 JSONL / 导入 Pi JSONL / 导出 HTML 或 JSONL | 导出 Pi 会话文件（.jsonl） / 导入 Pi 会话文件 / 导出为 HTML 或 Pi 会话文件 |
+| `electron/app-dialogs.ts:24` | 默认按钮"确定" | 默认按钮改为"知道了"；需要用户做决定的对话框必须传入动词按钮 |
+
+**文案检查。**
+
+- 在 `tools/lint/` 新增一条自定义 ESLint 规则 `pi-desktop/user-copy`，只检查字符串字面量、模板字符串和 JSX 文本，排除注释、`tests/`、`scripts/`，以及 `diagnostic(`、`console.` 的参数。
+- 规则内容：
+  1. 禁用词：索引、桥接、适配扩展、进程树、revision、协议版本、快照、撤回、写盘、写入不完整。用户可见文案中出现即报错。
+  2. 用户可见的模板字符串中，不能直接插入 `errorText(`、`.message`、`String(error)`（配合 CW1）。
+  3. 只有"请稍后重试""请重试"而前面没有原因的句子报警告。
+- 需要例外的地方，用行内注释说明理由。
+
+**验收标准。**
+
+1. 上表每一项都已改写，`npm run lint` 通过。
+2. 故意写入禁用词、原样插入 `error.message` 时，lint 报错。
+3. 受影响的 UI 测试中的文本断言同步更新，并且通过。
+
 ## 模型反问（已实现，v0.14.61）
 
 ### Q1 模型向用户提问：结构化问题与回答面板
