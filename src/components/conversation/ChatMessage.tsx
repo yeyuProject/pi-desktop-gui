@@ -2,7 +2,6 @@ import { memo, useEffect, useRef, useState } from 'react';
 import {
   GitBranch,
   LoaderCircle,
-  Copy,
   Terminal,
   RefreshCw,
   Pencil,
@@ -23,8 +22,12 @@ import { ThinkingBlock } from './ThinkingBlock';
 import { AnsiOutput } from '../AnsiOutput';
 import { userMessageInput } from '../../lib/message-content';
 import { useLayer } from '../../hooks/useLayer';
+import { CopyButton } from '../CopyButton';
+import { ErrorFeedback } from '../ErrorFeedback';
+import { notice } from '../../lib/notice-store';
+import { readableError } from '../../lib/format';
 
-function UserMessageMenu({ text, copy }: { text: string; copy: (text: string) => void }) {
+function UserMessageMenu({ text, copy }: { text: string; copy: (text: string) => Promise<boolean> }) {
   const [open, setOpen] = useState(false);
   const menu = useRef<HTMLSpanElement>(null);
   const popup = useRef<HTMLDivElement>(null);
@@ -54,7 +57,11 @@ function UserMessageMenu({ text, copy }: { text: string; copy: (text: string) =>
           <button
             role="menuitem"
             onClick={() => {
-              copy(text);
+              void copy(text)
+                .then((ok) => {
+                  if (ok) notice('消息已复制');
+                })
+                .catch((error) => notice(readableError(error), { level: 'error' }));
               setOpen(false);
             }}
           >
@@ -76,7 +83,7 @@ export interface MessageContext {
   toolFor: (m: Message) => ToolActivity;
   toggleTool: (id: string, open: boolean) => void;
   openFile: (path: string) => void;
-  copy: (text: string) => void;
+  copy: (text: string) => Promise<boolean>;
   act: (m: Message, kind: MessageAction) => void;
   askHunk?: (attachment: string | undefined, prompt: string) => void;
   rerun?: (command: string, includeContext: boolean) => void;
@@ -195,9 +202,7 @@ export const ChatMessage = memo(
             {m.timestamp && <time>{time(m.timestamp)}</time>}
             <ReplyMeta message={m} />
             <span className="message-actions">
-              <IconButton title="复制消息" onClick={() => ctx.copy(content)}>
-                <Copy size={13} />
-              </IconButton>
+              <CopyButton title="复制消息" iconOnly copy={() => ctx.copy(content)} />
               {content.trim() && (
                 <IconButton
                   title="侧边提问"
@@ -253,7 +258,7 @@ export const ChatMessage = memo(
           ) : m.role === 'assistant' && ctx.running ? (
             <span className="stream-cursor" />
           ) : null}
-          {m.errorMessage && <p className="inline-error">{m.errorMessage}</p>}
+          {m.errorMessage && <ErrorFeedback message={m.errorMessage} />}
           <MessageImages message={m} />
           {ctx.running &&
             typeof m.content !== 'string' &&
@@ -277,9 +282,7 @@ export const ChatMessage = memo(
           <div className="message-footer">
             {m.timestamp && <time>{time(m.timestamp)}</time>}
             <span className="message-actions">
-              <IconButton title="复制消息" onClick={() => ctx.copy(input)}>
-                <Copy size={13} />
-              </IconButton>
+              <CopyButton title="复制消息" iconOnly copy={() => ctx.copy(input)} />
               {m.timestamp && (
                 <>
                   {checkpoint && ctx.undo && (
@@ -311,10 +314,7 @@ export const ChatMessage = memo(
           <div className="reply-footer">
             <ReplySpeed message={m} />
             {copyReply && (
-              <button className="reply-copy" onClick={() => ctx.copy(content)}>
-                <Copy size={13} />
-                复制回复
-              </button>
+              <CopyButton className="reply-copy" title="复制回复" copy={() => ctx.copy(content)} />
             )}
           </div>
         )}

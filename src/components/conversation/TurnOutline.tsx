@@ -1,7 +1,7 @@
 import { memo, useEffect, useLayoutEffect, useMemo, useRef, useState, type CSSProperties } from 'react';
 import type { TurnItem } from '../../lib/conversation-layout';
 import { topLayer } from '../../hooks/useLayer';
-import { Copy } from 'lucide-react';
+import { CopyButton } from '../CopyButton';
 
 const rowHeight = 26;
 type Filter = 'all' | 'modified' | 'failed';
@@ -19,7 +19,7 @@ export const TurnOutline = memo(function TurnOutline({
   running: boolean;
   jump: (index: number) => void;
   focusConversation: () => void;
-  copyReply: (index: number) => void;
+  copyReply: (index: number) => Promise<boolean>;
   notice: (text: string) => void;
 }) {
   const list = useRef<HTMLDivElement>(null);
@@ -147,7 +147,11 @@ export const TurnOutline = memo(function TurnOutline({
         if (event.key.toLowerCase() === 'c') {
           event.preventDefault();
           const reply = filtered[current]?.replyIndex;
-          if (reply !== undefined) copyReply(reply);
+          if (reply !== undefined)
+            (event.target as HTMLElement)
+              .closest('.turn-outline-item')
+              ?.querySelector<HTMLButtonElement>('.turn-copy')
+              ?.click();
           else notice('本轮没有可复制的回复');
           return;
         }
@@ -244,15 +248,14 @@ export const TurnOutline = memo(function TurnOutline({
               </span>
             </button>
             {expanded && (hovered === turn.turn || focused === turn.turn) && (
-              <button
+              <CopyButton
+                iconOnly
                 className="turn-copy"
-                aria-label={`复制第 ${turn.turn} 轮回复`}
+                label={`复制第 ${turn.turn} 轮回复`}
                 title={turn.replyIndex === undefined ? '本轮没有可复制的回复' : '复制本轮回复（C）'}
                 disabled={turn.replyIndex === undefined}
-                onClick={() => turn.replyIndex !== undefined && copyReply(turn.replyIndex)}
-              >
-                <Copy size={13} />
-              </button>
+                copy={() => turn.replyIndex !== undefined && copyReply(turn.replyIndex)}
+              />
             )}
           </div>
         ))}

@@ -2,6 +2,8 @@ import { useEffect, useRef, useState } from 'react';
 import { X, Square, Send, Trash2 } from 'lucide-react';
 import type { Workbench } from '../hooks/useWorkbench';
 import { RichText } from './conversation/Markdown';
+import { CopyButton } from './CopyButton';
+import { ErrorFeedback } from './ErrorFeedback';
 import { parseUserMessage, quoteLabel } from '../../shared/message-content';
 import { useLayer, topLayer } from '../hooks/useLayer';
 
@@ -105,7 +107,7 @@ export function SideChatPanel({
                   message.content.trim() &&
                   sideChat.chat?.running !== message.id && (
                     <footer>
-                      <button onClick={() => void copy(message.content, '消息已复制')}>复制</button>
+                      <CopyButton title="复制" copy={() => copy(message.content)} />
                       <button
                         onClick={() => {
                           sideChat.quote(message);
@@ -121,11 +123,12 @@ export function SideChatPanel({
             );
           })}
         </div>
-        {(sideChat.error || sideChat.chat?.error) && (
-          <p className="inline-error" role="alert">
-            {sideChat.error || `${sideChat.chat?.error?.title}。${sideChat.chat?.error?.detail}`}
-          </p>
-        )}
+        <ErrorFeedback
+          message={
+            sideChat.error ||
+            (sideChat.chat?.error ? `${sideChat.chat.error.title}。${sideChat.chat.error.detail}` : undefined)
+          }
+        />
         {sideChat.disabledReason && (
           <div className="side-chat-unavailable">
             <p>{sideChat.disabledReason}</p>

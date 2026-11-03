@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react';
 import { AlertCircle } from 'lucide-react';
 import type { Changes, Runtime } from '../../shared/types';
 import { readableError } from '../lib/format';
+import { ErrorFeedback } from './ErrorFeedback';
 
 const defaultPrompt = '上一轮因进程退出中断，请检查当前文件状态后继续完成任务';
 export function CrashCard({
@@ -75,16 +76,17 @@ export function CrashCard({
             : '查看项目与本轮变更'}
         </button>
       )}
-      {crash.repeated && (
-        <p className="inline-error">Pi 在 10 秒内再次退出，可能是配置或扩展问题。请先打开诊断检查。</p>
-      )}
-      {crash.cleanup !== 'confirmed' && (
-        <p className="inline-error" role="alert">
-          {crash.cleanup === 'checking'
+      <ErrorFeedback
+        message={crash.repeated && 'Pi 在 10 秒内再次退出，可能是配置或扩展问题。请先打开诊断检查。'}
+      />
+      <ErrorFeedback
+        message={
+          crash.cleanup !== 'confirmed' &&
+          (crash.cleanup === 'checking'
             ? '正在确认本轮命令是否结束，请稍候。'
-            : '不确定上次的命令是否已结束，暂时不能重连和撤销。请在任务管理器或终端结束这些命令，然后重启 Pi Desktop。仅重启应用不会结束这些命令。'}
-        </p>
-      )}
+            : '不确定上次的命令是否已结束，暂时不能重连和撤销。请在任务管理器或终端结束这些命令，然后重启 Pi Desktop。仅重启应用不会结束这些命令。')
+        }
+      />
       <details>
         <summary>退出前的诊断日志（最后 20 行）</summary>
         <p>
@@ -103,7 +105,7 @@ export function CrashCard({
           onChange={(event) => setPrompt(event.target.value)}
         />
       </label>
-      {error && <p className="inline-error">{error}</p>}
+      <ErrorFeedback message={error} />
       <div className="button-row">
         <button
           className="primary"

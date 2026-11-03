@@ -42,6 +42,7 @@
     "test:connection-ui": "node --import tsx scripts/test-connection-ui.mjs",
     "test:user-bubble-ui": "node --import tsx scripts/test-user-bubble-ui.mjs",
     "test:motion-ui": "node --import tsx scripts/test-motion-interaction-ui.mjs",
+    "test:feedback-motion-ui": "node --import tsx scripts/test-feedback-motion-ui.mjs",
     "test:performance-ipc": "node --import tsx scripts/test-streaming-main.ts && node --import tsx scripts/test-streaming-ipc.ts",
     "test:checkpoint-scale": "node --import tsx scripts/test-checkpoint-scale.ts",
     "test:transcript-ui": "node --import tsx scripts/test-transcript-ui.mjs",

@@ -1,4 +1,5 @@
-import { ChevronDown, Copy } from 'lucide-react';
+import { ChevronDown } from 'lucide-react';
+import { CopyButton } from '../CopyButton';
 import { askHistoryText, askSelectionText, askStatusLabels, type AskDetails } from '../../../shared/ask';
 import { RichText } from './Markdown';
 import { SearchHighlight } from './SearchHighlight';
@@ -31,17 +32,7 @@ export function AskCard({
           <ChevronDown className="ask-card-chevron" size={14} />
           <strong>Pi 提问</strong>
           <small>{askStatusLabels[details.status]}</small>
-          <button
-            className="icon-button"
-            title="复制问答"
-            aria-label="复制问答"
-            onClick={(event) => {
-              event.preventDefault();
-              copy(askHistoryText(details));
-            }}
-          >
-            <Copy size={14} />
-          </button>
+          <CopyButton iconOnly title="复制问答" preventDefault copy={() => copy(askHistoryText(details))} />
         </span>
         <ul className="ask-card-summary">
           {details.questions.map((question) => (

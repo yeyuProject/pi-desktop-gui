@@ -71,7 +71,6 @@ export function Conversation(
     | 'messageContext'
     | 'addQuote'
     | 'setNotice'
-    | 'setNoticeAction'
   > & { state: AppState; recovery: ReactNode },
 ) {
   const {
@@ -238,7 +237,7 @@ export function Conversation(
         : undefined;
       const index = quoteMessageIndex(messages, quote);
       if (index < 0 && !liveTool) {
-        props.setNotice('引用的原文已不在当前会话分支');
+        props.setNotice('引用的原文已不在当前会话分支', { level: 'warning' });
         return;
       }
       setFindOpen(false);
@@ -277,7 +276,7 @@ export function Conversation(
           (message.details as { id?: string } | undefined)?.id === goalId,
       );
       if (index < 0) {
-        props.setNotice('当前分支中找不到这条 Goal 结果');
+        props.setNotice('当前分支中找不到这条 Goal 结果', { level: 'warning' });
         return;
       }
       setFindOpen(false);
@@ -901,16 +900,16 @@ export function Conversation(
                     const grant = d.approval?.grant;
                     if (value === APPROVAL_ALWAYS && grant) {
                       const text = `已放行 ${grantLabel(grant)}`;
-                      props.setNotice(text);
-                      props.setNoticeAction({
-                        text,
-                        label: '撤销',
-                        run: () =>
-                          void attempt(async () => {
-                            await api.invoke('revokeApproval', selected.id, grant.id);
-                            props.setNoticeAction(undefined);
-                            props.setNotice('已撤销这条放行规则');
-                          }),
+                      props.setNotice(text, {
+                        action: {
+                          label: '撤销',
+                          run: async () =>
+                            (await attempt(async () => {
+                              await api.invoke('revokeApproval', selected.id, grant.id);
+                              props.setNotice('已撤销这条放行规则');
+                              return true;
+                            })) === true,
+                        },
                       });
                     }
                   })

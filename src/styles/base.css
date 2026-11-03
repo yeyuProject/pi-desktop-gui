@@ -40,6 +40,8 @@
   --motion-fast: 120ms;
   --motion-base: 160ms;
   --ease-out: cubic-bezier(0.2, 0, 0, 1);
+  /* Exits are shorter and accelerate away. */
+  --ease-in: cubic-bezier(0.4, 0, 1, 1);
   color-scheme: light;
 }
 .feature-content {

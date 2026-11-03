@@ -2,6 +2,7 @@ import { CheckCircle2 } from 'lucide-react';
 import { type Runtime, type Environment } from '../../shared/types';
 import { compatibilityMessage } from '../../shared/pi-version';
 import { PiCompatibilityNotice } from './PiCompatibilityNotice';
+import { CopyButton } from './CopyButton';
 import { PI_INSTALL_COMMAND } from '../../shared/pi-version';
 
 export function ReadinessChecklist({
@@ -88,7 +89,7 @@ export function ReadinessChecklist({
       {!piReady && !environment.version && !/Node/i.test(environment.errors?.[0] ?? '') && (
         <p>
           <code>{PI_INSTALL_COMMAND}</code>
-          <button onClick={() => void window.desktop.invoke('copy', PI_INSTALL_COMMAND)}>复制安装命令</button>
+          <CopyButton title="复制安装命令" copy={() => window.desktop.invoke('copy', PI_INSTALL_COMMAND)} />
         </p>
       )}
       {steps.map((s, i) => (

@@ -52,6 +52,7 @@ try {
     globalThis.auditAppRenders = 0;
     globalThis.auditUserRenders = 0;
     globalThis.auditSidebarRenders = 0;
+    globalThis.auditToastRenders = 0;
     globalThis.auditMarkdownWork = [];
     globalThis.auditSecondTimers = new Set();
     const startInterval = window.setInterval.bind(window),
@@ -66,6 +67,7 @@ try {
       stopInterval(timer);
     };
     let previousFibers = new WeakSet();
+    const toastTypes = new Set();
     globalThis.__REACT_DEVTOOLS_GLOBAL_HOOK__ = {
       supportsFiber: true,
       inject: () => 1,
@@ -77,6 +79,12 @@ try {
           // A memo bailout can reuse an entire subtree with old flags still attached.
           const worked = !previousFibers.has(fiber) && Boolean(fiber.flags & 1);
           currentFibers.add(fiber);
+          if (
+            (fiber.tag === 0 || fiber.tag === 15) &&
+            fiber.child?.memoizedProps?.className === 'toast-stack'
+          )
+            toastTypes.add(fiber.type);
+          if (worked && toastTypes.has(fiber.type)) globalThis.auditToastRenders++;
           if (fiber.memoizedProps?.messageContext && fiber.memoizedProps?.messages && worked)
             globalThis.auditConversationRenders++;
           if (fiber.memoizedProps?.m?.role === 'user' && worked) globalThis.auditUserRenders++;
@@ -634,6 +642,46 @@ try {
       );
     }
   }
+  // A keyboard-only notice updates the actual store without injecting a runtime/state event.
+  await app.evaluate(({ BrowserWindow }) => {
+    const runtime = globalThis.auditRuntime;
+    runtime.status = 'completed';
+    runtime.tools = [];
+    runtime.notifications = [];
+    runtime.dialogs = [];
+    runtime.messages = [1, 2, 3].map((turn) => ({
+      role: 'user',
+      content: `反馈检查 ${turn}`,
+      timestamp: 1800000000000 + turn,
+    }));
+    BrowserWindow.getAllWindows()[0].webContents.send('desktop:event', { type: 'runtime', runtime });
+  });
+  await expect(page.locator('.message.user')).toHaveCount(3);
+  const outlineRow = page.locator('.turn-outline-row').first();
+  await outlineRow.focus();
+  await page.waitForTimeout(250);
+  await page.evaluate(() => {
+    globalThis.auditPauseCounters = false;
+    globalThis.auditConversationRenders =
+      globalThis.auditComposerRenders =
+      globalThis.auditSidebarRenders =
+      globalThis.auditAppRenders =
+      globalThis.auditToastRenders =
+        0;
+  });
+  await outlineRow.press('c');
+  await expect(page.locator('.toast')).toContainText('本轮没有可复制的回复');
+  await expect(page.locator('.toast-stack')).toHaveCount(0, { timeout: 6000 });
+  result.noticeCommits = await page.evaluate(() => ({
+    app: globalThis.auditAppRenders,
+    conversation: globalThis.auditConversationRenders,
+    composer: globalThis.auditComposerRenders,
+    sidebar: globalThis.auditSidebarRenders,
+    toasts: globalThis.auditToastRenders,
+  }));
+  for (const key of ['app', 'conversation', 'composer', 'sidebar'])
+    assert.equal(result.noticeCommits[key], 0, `${key} must not render for notice changes`);
+  assert.ok(result.noticeCommits.toasts > 0);
   result.errors = errors;
   assert.deepEqual(errors, []);
   result.appMetrics = await app.evaluate(({ app }) =>

@@ -413,8 +413,9 @@ try {
   await notify.setChecked(!(await notify.isChecked()));
   await expect(page.locator('.settings-content')).toContainText('未保存');
   await page.getByRole('button', { name: '保存设置', exact: true }).click();
-  await expect(page.locator('.settings-footer-note')).toContainText('已保存');
-  await expect(page.locator('.settings-footer-note')).not.toContainText('已保存', { timeout: 4000 });
+  await expect(page.locator('.settings-save')).toHaveText('已保存');
+  await expect(page.locator('.toast')).toHaveCount(0);
+  await expect(page.locator('.settings-save')).toHaveText('保存设置', { timeout: 4000 });
   await app.evaluate(() => {
     globalThis.optimizationFailSettings = true;
   });

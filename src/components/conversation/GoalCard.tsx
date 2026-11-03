@@ -7,6 +7,7 @@ import { compactGoalTokens } from '../../../shared/goal';
 import type { Message } from '../../../shared/types';
 import { RichText } from './Markdown';
 import { GoalBudgetPicker } from '../GoalBudgetPicker';
+import { ErrorFeedback } from '../ErrorFeedback';
 import { topLayer } from '../../hooks/useLayer';
 import '../../styles/goal.css';
 
@@ -216,11 +217,7 @@ export function GoalCard({
           <X size={14} />
         </button>
       </div>
-      {error && (
-        <p className="inline-error" role="alert">
-          {error}
-        </p>
-      )}
+      <ErrorFeedback message={error} />
       {view.open && (
         <div className="goal-details">
           <p className="goal-full-objective">{goal.objective}</p>

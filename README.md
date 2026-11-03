@@ -38,6 +38,7 @@ Sessions and workspaces stay on your machine. Model requests go to whichever pro
 
 ## Features
 
+- **Feedback beside the action** — Saving settings and copying content show confirmation on the button. Other notifications appear above the conversation, stay clear of the composer and approval cards, pause while hovered or focused, and can be closed manually.
 - **Responsive long conversations** — Send only changed streaming content, reuse completed Markdown sections and calculate history incrementally. Draft edits save after a short pause, with a final save before switching chats or quitting. Large repositories reuse file-change tracking between commands; hidden windows refresh less often, and snapshot cleanup waits until the app is idle.
 - **Compact conversation history** — Thinking from one user turn shares a single collapsible section. Completed turns start collapsed by default (or stay expanded when **默认展开思考过程** is enabled in Settings); search reveals the original text, and you can collapse all thinking at once.
 - **Turn outline** — From three turns onward, aligned markers stay in place as the outline expands. Clean question titles and skill labels make it easier to scan; current, running and failed turns are marked, and line counts appear only for actual additions or deletions. From ten turns, filter the outline to modified or failed turns.

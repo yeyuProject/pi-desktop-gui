@@ -2,6 +2,7 @@ import { readableError } from '../lib/format';
 import { useEffect, useRef, useState } from 'react';
 import type { AppDialog } from '../../shared/app-dialogs';
 import { Modal } from './Modal';
+import { ErrorFeedback } from './ErrorFeedback';
 
 /** Dismissal always cancels; Enter cannot implicitly approve a destructive action. */
 export function AppDialogs() {
@@ -46,11 +47,7 @@ export function AppDialogs() {
       <Modal key={dialog.id} title={dialog.message} close={() => void respond(dialog.cancelId)}>
         <div className="modal-body">
           {dialog.detail && <p style={{ whiteSpace: 'pre-wrap' }}>{dialog.detail}</p>}
-          {error && (
-            <p className="inline-error" role="alert">
-              {error}
-            </p>
-          )}
+          <ErrorFeedback message={error} />
         </div>
         <footer>
           {dialog.buttons.map((label, index) => (

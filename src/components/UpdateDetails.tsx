@@ -9,6 +9,7 @@ import {
   type UpdateState,
 } from '../../shared/app-update';
 import { RichText } from './conversation/Markdown';
+import { ErrorFeedback } from './ErrorFeedback';
 import { readableError } from '../lib/format';
 import type { UpdateStore } from '../lib/update-store';
 const api = window.desktop;
@@ -88,11 +89,7 @@ export function UpdateActions({ update, busy, install, updates }: UpdateProps) {
         <p className="update-package-size">安装包 {formatBytes(update.size)}</p>
       )}
       {update.state === 'downloading' && <DownloadProgress update={update} />}
-      {(update.error || error) && (
-        <p className="inline-error" role={error ? 'alert' : undefined}>
-          {error || update.error}
-        </p>
-      )}
+      <ErrorFeedback message={error || update.error} role={error ? 'alert' : undefined} />
       {installNotice && (
         <p className="environment-note" role="status">
           {installNotice}
@@ -213,11 +210,7 @@ export function AboutUpdates({
       </div>
       {update.state === 'idle' && update.checkedAt && <p className="environment-note">当前已是最新版本。</p>}
       {update.version && <h4>新版本 v{update.version}</h4>}
-      {error && (
-        <p className="inline-error" role="alert">
-          {error}
-        </p>
-      )}
+      <ErrorFeedback message={error} />
       <UpdateActions update={update} busy={busy} install={install} updates={updates} />
       {update.notes && (
         <details className="update-notes">

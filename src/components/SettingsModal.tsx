@@ -21,6 +21,8 @@ import { readableError } from '../lib/format';
 import { useEffect, useState } from 'react';
 import { IconButton } from './IconButton';
 import { Modal } from './Modal';
+import { CopyButton } from './CopyButton';
+import { ErrorFeedback } from './ErrorFeedback';
 import { CodeBlock } from './conversation/Markdown';
 import { compatibilityLabels, PI_INSTALL_COMMAND, PI_SOURCE_URL } from '../../shared/pi-version';
 import { PiCompatibilityNotice } from './PiCompatibilityNotice';
@@ -56,7 +58,6 @@ export function SettingsModal(
     | 'environment'
     | 'error'
     | 'setError'
-    | 'setNotice'
     | 'settingsOpen'
     | 'setSettingsOpen'
     | 'settingsTab'
@@ -84,19 +85,21 @@ export function SettingsModal(
   > & { updatePanel: ReactNode },
 ) {
   const [saved, setSaved] = useState(false);
+  const [saving, setSaving] = useState(false);
+  const [saveRevision, setSaveRevision] = useState(0);
+  const [cleanupResult, setCleanupResult] = useState('');
   const [connectionError, setConnectionError] = useState('');
   useEffect(() => {
     if (saved) {
-      const timer = setTimeout(() => setSaved(false), 2000);
+      const timer = setTimeout(() => setSaved(false), 1500);
       return () => clearTimeout(timer);
     }
-  }, [saved]);
+  }, [saved, saveRevision]);
   const {
     runtime,
     environment,
     error,
     setError,
-    setNotice,
     settingsOpen,
     setSettingsOpen,
     settingsTab,
@@ -174,15 +177,17 @@ export function SettingsModal(
             </nav>
             <div className="settings-content">
               {settingsTab === 'updates' && props.updatePanel}
-              {error && (
-                <div className="error-banner" role="alert">
-                  <AlertCircle size={16} />
-                  <span>{error}</span>
-                  <IconButton title="关闭设置错误" onClick={() => setError('')}>
-                    <X size={14} />
-                  </IconButton>
-                </div>
-              )}
+              <ErrorFeedback as="div" className="error-banner" message={error}>
+                {(text) => (
+                  <>
+                    <AlertCircle size={16} />
+                    <span>{text}</span>
+                    <IconButton title="关闭设置错误" onClick={() => setError('')}>
+                      <X size={14} />
+                    </IconButton>
+                  </>
+                )}
+              </ErrorFeedback>
               {settingsTab === 'environment' && (
                 <>
                   <div className="settings-heading">
@@ -380,9 +385,7 @@ export function SettingsModal(
                   </div>
                   {testResult && <p className="test-result">{testResult}</p>}
                   {connectionError && (
-                    <button onClick={() => void attempt(() => api.invoke('copy', connectionError))}>
-                      复制详情
-                    </button>
+                    <CopyButton title="复制详情" copy={() => api.invoke('copy', connectionError)} />
                   )}
                   <details className="setup-guide" open={!environment?.authExists}>
                     <summary>登录或配置模型</summary>
@@ -643,15 +646,21 @@ export function SettingsModal(
                     disabled={pending}
                     onClick={() =>
                       void attempt(async () => {
+                        setCleanupResult('');
                         const count = await api.invoke('cleanupEmptySessions');
                         if (count === null) return;
-                        setNotice(count ? `已清理 ${count} 个空会话` : '没有可清理的会话。');
+                        setCleanupResult(count ? `已清理 ${count} 个空会话` : '没有可清理的会话。');
                       })
                     }
                   >
                     <Trash2 size={15} />
                     清理空会话
                   </button>
+                  {cleanupResult && (
+                    <p className="feature-notice" role="status">
+                      {cleanupResult}
+                    </p>
+                  )}
                   <section className="danger-actions">
                     {' '}
                     <h3>危险操作</h3>
@@ -671,22 +680,36 @@ export function SettingsModal(
             <span className="settings-footer-note">
               {dirty
                 ? '未保存。外观立即预览；其他设置需要保存。'
-                : saved
-                  ? '已保存'
-                  : '运行环境路径在下一次启动对应进程时生效。'}
+                : '运行环境路径在下一次启动对应进程时生效。'}
             </span>
             <button disabled={pending} onClick={requestClose}>
               关闭
             </button>
             <button
-              className="primary"
-              disabled={pending && !running}
+              className="primary settings-save"
+              data-saved={(saved && !dirty) || undefined}
+              disabled={saving || (pending && !running)}
               onClick={async () => {
                 setSaved(false);
-                setSaved(await saveSettings());
+                setSaving(true);
+                try {
+                  if (await saveSettings()) {
+                    setSaved(true);
+                    setSaveRevision((value) => value + 1);
+                  }
+                } finally {
+                  setSaving(false);
+                }
               }}
             >
-              {pending ? <LoaderCircle size={14} className="spin" /> : <Check size={14} />}保存设置
+              {saving ? (
+                <LoaderCircle size={14} className="spin" />
+              ) : saved && !dirty ? (
+                <span className="copy-feedback-icon" key={saveRevision}>
+                  <Check size={14} />
+                </span>
+              ) : null}
+              {saved && !dirty ? '已保存' : '保存设置'}
             </button>
           </footer>
         </Modal>

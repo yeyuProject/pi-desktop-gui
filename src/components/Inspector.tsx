@@ -4,7 +4,6 @@ import {
   GitBranch,
   CheckCircle2,
   LoaderCircle,
-  Copy,
   Terminal,
   Files,
   GitCompareArrows,
@@ -20,6 +19,8 @@ import {
 } from 'lucide-react';
 import { useEffect, useMemo, useRef, useState, type CSSProperties } from 'react';
 import { IconButton } from './IconButton';
+import { CopyButton } from './CopyButton';
+import { ErrorFeedback } from './ErrorFeedback';
 import { FileTree } from './FileTree';
 import { DiffView } from './DiffView';
 import { AnsiOutput } from './AnsiOutput';
@@ -505,7 +506,7 @@ export function Inspector(
                       />
                     </details>
                   )}
-                  {changes.error && <p className="inline-error">{changes.error}</p>}
+                  <ErrorFeedback message={changes.error} />
                 </>
               )}
               {divider}
@@ -541,10 +542,7 @@ export function Inspector(
                     <DiffView {...fileDiff} split={split} full={fullDiff} onAskHunk={askHunk} />
                   )}
                   <div className="preview-foot">
-                    <button onClick={() => void copy(selectedFile, '路径已复制')}>
-                      <Copy size={12} />
-                      路径
-                    </button>
+                    <CopyButton title="路径" copy={() => copy(selectedFile)} />
                     {changeMode === 'run' && changes?.files.some((f) => f.path === selectedFile) && (
                       <button
                         className="danger"
@@ -682,10 +680,7 @@ export function Inspector(
                   )}
                   <div className="preview-foot">
                     <span>{filePreview && (filePreview.size / 1024).toFixed(1) + ' KiB'}</span>
-                    <button onClick={() => void api.invoke('copy', selectedFile)}>
-                      <Copy size={12} />
-                      复制路径
-                    </button>
+                    <CopyButton title="复制路径" copy={() => api.invoke('copy', selectedFile)} />
                   </div>
                 </div>
               )}

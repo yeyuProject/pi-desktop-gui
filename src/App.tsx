@@ -4,7 +4,6 @@ import { Conversation as ConversationView } from './components/Conversation';
 import { Sidebar as SidebarView } from './components/Sidebar';
 import { WorkspaceHeader as WorkspaceHeaderView } from './components/WorkspaceHeader';
 import { Inspector as InspectorView } from './components/Inspector';
-import { Toasts as ToastsView } from './components/Toasts';
 import { WorkbenchDialogs as WorkbenchDialogsView } from './components/WorkbenchDialogs';
 import { Composer as ComposerView } from './components/Composer';
 import { StorageBanner } from './components/StorageBanner';
@@ -20,6 +19,7 @@ import {
   UpdateDialog,
   CrashCard,
   AutomaticUpdate,
+  Toasts,
 } from './lib/lazy-dialogs';
 const Sidebar = memo(SidebarView);
 const WorkspaceHeader = memo(WorkspaceHeaderView);
@@ -33,7 +33,6 @@ const Inspector = memo(
       (key) => key === 'runtime' || Object.is(before[key], after[key]),
     ),
 );
-const Toasts = memo(ToastsView);
 const WorkbenchDialogs = memo(WorkbenchDialogsView);
 const Composer = memo(ComposerView);
 const Conversation = memo(ConversationView);
@@ -249,7 +248,6 @@ export default function App() {
                 'messageContext',
                 'addQuote',
                 'setNotice',
-                'setNoticeAction',
               ])}
               state={state}
               recovery={recovery}
@@ -264,7 +262,6 @@ export default function App() {
                 'runtime',
                 'error',
                 'setError',
-                'setNotice',
                 'pending',
                 'attachmentsPending',
                 'selectionChanging',
@@ -414,7 +411,9 @@ export default function App() {
           />
         </div>
       </main>
-      <Toasts {...pick(model, ['notice', 'noticeAction', 'setDismissed', 'setToastsPaused', 'toasts'])} />
+      <Suspense fallback={null}>
+        <Toasts />
+      </Suspense>
       {(model.searchOpen ||
         model.shortcutsOpen ||
         model.rename ||
@@ -454,7 +453,6 @@ export default function App() {
                     'environment',
                     'error',
                     'setError',
-                    'setNotice',
                     'settingsOpen',
                     'setSettingsOpen',
                     'settingsTab',

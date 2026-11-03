@@ -1,5 +1,6 @@
 import { useState } from 'react';
 import { Modal } from './Modal';
+import { ErrorFeedback } from './ErrorFeedback';
 import type { CheckpointPreview } from '../../shared/checkpoints';
 
 export interface CheckpointDialogProps {
@@ -49,7 +50,7 @@ export function CheckpointDialog({
             {preview.includesCommitted && (
               <p className="checkpoint-warning">包含已提交的内容。恢复后，这些差异会显示为未提交变更。</p>
             )}
-            {!preview.available && <p className="inline-error">{preview.invalidReason}</p>}
+            <ErrorFeedback message={!preview.available && preview.invalidReason} />
             {preview.files.some((file) => file.manual) && (
               <p className="checkpoint-warning">手动改过或无法确认归属的文件默认不勾选，请逐项确认。</p>
             )}

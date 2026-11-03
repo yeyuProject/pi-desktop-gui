@@ -3,6 +3,7 @@ import { useEffect, useState } from 'react';
 import { IconButton } from '../IconButton';
 import { Badge } from '../Badge';
 import { ModelErrorCard } from '../ModelErrorCard';
+import { ErrorFeedback } from '../ErrorFeedback';
 import { ContextMeter } from './Usage';
 import { modKey, shortcut } from '../../lib/platform';
 import type { ComposerProps } from '../Composer';
@@ -33,20 +34,25 @@ export function ComposerFeedback(
     storage,
     handleModelError,
     selected,
-    setNotice,
   } = props;
   const now = useNow(ownRuntime && runtime.status === 'retrying' && Boolean(runtime.retry));
   return (
     <>
-      {error && !(ownRuntime && runtime.errorKind && error === runtime.error) && (
-        <div className="error-banner" role="alert">
-          <AlertCircle size={16} />
-          <span>{error}</span>
-          <IconButton title="关闭错误提示" onClick={() => setError('')}>
-            <X size={14} />
-          </IconButton>
-        </div>
-      )}
+      <ErrorFeedback
+        as="div"
+        className="error-banner"
+        message={error && !(ownRuntime && runtime.errorKind && error === runtime.error) ? error : undefined}
+      >
+        {(text) => (
+          <>
+            <AlertCircle size={16} />
+            <span>{text}</span>
+            <IconButton title="关闭错误提示" onClick={() => setError('')}>
+              <X size={14} />
+            </IconButton>
+          </>
+        )}
+      </ErrorFeedback>
       {ownRuntime && runtime.status === 'retrying' && runtime.retry && (
         <div className="retry-banner" role="status">
           <RefreshCw size={14} className="spin" />
@@ -89,20 +95,21 @@ export function ComposerFeedback(
           autoCompaction={runtime.autoCompaction}
           act={(action) => attempt(() => handleModelError(action))}
           enableCompaction={() => attempt(() => api.invoke('piOption', selected!.id, 'autoCompaction', true))}
-          copy={async (text) => {
-            await api.invoke('copy', text);
-            setNotice('错误详情已复制');
-          }}
+          copy={(text) => api.invoke('copy', text)}
         />
       ) : (
-        ownRuntime &&
-        runtime.error &&
-        runtime.error !== error && (
-          <div className="error-banner">
-            <AlertCircle size={16} />
-            <span>{runtime.error}</span>
-          </div>
-        )
+        <ErrorFeedback
+          as="div"
+          className="error-banner"
+          message={ownRuntime && runtime.error !== error ? runtime.error : undefined}
+        >
+          {(text) => (
+            <>
+              <AlertCircle size={16} />
+              <span>{text}</span>
+            </>
+          )}
+        </ErrorFeedback>
       )}
       {ownRuntime && (runtime.steering.length > 0 || runtime.followUp.length > 0) && (
         <div className="queue">

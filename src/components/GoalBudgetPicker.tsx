@@ -2,6 +2,7 @@ import { readableError } from '../lib/format';
 import { useEffect, useId, useRef, useState } from 'react';
 import { Info } from 'lucide-react';
 import { useLayer } from '../hooks/useLayer';
+import { ErrorFeedback } from './ErrorFeedback';
 import {
   compactGoalTokens,
   GOAL_BUDGET_PRESETS,
@@ -137,11 +138,7 @@ export function GoalBudgetPicker({
               <strong>约 {Math.max(0, Math.floor((limit - used) / average)).toLocaleString()} 次请求</strong>
             </div>
           )}
-          {error && (
-            <p className="inline-error" role="alert">
-              {error}
-            </p>
-          )}
+          <ErrorFeedback message={error} />
           <div className="goal-budget-actions">
             <button disabled={pending} onClick={() => setOpen(false)}>
               取消

@@ -97,7 +97,11 @@ try {
     assert.equal(result.error.title, sample.title);
     assert.ok(result.details.includes(sample.copy));
     assert.ok(!JSON.stringify(result).includes(secret));
-    await page.getByRole('button', { name: '复制详情', exact: true }).click();
+    const copyDetails = page.getByRole('button', { name: /^复制详情/ });
+    await copyDetails.click();
+    await expect(copyDetails).toHaveAttribute('aria-label', '复制详情，已复制');
+    await expect(copyDetails).toHaveAttribute('data-copied', /[1-9]/);
+    await expect(page.locator('.toast')).toHaveCount(0);
     await expect
       .poll(() => app.evaluate(async ({ clipboard }) => clipboard.readText()))
       .toContain(sample.copy);

@@ -1,5 +1,6 @@
 import type { Session, Runtime, Environment, StorageStatus } from '../shared/types';
 import { Modal } from './components/Modal';
+import { ErrorFeedback } from './components/ErrorFeedback';
 import { usePiFeatures } from './features/usePiFeatures';
 import { SessionTab } from './features/SessionTab';
 import { TreeTab } from './features/TreeTab';
@@ -88,14 +89,16 @@ export function PiFeatures({
                 正在读取此页数据…
               </p>
             )}
-            {error && (
-              <div className="error-banner" role="alert">
-                {error}
-                {tab !== 'prefs' && !dirty && !pending && (
-                  <button onClick={() => void model.refresh()}>重试读取</button>
-                )}
-              </div>
-            )}
+            <ErrorFeedback as="div" className="error-banner" message={error}>
+              {(text) => (
+                <>
+                  {text}
+                  {tab !== 'prefs' && !dirty && !pending && (
+                    <button onClick={() => void model.refresh()}>重试读取</button>
+                  )}
+                </>
+              )}
+            </ErrorFeedback>
             {notice && (
               <p className="feature-notice" role="status">
                 {notice}

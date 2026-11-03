@@ -1,5 +1,7 @@
 import { useState } from 'react';
-import { AlertCircle, Copy } from 'lucide-react';
+import { AlertCircle } from 'lucide-react';
+import { CopyButton } from './CopyButton';
+import { ErrorFeedback } from './ErrorFeedback';
 import { describeModelError, redact, type ModelErrorAction, type ModelErrorKind } from '../../shared/errors';
 
 const actionLabels: Record<ModelErrorAction, string> = {
@@ -38,8 +40,10 @@ export function ModelErrorCard({
     setFailure('');
     try {
       await action();
+      return true;
     } catch (error) {
       setFailure(redact(String(error)));
+      return false;
     } finally {
       setPending(false);
     }
@@ -73,17 +77,14 @@ export function ModelErrorCard({
             开启自动压缩
           </button>
         )}
-        <button disabled={pending} onClick={() => void run(() => copy(details))}>
-          <Copy size={13} />
-          复制详细信息
-        </button>
+        <CopyButton disabled={pending} title="复制详细信息" copy={() => run(() => copy(details))} />
       </div>
       {billing && (
         <p className="environment-note">
           请登录当前模型供应商的网站，检查账单、余额和用量上限；充值或调整额度后，再回到这里重新发送。
         </p>
       )}
-      {failure && <p className="inline-error">{failure}</p>}
+      <ErrorFeedback message={failure} />
       <details open={kind === 'unknown'}>
         <summary>查看详细信息</summary>
         <pre>{details}</pre>

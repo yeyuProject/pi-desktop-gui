@@ -39,7 +39,9 @@ const ctx: MessageContext = {
   },
   toggleTool() {},
   openFile() {},
-  copy() {},
+  async copy() {
+    return true;
+  },
   act() {},
 };
 const message: Message = {

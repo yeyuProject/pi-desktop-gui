@@ -24,6 +24,7 @@ import {
 
 import { readableError } from '../lib/format';
 import { PI_SOURCE_URL } from '../../shared/pi-version';
+import { notice as setNotice } from '../lib/notice-store';
 
 import { useLayer } from './useLayer';
 import { type MessageContext } from '../components/conversation/ChatMessage';
@@ -31,8 +32,7 @@ const api = window.desktop;
 const noTools: ToolActivity[] = [];
 export function useWorkbench() {
   const [errors, setErrors] = useState<Record<string, string>>({});
-  const [notice, setNotice] = useState(''),
-    [settingsOpen, setSettingsOpen] = useState(false),
+  const [settingsOpen, setSettingsOpen] = useState(false),
     [settingsTab, setSettingsTab] = useState('environment'),
     [prefs, setPrefs] = useState<Settings>();
   const {
@@ -55,7 +55,6 @@ export function useWorkbench() {
     error?: string;
   }>();
   const [featureTab, setFeatureTab] = useState('');
-  const [noticeAction, setNoticeAction] = useState<{ text: string; label: string; run: () => void }>();
   const [modelPickerRequest, setModelPickerRequest] = useState(0);
   const openModelPicker = () => setModelPickerRequest((value) => value + 1);
   const [sidebar, setSidebar] = useState(() => localStorage.getItem('pi.sidebar') !== 'hidden'),
@@ -68,8 +67,7 @@ export function useWorkbench() {
     [searchQuery, setSearchQuery] = useState(''),
     [rename, setRename] = useState<{ kind: 'project' | 'session'; id: string; name: string }>(),
     [menuId, setMenuId] = useState('');
-  const [seenNotification, setSeenNotification] = useState(Number.MAX_SAFE_INTEGER),
-    [dismissed, setDismissed] = useState<number[]>([]);
+  const notificationCursor = useRef<{ sessionId?: string; id: number }>({ id: 0 });
   const [testResult, setTestResult] = useState(''),
     [diagnostic, setDiagnostic] = useState('');
   const [shortcutsOpen, setShortcutsOpen] = useState(false),
@@ -154,7 +152,6 @@ export function useWorkbench() {
     setInspector,
     attempt,
     setError,
-    setNotice,
   });
   const {
     draft,
@@ -260,16 +257,6 @@ export function useWorkbench() {
     setExpanded(selected.expandedTools ?? []);
   }, [selected?.id]);
 
-  // Hovering or focusing the toast stack holds every auto-dismiss timer; leaving restarts them.
-  const [toastsPaused, setToastsPaused] = useState(false);
-  const noticeHasAction = !!notice && noticeAction?.text === notice;
-  useEffect(() => {
-    if (notice && !toastsPaused) {
-      // A notice with an action (撤销) needs time to reach the button, not only to read.
-      const timer = setTimeout(() => setNotice(''), noticeHasAction ? 6000 : 3500);
-      return () => clearTimeout(timer);
-    }
-  }, [notice, noticeHasAction, toastsPaused]);
   useEffect(() => {
     if (!menuId) return;
     const outside = (e: MouseEvent) => {
@@ -282,23 +269,20 @@ export function useWorkbench() {
     };
   }, [menuId]);
 
-  const toasts = useMemo(
-    () => (runtime.notifications ?? []).filter((n) => n.id > seenNotification && !dismissed.includes(n.id)),
-    [runtime.notifications, seenNotification, dismissed],
-  );
   useEffect(() => {
-    if (toastsPaused) return;
-    const timers = toasts
-      .filter((n) => n.level !== 'error')
-      .map((n) =>
-        setTimeout(() => setDismissed((v) => [...v, n.id].slice(-20)), n.level === 'warning' ? 9000 : 5000),
-      );
-    return () => timers.forEach(clearTimeout);
-  }, [toasts.map((n) => n.id).join(','), toastsPaused]);
-  useEffect(() => {
-    setSeenNotification(Math.max(0, ...(runtime.notifications ?? []).map((n) => n.id)));
-    setDismissed([]);
-  }, [runtime.sessionId]);
+    const current = notificationCursor.current;
+    const notifications = runtime.notifications ?? [];
+    if (current.sessionId === runtime.sessionId) {
+      for (const item of notifications) if (item.id > current.id) setNotice(item.text, { level: item.level });
+    }
+    notificationCursor.current = {
+      sessionId: runtime.sessionId,
+      id: Math.max(
+        current.sessionId === runtime.sessionId ? current.id : 0,
+        ...notifications.map((item) => item.id),
+      ),
+    };
+  }, [runtime.sessionId, runtime.notifications]);
 
   async function send() {
     if (isReadingAttachments()) return;
@@ -375,7 +359,7 @@ export function useWorkbench() {
     await attempt(async () => {
       await flushDraft();
       if (getDraftRevision() !== draftRevision) {
-        setNotice('草稿在准备发送时发生变化，请确认后重新发送');
+        setNotice('草稿在准备发送时发生变化，请确认后重新发送', { level: 'warning' });
         return;
       }
       if (isReadingAttachments()) return;
@@ -549,7 +533,6 @@ export function useWorkbench() {
       await api.invoke('saveSettings', prefs);
       saved = true;
       await detect();
-      setNotice('设置已保存');
     });
     return saved;
   }
@@ -618,9 +601,9 @@ export function useWorkbench() {
     setPrefs((prev) => (prev ? { ...prev, thinking } : prev));
     await action(() => api.invoke('setSessionThinking', selected.id, thinking));
   }
-  async function copy(value: string, label = '已复制') {
-    await attempt(() => api.invoke('copy', value));
-    setNotice(label);
+  async function copy(value: string) {
+    await api.invoke('copy', value);
+    return true;
   }
   async function rerunCommand(command: string, includeContext: boolean) {
     if (!selected || pending || busy(runtimeRef.current.status) || !sessionEnabled) return;
@@ -690,7 +673,7 @@ export function useWorkbench() {
     () => ({
       toggleTool: (id: string, open: boolean) => latest.current.toggleTool(id, open),
       openFile: (p: string) => void latest.current.inspectFile(p, 'files'),
-      copy: (text: string) => void latest.current.copy(text, '消息已复制'),
+      copy: (text: string) => latest.current.copy(text),
       act: (m: Message, kind: MessageAction) => void latest.current.messageAction(m, kind),
       rerun: (command: string, includeContext: boolean) =>
         void latest.current.rerunCommand(command, includeContext),
@@ -839,9 +822,6 @@ export function useWorkbench() {
       error,
       setError,
       setNotice,
-      noticeAction,
-      setNoticeAction,
-      setToastsPaused,
       setShortcutsOpen,
       stopArmed,
       dragging,
@@ -862,9 +842,6 @@ export function useWorkbench() {
       setInspector,
       inspectorPanel,
       copy,
-      notice,
-      setDismissed,
-      toasts,
       featureTab,
       searchOpen,
       searchQuery,

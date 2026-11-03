@@ -2,6 +2,7 @@ import { useEffect, useRef, useState, type RefObject } from 'react';
 import type { Message } from '../../../shared/types';
 import type { DraftQuote } from '../../../shared/message-content';
 import { turnThinking, type TurnItem } from '../../lib/conversation-layout';
+import { CopyButton } from '../CopyButton';
 
 export function SelectionMenu({
   thread,
@@ -200,14 +201,7 @@ export function SelectionMenu({
       >
         侧边提问
       </button>
-      <button
-        onClick={() => {
-          void window.desktop.invoke('copy', selection.quote.text).then(() => notice('消息已复制'));
-          setSelection(undefined);
-        }}
-      >
-        复制
-      </button>
+      <CopyButton title="复制" copy={() => window.desktop.invoke('copy', selection.quote.text)} />
     </div>
   );
 }

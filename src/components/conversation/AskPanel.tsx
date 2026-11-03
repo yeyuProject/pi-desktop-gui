@@ -5,6 +5,7 @@ import { getAskDraft, saveAskDraft, type AskDraft } from '../../lib/ask-drafts';
 import { topLayer } from '../../hooks/useLayer';
 import { RichText } from './Markdown';
 import { Modal } from '../Modal';
+import { ErrorFeedback } from '../ErrorFeedback';
 
 export function AskPanel({
   sessionId,
@@ -271,11 +272,7 @@ export function AskPanel({
           )}
         </div>
         <footer className="ask-footer">
-          {error && (
-            <p className="inline-error" role="alert">
-              {error}
-            </p>
-          )}
+          <ErrorFeedback message={error} />
           <button
             disabled={disabled || pending}
             onClick={() => update({ ...draft, noteOpen: !draft.noteOpen })}

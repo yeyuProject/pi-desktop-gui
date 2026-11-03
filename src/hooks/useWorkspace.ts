@@ -330,7 +330,6 @@ export function useWorkspace(options: WorkspaceOptions) {
       }
       if (latest.current.selected?.id !== sessionId) return;
       setCheckpointRestoredCount(restored.length);
-      setNotice(`已把 ${restored.length} 个文件恢复到第 ${preview.turn} 轮之前`);
       setSelectedFile('');
       setFileDiff(undefined);
       setFilePreview(undefined);

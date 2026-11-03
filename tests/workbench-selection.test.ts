@@ -15,6 +15,7 @@ import * as types from '../shared/types';
 import { defaultSettings } from '../electron/store-state';
 import { hideRecoveredErrors } from '../src/lib/conversation-layout';
 import { readableError } from '../src/lib/format';
+import { NoticeStore } from '../src/lib/notice-store';
 import type { Workbench } from '../src/hooks/useWorkbench';
 import { Store } from '../electron/store';
 import { SessionAgents } from '../electron/session-agents';
@@ -189,7 +190,13 @@ function harness(
     inspectFile: noOp,
     openCheckpoint: noOp,
   };
+  const noticeStore = new NoticeStore({
+    now: () => 0,
+    setTimeout: (run, delay) => timeout(run, delay),
+    clearTimeout: (id) => clear(id as number),
+  });
   const dependencies: Record<string, unknown> = {
+    '../lib/notice-store': { notice: noticeStore.notice },
     react: hooks,
     './useRuntime': { useRuntime: () => view },
     './useDraft': { useDraft: () => draft },
@@ -313,6 +320,7 @@ function harness(
   flush();
   return {
     view,
+    noticeStore,
     draft,
     render,
     flush,
@@ -336,6 +344,7 @@ function harness(
       return updatesAfterUnmount;
     },
     unmount() {
+      noticeStore.dispose();
       for (const effect of effects.values()) effect.cleanup?.();
       mounted = false;
     },
@@ -808,7 +817,7 @@ test('edits during the draft save barrier cancel the old send snapshot', async (
   await f.settle();
   assert.ok(!calls.includes('send'));
   assert.deepEqual(f.current.attachments, ['added-during-save.txt']);
-  assert.match(f.current.notice, /草稿.*变化/);
+  assert.ok(f.noticeStore.get().some((item) => /草稿.*变化/.test(item.text)));
   f.unmount();
 });
 

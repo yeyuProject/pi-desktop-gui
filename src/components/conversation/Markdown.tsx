@@ -1,14 +1,25 @@
-import { Children, isValidElement, memo, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
-import { FileText, Copy, Check, WrapText, BookOpen, ChevronDown, ChevronRight } from 'lucide-react';
+import {
+  Children,
+  isValidElement,
+  memo,
+  Suspense,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  type ReactNode,
+} from 'react';
+import { FileText, WrapText, BookOpen, ChevronDown, ChevronRight } from 'lucide-react';
 import Markdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import { type Message } from '../../../shared/types';
-import { Lightbox } from '../Lightbox';
+import { Lightbox } from '../../lib/lazy-dialogs';
 import { tokenizeCode } from '../../lib/code-tokens';
 import { parseUserMessage, quoteLabel, type DraftQuote } from '../../lib/message-content';
 import { SearchHighlight } from './SearchHighlight';
 import type { SessionMatch } from '../../lib/session-search';
 import { streamingMarkdown, type MarkdownParts } from '../../lib/streaming-markdown';
+import { CopyButton } from '../CopyButton';
 const api = window.desktop;
 function codeText(children: ReactNode): string {
   return Children.toArray(children)
@@ -22,10 +33,7 @@ function codeText(children: ReactNode): string {
     .join('');
 }
 export function CodeBlock({ children }: { children: ReactNode }) {
-  const [copied, setCopied] = useState(false),
-    [wrap, setWrap] = useState(false);
-  const timer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
-  useEffect(() => () => clearTimeout(timer.current), []);
+  const [wrap, setWrap] = useState(false);
   const code = codeText(children);
   const child = Children.toArray(children)[0];
   const language = isValidElement<{ className?: string }>(child)
@@ -44,20 +52,9 @@ export function CodeBlock({ children }: { children: ReactNode }) {
             <WrapText size={13} />
             换行
           </button>
-          <button
-            className="code-copy"
-            aria-label="复制代码"
-            onClick={() =>
-              void api.invoke('copy', code).then(() => {
-                setCopied(true);
-                clearTimeout(timer.current);
-                timer.current = setTimeout(() => setCopied(false), 1500);
-              })
-            }
-          >
-            {copied ? <Check size={13} /> : <Copy size={13} />}
-            {copied ? '已复制' : '复制'}
-          </button>
+          <CopyButton className="code-copy" title="复制代码" copy={() => api.invoke('copy', code)}>
+            复制
+          </CopyButton>
         </div>
       </div>
       <pre>
@@ -127,7 +124,11 @@ export function MarkdownImage({ src, alt }: { src?: string; alt?: string }) {
         <button className="image-preview" onClick={() => setOpen(true)}>
           <img className="message-image" src={src} alt={alt || '图片'} />
         </button>
-        {open && <Lightbox images={[{ src, alt: alt || '图片' }]} close={() => setOpen(false)} />}
+        {open && (
+          <Suspense fallback={null}>
+            <Lightbox images={[{ src, alt: alt || '图片' }]} close={() => setOpen(false)} />
+          </Suspense>
+        )}
       </>
     );
   if (src && /^https?:\/\//.test(src))
@@ -155,7 +156,11 @@ export function MessageImages({ message }: { message: Message }) {
           <img className="message-image" {...image} />
         </button>
       ))}
-      {index !== null && <Lightbox images={images} initialIndex={index} close={() => setIndex(null)} />}
+      {index !== null && (
+        <Suspense fallback={null}>
+          <Lightbox images={images} initialIndex={index} close={() => setIndex(null)} />
+        </Suspense>
+      )}
     </div>
   );
 }
@@ -201,10 +206,7 @@ export function UserMessage({
           </button>
           {skillOpen && (
             <>
-              <button className="skill-copy" onClick={() => copy(skill.content)}>
-                <Copy size={13} />
-                复制技能正文
-              </button>
+              <CopyButton className="skill-copy" title="复制技能正文" copy={() => copy(skill.content)} />
               <div className="skill-content" data-search-section="skill">
                 <RichText text={skill.content} />
               </div>

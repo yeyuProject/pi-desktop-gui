@@ -7,6 +7,10 @@ const checkpoint = () => import('../components/CheckpointDialog');
 const updates = () => import('../components/UpdateDialog');
 const crash = () => import('../components/CrashCard');
 const automaticUpdate = () => import('../components/AutomaticUpdate');
+const toasts = () => import('../components/Toasts');
+const lightbox = () => import('../components/Lightbox');
+export const Lightbox = lazy(() => lightbox().then((m) => ({ default: m.Lightbox })));
+export const Toasts = lazy(() => toasts().then((m) => ({ default: m.Toasts })));
 export const CrashCard = lazy(() => crash().then((m) => ({ default: m.CrashCard })));
 export const AutomaticUpdate = lazy(() => automaticUpdate().then((m) => ({ default: m.AutomaticUpdate })));
 export const SettingsModal = lazy(() => settings().then((m) => ({ default: m.SettingsModal })));
@@ -25,6 +29,7 @@ export function preloadDialogs() {
     updates(),
     crash(),
     automaticUpdate(),
+    lightbox(),
   ]);
 }
 

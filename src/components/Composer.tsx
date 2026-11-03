@@ -18,12 +18,14 @@ import {
 import { mod } from '../lib/platform';
 import { commandSourceNames } from '../lib/commands';
 import { IconButton } from './IconButton';
+import { ErrorFeedback } from './ErrorFeedback';
+import { noticeDuration } from '../lib/notice-store';
 import { ComposerFeedback, ComposerFooter } from './conversation/ComposerStatus';
 import { ComposerResize } from './conversation/ComposerResize';
 import { ModelPicker } from './ModelPicker';
 import { ApprovalSwitch } from './Approval';
-import { useMemo, useEffect, useLayoutEffect, useRef, useState, type KeyboardEvent } from 'react';
-import { Lightbox } from './Lightbox';
+import { Suspense, useMemo, useEffect, useLayoutEffect, useRef, useState, type KeyboardEvent } from 'react';
+import { Lightbox } from '../lib/lazy-dialogs';
 import { Modal } from './Modal';
 import { SearchHighlight } from './conversation/SearchHighlight';
 import { sessionModelState } from '../lib/session-model';
@@ -48,7 +50,6 @@ export type ComposerProps = Pick<
   | 'toggleTool'
   | 'error'
   | 'setError'
-  | 'setNotice'
   | 'pending'
   | 'attachmentsPending'
   | 'selectionChanging'
@@ -123,7 +124,6 @@ export function Composer(props: ComposerProps) {
     environment,
     runtime,
     setError,
-    setNotice,
     pending,
     selectionChanging,
     selectionRevision,
@@ -264,6 +264,12 @@ export function Composer(props: ComposerProps) {
   const [lightboxIndex, setLightboxIndex] = useState<number | null>(null),
     [snippetId, setSnippetId] = useState('');
   const [parameterError, setParameterError] = useState('');
+  const [approvalFeedback, setApprovalFeedback] = useState<{ text: string }>();
+  useEffect(() => {
+    if (!approvalFeedback) return;
+    const timer = setTimeout(() => setApprovalFeedback(undefined), noticeDuration(approvalFeedback.text));
+    return () => clearTimeout(timer);
+  }, [approvalFeedback]);
   const parameterPick = useRef<((path: string) => void) | null>(null);
   useEffect(() => {
     setParameterError('');
@@ -620,11 +626,7 @@ export function Composer(props: ComposerProps) {
             onFileKeyDown={fileKey}
           />
         )}
-        {!answering && parameterError && (
-          <div className="inline-error" role="alert">
-            {parameterError}
-          </div>
-        )}
+        <ErrorFeedback as="div" message={!answering && parameterError} />
         <textarea
           ref={input}
           aria-label="任务输入"
@@ -861,15 +863,15 @@ export function Composer(props: ComposerProps) {
                 selected &&
                 void attempt(async () => {
                   await api.invoke('setApprovalMode', selected.id, mode);
-                  setNotice(
-                    running
+                  setApprovalFeedback({
+                    text: running
                       ? '审批模式用于后续工具调用；已开始的命令和已有审批不变'
                       : mode === 'auto'
                         ? 'Pi 将直接修改文件和执行命令'
                         : mode === 'confirm'
                           ? '修改文件和执行命令前会先询问你'
                           : '只读：Pi 只能读取和分析项目内文件，不能修改或执行',
-                  );
+                  });
                 })
               }
             />
@@ -1009,13 +1011,16 @@ export function Composer(props: ComposerProps) {
           </div>
         </div>
       </div>
+      <ErrorFeedback className="approval-mode-feedback" role="status" message={approvalFeedback?.text} />
       <ComposerFooter {...props} />
       {lightboxIndex !== null && images.length > 0 && (
-        <Lightbox
-          images={images.map((img) => ({ src: `data:${img.mimeType};base64,${img.data}`, alt: img.name }))}
-          initialIndex={lightboxIndex}
-          close={() => setLightboxIndex(null)}
-        />
+        <Suspense fallback={null}>
+          <Lightbox
+            images={images.map((img) => ({ src: `data:${img.mimeType};base64,${img.data}`, alt: img.name }))}
+            initialIndex={lightboxIndex}
+            close={() => setLightboxIndex(null)}
+          />
+        </Suspense>
       )}
       {snippet && (
         <Modal title={`粘贴片段 · ${textLines(snippet.text)} 行`} close={() => setSnippetId('')}>

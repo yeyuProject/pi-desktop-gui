@@ -3,6 +3,7 @@ import { Folder, ChevronRight, FileText, LocateFixed, Search } from 'lucide-reac
 import { type Project, type FileItem, type Change } from '../../shared/types';
 import { readableError } from '../lib/format';
 import { IconButton } from './IconButton';
+import { ErrorFeedback } from './ErrorFeedback';
 const api = window.desktop;
 
 interface FileTreeProps {
@@ -68,7 +69,7 @@ function Directory({
   }, [locate, items, selectedFile]);
   return (
     <div className="file-tree">
-      {error && <p className="inline-error">{error}</p>}
+      <ErrorFeedback message={error} />
       {!items.length && !error && <p className="empty-small">{depth ? '空文件夹' : '没有可显示的文件'}</p>}
       {items.map((item) => (
         <div key={item.path}>
@@ -179,7 +180,7 @@ export function FileTree(props: FileTreeProps) {
       </div>
       {!!query.trim() && (
         <div className="file-search-results">
-          {error && <p className="inline-error">{error}</p>}
+          <ErrorFeedback message={error} />
           {!results.length && !error && <p className="empty-small">没有匹配的文件</p>}
           {results.map((name) => (
             <button

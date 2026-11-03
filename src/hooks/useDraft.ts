@@ -48,7 +48,6 @@ interface DraftOptions {
   setInspector: Dispatch<SetStateAction<boolean>>;
   attempt: <T>(fn: () => Promise<T>) => Promise<T | undefined>;
   setError: (value: string) => void;
-  setNotice: (value: string) => void;
 }
 export function useDraft({
   state,
@@ -61,7 +60,6 @@ export function useDraft({
   setInspector,
   attempt,
   setError,
-  setNotice,
 }: DraftOptions) {
   const [draftGoal, setDraftGoal] = useState<GoalDraft>();
   const goalDraftRef = useRef<GoalDraft>(undefined);
@@ -491,7 +489,6 @@ export function useDraft({
           const { accepted, rejected } = await api.invoke('referenceDropped', project.id, paths);
           if (stateRef.current?.selectedSessionId !== selected.id) return;
           nextFiles = accepted;
-          if (accepted.length) setNotice(`已引用 ${accepted.length} 个文件`);
           if (rejected.length)
             setError(
               `${rejected.slice(0, 3).join('、')}${rejected.length > 3 ? ` 等 ${rejected.length} 个文件` : ''} 无法引用：只支持项目内 256 KiB 以内的文本文件`,
