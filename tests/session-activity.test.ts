@@ -43,6 +43,16 @@ async function settled(service: AgentService) {
   }
 }
 
+for (const title of ['新会话', '新对话']) {
+  test(`first send names a session with the saved default title ${title}`, async (t) => {
+    const { store, service, older } = await fixture(t);
+    older.title = title;
+    await service.send(older.id, '给这个项目添加说明', [], 'steer');
+    await settled(service);
+    assert.equal(store.session(older.id).title, '给这个项目添加说明');
+  });
+}
+
 async function waitForGate(entered: Promise<void>, completion: Promise<unknown>) {
   let timer: ReturnType<typeof setTimeout> | undefined;
   try {

@@ -1,10 +1,15 @@
-import { messageText, type Message, type ToolActivity } from '../../shared/types';
+import { messageArrayChanges, messageText, type Message, type ToolActivity } from '../../shared/types';
 import { parseUserMessage } from './message-content';
 import { DESKTOP_ASK_TOOL } from '../../shared/ask';
 const readOnly = new Set(['read', 'grep', 'find', 'ls', 'tool_search']);
 
 /** Nested calls have live tool events but no separate transcript message. */
 export function placeRuntimeTools(messages: Message[], tools: ToolActivity[]) {
+  const { results, messageForTool } = toolPositions(messages);
+  return placeTools(results, messageForTool, tools);
+}
+
+function toolPositions(messages: Message[]) {
   const results = new Set<string>();
   const messageForTool = new Map<string, number>();
   messages.forEach((message, index) => {
@@ -15,6 +20,10 @@ export function placeRuntimeTools(messages: Message[], tools: ToolActivity[]) {
     }
     for (const call of message.nestedCalls?.calls ?? []) messageForTool.set(call.id, index);
   });
+  return { results, messageForTool };
+}
+
+function placeTools(results: Set<string>, messageForTool: Map<string, number>, tools: ToolActivity[]) {
   const byId = new Map(tools.map((tool) => [tool.id, tool]));
   const afterMessage = new Map<number, ToolActivity[]>();
   const trailing: ToolActivity[] = [];
@@ -36,6 +45,39 @@ export function placeRuntimeTools(messages: Message[], tools: ToolActivity[]) {
     }
   }
   return { afterMessage, trailing, messageForTool };
+}
+
+/** Text patches cannot change tool placement. Re-index only when tool results change. */
+export class RuntimeToolPlacer {
+  private messages: Message[] = [];
+  private tools: ToolActivity[] = [];
+  private results = new Set<string>();
+  private positions = new Map<string, number>();
+  private placed = placeTools(this.results, new Map(this.positions), this.tools);
+  place(messages: Message[], tools: ToolActivity[]) {
+    const change = messageArrayChanges.get(messages);
+    let from = messages === this.messages ? messages.length : 0;
+    if (change?.previous.deref() === this.messages) from = change.from;
+    else if (messages !== this.messages)
+      while (from < messages.length && messages[from] === this.messages[from]) from++;
+    const reindex =
+      this.messages.slice(from).some((message) => message.role === 'toolResult') ||
+      messages.slice(from).some((message) => message.role === 'toolResult');
+    if (reindex) {
+      const indexed = toolPositions(messages);
+      this.results = indexed.results;
+      this.positions = indexed.messageForTool;
+    }
+    if (
+      reindex ||
+      tools.length !== this.tools.length ||
+      tools.some((tool, index) => tool !== this.tools[index])
+    )
+      this.placed = placeTools(this.results, new Map(this.positions), tools);
+    this.messages = messages;
+    this.tools = tools;
+    return this.placed;
+  }
 }
 
 export function hideRecoveredErrors(messages: Message[]): Message[] {

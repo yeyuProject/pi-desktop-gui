@@ -22,7 +22,7 @@ import path from 'node:path';
 import { promisify } from 'node:util';
 import { classifyModelError } from '../shared/errors';
 import { goalNotificationTitle } from '../shared/goal';
-import { InvalidRequestError, describeSystemError } from '../shared/errors';
+import { InvalidRequestError, describeSystemError, describeOperationError } from '../shared/errors';
 import { isDraftQuote, splitMessageQuotes } from '../shared/message-content';
 import {
   sideChatContext,
@@ -756,6 +756,8 @@ const handlers: Record<
     text(id, 100);
     text(toolId, 1000);
     const agent = service.get(id);
+    const runningTool = agent.runtime.tools.find((tool) => tool.id === toolId && tool.status === 'running');
+    if (runningTool) return runningTool.output;
     const message = (await agent.history(id)).findLast(
       (message) =>
         (message.role === 'toolResult' && message.toolCallId === toolId) ||
@@ -770,10 +772,6 @@ const handlers: Record<
   draftFlushed: (id) => {
     text(id, 100);
     draftWaiters.get(id)?.();
-  },
-  recheckCrash: async (id) => {
-    text(id, 100);
-    await service.get(id).recheckCrash();
   },
   respondAppDialog: (id, response) => {
     text(id, 100);
@@ -1028,7 +1026,7 @@ async function createWindow() {
               type: 'question',
               message: service.requiresStopConfirmation ? 'Pi 仍在执行任务' : '侧边对话正在回答，将被停止',
               detail: service.requiresStopConfirmation
-                ? '停止并退出会将未发送的队列内容恢复到草稿，已写入文件将保留。通过 nohup、后台运行等方式脱离 Pi 的服务可能继续运行，请到终端停止这些服务并释放端口。'
+                ? '停止并退出会将未发送的队列内容恢复到草稿，已修改的文件会保留。另行启动的后台服务可能继续运行，请在终端中单独停止。'
                 : '停止后保留已收到的侧边回答，随后退出应用。',
               buttons: ['留在窗口', '停止并退出'],
               defaultId: 0,
@@ -1140,7 +1138,11 @@ else {
       }
       if ((store.storage.recovery || store.state.appVersion !== app.getVersion()) && store.storage.writable)
         await store.save().catch(() => {});
-      workspace = new Workspace(store.dir);
+      workspace = new Workspace(store.dir, (message) => {
+        if (service)
+          service.runtime.diagnostic = [...service.runtime.diagnostic, message.slice(-4000)].slice(-100);
+        else console.error(message);
+      });
       service = new SessionAgents(
         store,
         workspace,
@@ -1363,7 +1365,7 @@ else {
             -100,
           );
           // eslint-disable-next-line preserve-caught-error -- The unsanitized cause must not cross the IPC boundary.
-          throw new Error(redact(e instanceof Error ? e.message : String(e)));
+          throw new Error(describeOperationError(e));
         } finally {
           if (trackedOperation) finishOperation();
         }
@@ -1453,7 +1455,8 @@ else {
       updates.start();
     })
     .catch((error) => {
-      dialog.showErrorBox('Pi Desktop 无法启动', String(error));
+      console.error(redact(error instanceof Error ? (error.stack ?? error.message) : String(error)));
+      dialog.showErrorBox('Pi Desktop 无法启动', describeOperationError(error));
       app.quit();
     });
   app.on('window-all-closed', () => {

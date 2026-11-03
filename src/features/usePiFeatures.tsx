@@ -211,7 +211,7 @@ export function usePiFeatures({
             >
               <option value="user">个人</option>
               <option value="project" disabled={!projectEnabled}>
-                当前项目{!projectEnabled ? '（请先信任并启用）' : ''}
+                当前项目{!projectEnabled ? '（请先启用项目）' : ''}
               </option>
             </select>
           </label>

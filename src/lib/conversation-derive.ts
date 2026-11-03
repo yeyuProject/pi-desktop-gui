@@ -26,7 +26,7 @@ export class ConversationDeriver {
     const change = messageArrayChanges.get(messages);
     const same =
       messages === this.source ||
-      (change?.previous === this.source
+      (change?.previous.deref() === this.source
         ? change.from >= this.boundary
         : this.source.slice(0, this.boundary).every((message, index) => message === messages[index]));
     const expansion = expanded.join('\0');

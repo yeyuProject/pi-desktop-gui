@@ -21,9 +21,12 @@ export function AutomaticUpdate({
   flush.current = flushDraft;
   const [seconds, setSeconds] = useState<number>();
   const [error, setError] = useState('');
+  const previousBusy = useRef(busy);
   useEffect(() => {
+    const finished = previousBusy.current && !busy;
+    previousBusy.current = busy;
     setSeconds(undefined);
-    if (!checked || busy || update?.state !== 'ready') return;
+    if (!checked || !finished || update?.state !== 'ready') return;
     let cancelled = false;
     let timer: ReturnType<typeof setInterval>;
     void flush

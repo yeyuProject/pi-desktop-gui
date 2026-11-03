@@ -13,7 +13,7 @@ export class TranscriptIndex {
     const change = messageArrayChanges.get(messages);
     const append =
       messages.length >= this.before.length &&
-      (change?.previous === this.before
+      (change?.previous.deref() === this.before
         ? change.from >= Math.max(0, this.before.length - 1)
         : this.before.slice(0, -1).every((message, index) => message === messages[index]));
     if (!append) {

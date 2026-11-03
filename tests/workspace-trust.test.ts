@@ -40,12 +40,12 @@ test('untrusted workspace operations never run a repository-configured clean fil
   const sessionId = randomUUID();
   const marker = path.join(directory, 'approval-filter-ran.txt');
   const changes = await workspace.changes(project);
-  assert.match(changes.error!, /信任/);
+  assert.match(changes.error!, /请先启用项目/);
   assert.deepEqual(changes.files, []);
-  await assert.rejects(git(project, ['status', '--porcelain']), /信任/);
-  await assert.rejects(info(project), /信任/);
-  await assert.rejects(workspace.diff(project, 'tracked.txt', 'all'), /信任/);
-  await assert.rejects(workspace.revert(project, ['tracked.txt']), /信任/);
+  await assert.rejects(git(project, ['status', '--porcelain']), /请先启用项目/);
+  await assert.rejects(info(project), /请先启用项目/);
+  await assert.rejects(workspace.diff(project, 'tracked.txt', 'all'), /请先启用项目/);
+  await assert.rejects(workspace.revert(project, ['tracked.txt']), /请先启用项目/);
   assert.equal(await workspace.capture(project), undefined);
   assert.equal(await workspace.captureCheckpoint(project, sessionId, 1), undefined);
   assert.deepEqual(await workspace.listCheckpoints(project, sessionId), []);

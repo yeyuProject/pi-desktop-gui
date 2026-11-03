@@ -538,12 +538,15 @@ export function useWorkbench() {
     if (e) setEnvironment(e);
   }
   async function saveSettings() {
-    if (!prefs) return;
+    if (!prefs) return false;
+    let saved = false;
     await action(async () => {
       await api.invoke('saveSettings', prefs);
+      saved = true;
       await detect();
       setNotice('设置已保存');
     });
+    return saved;
   }
   function currentModelTarget() {
     // The ref also rejects a captured click before navigation's next React render.
@@ -769,6 +772,7 @@ export function useWorkbench() {
     inspector,
     ownRunning,
     createSession,
+    flushDraft,
     openSettings,
     action,
     attempt,

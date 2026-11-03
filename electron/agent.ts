@@ -1,6 +1,6 @@
 import { AgentOperations } from './agent-operations';
 import { RuntimePublisher } from './runtime-publisher';
-import { describeSystemError } from '../shared/errors';
+import { describeOperationError } from '../shared/errors';
 import { AgentDialogs } from './agent-dialogs';
 import {
   editGoalDraft,
@@ -257,20 +257,6 @@ export class AgentService extends EventEmitter {
   logRendererError(text: string) {
     this.diagnostic('renderer: ' + text);
   }
-  async recheckCrash() {
-    const crash = this.runtime.crash;
-    if (!crash || crash.cleanup === 'confirmed') return;
-    const confirmed = this.rpc ? await this.rpc.treeTerminationConfirmed() : false;
-    if (this.runtime.crash === crash) {
-      this.unsafeExit = !confirmed;
-      if (confirmed && this.runtime.sessionId) {
-        await this.checkpointRecorder.finish(this.runtime.sessionId);
-        this.activeWriteTargets.clear();
-      }
-      crash.cleanup = confirmed ? 'confirmed' : 'unconfirmed';
-      this.publish(true);
-    }
-  }
   resync() {
     this.publisher.resync();
   }
@@ -342,15 +328,7 @@ export class AgentService extends EventEmitter {
   }
   private setError(error?: string) {
     if (error) this.diagnostic(error);
-    const reason = error && describeSystemError(error);
-    this.runtime.error =
-      error === undefined
-        ? undefined
-        : reason
-          ? `${reason}。请检查路径、读写权限、磁盘空间或网络后重试。`
-          : /^(?:Error|TypeError|RangeError|SyntaxError):/.test(error) || !/[\u3400-\u9fff]/.test(error)
-            ? '操作没有完成，详情已记入诊断。'
-            : redact(error);
+    this.runtime.error = error === undefined ? undefined : describeOperationError(error);
     this.runtime.errorKind = undefined;
     this.runtime.errorCount = undefined;
   }
@@ -477,7 +455,7 @@ export class AgentService extends EventEmitter {
         if (record.open) r.goalOpenRequest = (r.goalOpenRequest ?? 0) + 1;
         if (r.goal?.status === 'active' && r.sessionId) {
           const session = this.store.session(r.sessionId);
-          if (session.title === '新会话') {
+          if (session.title === '新会话' || session.title === '新对话') {
             session.title = r.goal.objective.split(/\r?\n/)[0].slice(0, 28);
             void this.rpc?.request('set_session_name', { name: session.title }).catch(() => {});
             this.activity();
@@ -678,8 +656,9 @@ export class AgentService extends EventEmitter {
         this.refreshLiveStats();
         break;
       case 'auto_retry_start':
+        if (record.errorMessage) this.diagnostic(record.errorMessage);
         this.updateRetryNotice(
-          `等待重试 ${record.attempt}/${record.maxAttempts}：${record.errorMessage ?? ''}`,
+          `等待重试 ${record.attempt}/${record.maxAttempts}：${classifyModelError(record.errorMessage ?? '').title}`,
         );
         r.retry = {
           attempt: record.attempt,
@@ -687,7 +666,7 @@ export class AgentService extends EventEmitter {
           delayMs: record.delayMs ?? 0,
           startedAt: Date.now(),
           phase: 'delay',
-          error: record.errorMessage ? redact(record.errorMessage) : undefined,
+          error: record.errorMessage ? classifyModelError(record.errorMessage).title : undefined,
         };
         if (!this.stopRequested) this.status('retrying');
         break;
@@ -1667,7 +1646,7 @@ export class AgentService extends EventEmitter {
         session.draftQuotes = [];
       }
       if (
-        (session.title === '新会话' || session.title === '新会话') &&
+        (session.title === '新会话' || session.title === '新对话') &&
         !/^\/goal(?:\s|$)/.test(text.trim())
       ) {
         session.title = text.trim().split('\n')[0].slice(0, 28) || images[0]?.name || '图片对话';
@@ -2336,7 +2315,9 @@ export class AgentService extends EventEmitter {
     } catch (error) {
       if (rpc && !rpc.closed) this.rpc = rpc;
       this.diagnostic(errorText(error));
-      this.setError('Pi 尚未确认关闭，请结束上次的命令，然后重新检查。');
+      this.setError(
+        'Pi 尚未确认关闭，请先在任务管理器或终端结束上次的命令，再重启 Pi Desktop。仅重启应用不会结束这些命令。',
+      );
       this.publish(true);
       throw error;
     }

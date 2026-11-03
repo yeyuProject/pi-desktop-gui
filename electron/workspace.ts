@@ -11,6 +11,7 @@ import { formatAttachmentSpec, parseAttachmentSpec, type AttachmentInfo } from '
 import { Checkpoints, checkpointRevision, type SnapshotData, type CheckpointRecord } from './checkpoints';
 import type { CheckpointContext, CheckpointPreview } from '../shared/checkpoints';
 import { isWindows, loadLoginShellPath } from './platform';
+import { describeOperationError, redact } from '../shared/errors';
 export { parseAttachmentSpec } from '../shared/attachments';
 const exec = promisify(execFile);
 const MiB = 1024 * 1024;
@@ -52,7 +53,7 @@ export async function safePath(root: string, relative: string, allowRoot = false
 export async function git(project: Project, args: string[], maxBuffer = 4 * MiB) {
   // Even status can execute repository-configured filters. Check trust at the shared
   // process boundary so file search, previews and checkpoints cannot bypass it.
-  if (!project.trusted) throw new Error('请先信任并启用项目，再读取 Git 状态');
+  if (!project.trusted) throw new Error('请先启用项目，再查看文件变更');
   await loadLoginShellPath();
   return (
     await exec('git', ['-c', 'core.fsmonitor=false', '-c', 'core.quotepath=false', ...args], {
@@ -385,6 +386,26 @@ export class Workspace {
     { baseline: SnapshotData; changes: Change[]; paths: string[]; revision: string }
   >();
   private restoreDirectories = new Set<string>();
+  private async cleanupRestoreCopies() {
+    const root = path.resolve(this.dataDir, 'restore-backups');
+    const stat = await fs.lstat(root).catch((error) => {
+      if ((error as NodeJS.ErrnoException).code === 'ENOENT') return undefined;
+      throw error;
+    });
+    if (!stat?.isDirectory() || stat.isSymbolicLink()) return;
+    const entries = await fs.readdir(root, { withFileTypes: true }).catch((error) => {
+      if ((error as NodeJS.ErrnoException).code === 'ENOENT') return [];
+      throw error;
+    });
+    for (const entry of entries) {
+      if (!entry.isDirectory() || !/^[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}$/i.test(entry.name))
+        continue;
+      const directory = path.resolve(root, entry.name);
+      if (path.dirname(directory) !== root || this.restoreDirectories.has(directory)) continue;
+      await fs.rm(directory, { recursive: true, force: true });
+      await new Promise<void>((resolve) => setImmediate(resolve));
+    }
+  }
   async disposeRestoreCopies() {
     const root = path.resolve(this.dataDir, 'restore-backups');
     for (const directory of this.restoreDirectories)
@@ -431,7 +452,10 @@ export class Workspace {
     string,
     { root: string; files: Map<string, { stamp: string; id: string }> }
   >();
-  constructor(private dataDir: string) {
+  constructor(
+    private dataDir: string,
+    private diagnostic: (message: string) => void = console.error,
+  ) {
     this.checkpoints = new Checkpoints(dataDir);
   }
   watchProject(id?: string) {
@@ -546,7 +570,10 @@ export class Workspace {
       throw new Error('本轮检查点超过 200 MiB 的保留上限，请缩小项目范围或减少需保存的文件后重试');
   }
   cleanup() {
-    return this.checkpoints.cleanup(() => this.cleanupBaselines());
+    return this.checkpoints.cleanup(async () => {
+      await this.cleanupRestoreCopies();
+      await this.cleanupBaselines();
+    });
   }
   private async cleanupBaselines() {
     const dir = path.join(this.dataDir, 'baselines');
@@ -659,7 +686,7 @@ export class Workspace {
         baselineAvailable: false,
         omitted: [],
         checkpoints: [],
-        error: '请先信任并启用项目，再读取 Git 状态',
+        error: '请先启用项目，再查看文件变更',
       };
     let meta = metadata;
     try {
@@ -777,7 +804,8 @@ export class Workspace {
         result.files = files;
       }
     } catch (e) {
-      result.error = (e as Error).message;
+      this.diagnostic(redact(e instanceof Error ? (e.stack ?? e.message) : String(e)));
+      result.error = describeOperationError(e);
     }
     return result;
   }
@@ -988,7 +1016,8 @@ export class Workspace {
       result.patch = await computeDiff(relative, result.before, result.after, signal);
     } catch (error) {
       if (signal?.aborted) throw error;
-      result.unavailable = error instanceof Error ? error.message : '无法计算差异，请重试';
+      this.diagnostic(redact(error instanceof Error ? (error.stack ?? error.message) : String(error)));
+      result.unavailable = describeOperationError(error);
     }
     return result;
   }

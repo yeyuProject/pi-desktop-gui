@@ -422,7 +422,8 @@ export type AppEvent =
   | { type: 'runtimeRemoved'; sessionId: string }
   | { type: 'runtimePatch'; patch: RuntimePatch };
 /** Apply a patch; arrays before the change point keep their identity so the UI can skip them. */
-export const messageArrayChanges = new WeakMap<Message[], { previous: Message[]; from: number }>();
+// A hint must not retain an entire chain of earlier streaming snapshots.
+export const messageArrayChanges = new WeakMap<Message[], { previous: WeakRef<Message[]>; from: number }>();
 export function applyRuntimePatch(previous: Runtime, patch: RuntimePatch): Runtime {
   const { messagesFrom, messages, messageCount, toolsFrom, tools, toolCount, removed, messageTail, ...rest } =
     patch;
@@ -459,7 +460,7 @@ export function applyRuntimePatch(previous: Runtime, patch: RuntimePatch): Runti
   for (const key of removed ?? []) delete (next as unknown as Record<string, unknown>)[key];
   if (next.messages !== previous.messages)
     messageArrayChanges.set(next.messages, {
-      previous: previous.messages,
+      previous: new WeakRef(previous.messages),
       from: sameSession ? Math.min(messagesFrom, messageTail?.index ?? Infinity) : 0,
     });
   return next;
@@ -475,7 +476,6 @@ export interface ApiMap {
   logRendererError: { args: [string]; result: void };
   getToolOutput: { args: [string, string]; result: string };
   draftFlushed: { args: [string]; result: void };
-  recheckCrash: { args: [string]; result: void };
   retryStorage: { args: []; result: void };
   rendererReady: { args: []; result: void };
   clearLocalData: { args: []; result: void };

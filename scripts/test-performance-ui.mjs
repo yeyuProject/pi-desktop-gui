@@ -15,7 +15,7 @@ await new Workspace(fixture.dataDir).captureCheckpoint(
   1700000000000,
 );
 const result = {
-  note: 'Synthetic local data, no model calls. Update timings include test dispatch IPC plus renderer commit and next animation frame.',
+  note: 'Synthetic local data, no model calls. Frame timings include dispatch IPC, commit and next frame. rendererScripting is the CDP ScriptDuration delta, excluding dispatch and frame wait; component-count instrumentation is paused during timing. 5000-message cases measure 200 patches after 5 warmups.',
   cases: [],
 };
 const summary = (a) => {
@@ -71,6 +71,7 @@ try {
       inject: () => 1,
       onCommitFiberUnmount() {},
       onCommitFiberRoot(_id, root) {
+        if (globalThis.auditPauseCounters) return;
         const currentFibers = new WeakSet();
         const visit = (fiber) => {
           // A memo bailout can reuse an entire subtree with old flags still attached.
@@ -193,9 +194,17 @@ try {
         globalThis.auditLongTasks.push(...list.getEntries().map((e) => e.duration)),
       );
       globalThis.auditLongTaskObserver.observe({ type: 'longtask' });
+      // Component counters walk every Fiber; exclude that test instrumentation from JS timings.
+      globalThis.auditPauseCounters = true;
     });
     const durations = [];
-    for (let i = 0; i < 35; i++) {
+    const scripting = [];
+    const cdp = await page.context().newCDPSession(page);
+    await cdp.send('Performance.enable');
+    const scriptDuration = async () =>
+      (await cdp.send('Performance.getMetrics')).metrics.find((metric) => metric.name === 'ScriptDuration')
+        .value;
+    for (let i = 0; i < (spec.messages === 5000 ? 205 : 35); i++) {
       const marker = `AUDIT_UPDATE_${i}_END`;
       await page.evaluate((marker) => {
         globalThis.auditMeasurement = new Promise((resolve, reject) => {
@@ -217,6 +226,7 @@ try {
           });
         });
       }, marker);
+      const scriptingBefore = await scriptDuration();
       await app.evaluate(({ BrowserWindow }, marker) => {
         const r = globalThis.auditRuntime;
         r.messages.at(-1).content += '\n' + marker;
@@ -234,9 +244,15 @@ try {
         });
       }, marker);
       const elapsed = await page.evaluate(() => globalThis.auditMeasurement);
-      if (i >= 5) durations.push(elapsed);
+      const scriptingMs = ((await scriptDuration()) - scriptingBefore) * 1000;
+      if (i >= 5) {
+        durations.push(elapsed);
+        scripting.push(scriptingMs);
+      }
     }
-    const cdp = await page.context().newCDPSession(page);
+    await page.evaluate(() => {
+      globalThis.auditPauseCounters = false;
+    });
     await cdp.send('HeapProfiler.collectGarbage');
     const heap = await cdp.send('Runtime.getHeapUsage');
     const dom = await cdp.send('Memory.getDOMCounters');
@@ -254,6 +270,7 @@ try {
     const item = {
       ...spec,
       ...summary(durations),
+      rendererScripting: summary(scripting),
       rendererHeapAfterGcMiB: heap.usedSize / 1024 / 1024,
       dom,
       observation,
@@ -622,7 +639,10 @@ try {
   result.appMetrics = await app.evaluate(({ app }) =>
     app.getAppMetrics().map((p) => ({ type: p.type, cpu: p.cpu, memory: p.memory })),
   );
-  await fs.writeFile('test-results/performance-ui.json', JSON.stringify(result, null, 2));
+  await fs.writeFile(
+    process.env.PI_PERF_RESULT || 'test-results/performance-ui.json',
+    JSON.stringify(result, null, 2),
+  );
   console.log(JSON.stringify({ firstLaunchToInputMs: result.firstLaunchToInputMs, errors }));
 } finally {
   await closeApp(app);

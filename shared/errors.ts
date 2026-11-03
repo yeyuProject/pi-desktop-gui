@@ -31,6 +31,24 @@ export function describeSystemError(error: unknown): string | undefined {
       return undefined;
   }
 }
+/** User-facing operation errors; callers retain the original error in diagnostics. */
+export function describeOperationError(error: unknown): string {
+  const raw = String(error instanceof Error ? error.message : error).replace(
+    /^Error invoking remote method '[^']+': (Error: )?/,
+    '',
+  );
+  if (raw.includes('InvalidRequestError:')) return '内部错误，已记入诊断。请重试，或在诊断中复制详情反馈。';
+  const reason = describeSystemError(error);
+  if (reason) return `${reason}。请检查路径、权限、磁盘空间或网络后重试，详情已记入诊断。`;
+  if (
+    !/[\u3400-\u9fff]/.test(raw) ||
+    /\b(?:Error|TypeError|RangeError|SyntaxError):|\n\s+at\s|Command failed:|SQLSTATE\b|\bSELECT\s.+\bFROM\b/i.test(
+      raw,
+    )
+  )
+    return '操作没有完成，详情已记入诊断。';
+  return redact(raw);
+}
 export type ModelErrorAction = 'providers' | 'billing' | 'regenerate' | 'compact' | 'model' | 'proxy';
 export interface ModelErrorDescription {
   kind: ModelErrorKind;

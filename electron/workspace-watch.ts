@@ -111,7 +111,7 @@ export class WorkspaceWatcher {
         this.debounce = undefined;
       },
       Math.max(
-        this.options.running?.() ? Math.max(0, this.lastNotify + 1000 - Date.now()) : 0,
+        this.options.running?.() ? Math.max(0, this.lastNotify + 2000 - Date.now()) : 0,
         Math.min(300, Math.max(0, this.firstChange + 2000 - Date.now())),
       ),
     );

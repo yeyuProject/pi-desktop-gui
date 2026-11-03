@@ -306,7 +306,7 @@ export function SettingsForm({
       )}
       {dirty && <p className="environment-note">设置尚未保存。请保存或放弃修改后切换页面。</p>}
       {local && (
-        <p className="environment-note">未单独设置的项沿用个人设置；只把本次修改写入 {document?.path}</p>
+        <p className="environment-note">未单独设置的项沿用个人设置；只把本次修改保存到 {document?.path}</p>
       )}
       {groups.map((g) => (
         <section key={g.title}>

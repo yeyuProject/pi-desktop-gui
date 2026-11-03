@@ -23,7 +23,6 @@ export function CrashCard({
   undo: () => Promise<void>;
   diagnostic: () => void;
 }) {
-  const workDisabled = disabled;
   disabled ||= crash.cleanup !== 'confirmed';
   const [prompt, setPrompt] = useState(defaultPrompt);
   const [pending, setPending] = useState(false);
@@ -59,7 +58,7 @@ export function CrashCard({
     }
   };
   return (
-    <section className="crash-card" aria-label="Pi 意外退出">
+    <section className="crash-card" aria-label="Pi 意外退出" tabIndex={-1}>
       <h3>
         <AlertCircle size={18} /> Pi {crash.lastTool ? `在调用 ${crash.lastTool.name} 时` : ''}意外退出了
       </h3>
@@ -83,7 +82,7 @@ export function CrashCard({
         <p className="inline-error" role="alert">
           {crash.cleanup === 'checking'
             ? '正在确认本轮命令是否结束，请稍候。'
-            : '不确定上次的命令是否已结束，所以暂时不能重连和撤销。请在任务管理器或终端结束它们，然后点“重新检查”。'}
+            : '不确定上次的命令是否已结束，暂时不能重连和撤销。请在任务管理器或终端结束这些命令，然后重启 Pi Desktop。仅重启应用不会结束这些命令。'}
         </p>
       )}
       <details>
@@ -113,14 +112,6 @@ export function CrashCard({
         >
           重新连接并继续
         </button>
-        {crash.cleanup === 'unconfirmed' && (
-          <button
-            disabled={pending || workDisabled}
-            onClick={() => void run(() => window.desktop.invoke('recheckCrash', sessionId))}
-          >
-            重新检查
-          </button>
-        )}
         <details>
           <summary>更多</summary>
           <button disabled={pending || disabled} onClick={() => void run(() => recover())}>

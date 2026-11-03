@@ -210,7 +210,7 @@ test('a native watcher error closes its handle without starting another watcher 
   assert.equal(factory.mock.callCount(), 1);
 });
 
-test('continuous file events notify within two seconds and active-task refreshes stay one second apart', async (t) => {
+test('continuous file events notify within two seconds and active-task refreshes stay two seconds apart', async (t) => {
   const f = await fakeWatcher(t, { running: () => true });
   for (let i = 0; i < 20; i++) {
     f.emit(`src/file-${i}.ts`);
@@ -219,7 +219,7 @@ test('continuous file events notify within two seconds and active-task refreshes
   assert.equal(f.events.length, 1);
   assert.equal(f.events[0].changedPaths?.length, 20);
   f.emit('src/next.ts');
-  t.mock.timers.tick(999);
+  t.mock.timers.tick(1999);
   assert.equal(f.events.length, 1);
   t.mock.timers.tick(1);
   assert.equal(f.events.length, 2);

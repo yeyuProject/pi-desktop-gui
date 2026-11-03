@@ -354,9 +354,20 @@ export function Composer(props: ComposerProps) {
       )[0],
     [attachmentSizes, draft],
   );
-  const sendDisabledReason = !sessionEnabled
-    ? '这个项目还没启用，先点上方“启用项目”'
-    : !localGoalCommand && !environment?.supported && !runtime.connected
+  const sessionDisabledReason = selectionChanging
+    ? '正在切换会话，稍等一下'
+    : !storage.writable
+      ? '本地数据暂时无法保存，请先处理上方的存储提示'
+      : !selected
+        ? '请先新建或选择一个会话'
+        : runtime.crash && runtime.crash.cleanup !== 'confirmed'
+          ? '上次的命令可能还在运行，结束它们并重启应用后才能继续'
+          : !sessionEnabled
+            ? '这个项目还没启用，先点上方“启用项目”'
+            : '';
+  const sendDisabledReason =
+    sessionDisabledReason ||
+    (!localGoalCommand && !environment?.supported && !runtime.connected
       ? 'Pi 还没准备好，先完成开始前检查'
       : runtime.status === 'stopping'
         ? '正在停止，稍等一下'
@@ -372,15 +383,20 @@ export function Composer(props: ComposerProps) {
                   (!answering && parameterError) ||
                   (!draft.trim() && !images.length && !snippets.length && !draftQuotes.length
                     ? '先输入内容'
-                    : '');
+                    : ''));
   const explainSend = () => {
-    const target = !sessionEnabled
-      ? document.getElementById('enable-project')
-      : !environment?.supported && !runtime.connected
-        ? document.querySelector<HTMLElement>('.readiness')
-        : parameterError
-          ? document.querySelector<HTMLElement>('.prompt-arguments [aria-invalid="true"]')
-          : input.current;
+    if (selectionChanging) return;
+    const target = !storage.writable
+      ? document.querySelector<HTMLElement>('.storage-banner button')
+      : runtime.crash && runtime.crash.cleanup !== 'confirmed'
+        ? document.querySelector<HTMLElement>('.crash-card')
+        : !sessionEnabled
+          ? document.getElementById('enable-project')
+          : !environment?.supported && !runtime.connected
+            ? document.querySelector<HTMLElement>('.readiness')
+            : parameterError
+              ? document.querySelector<HTMLElement>('.prompt-arguments [aria-invalid="true"]')
+              : input.current;
     target?.scrollIntoView({ block: 'nearest' });
     target?.focus();
   };

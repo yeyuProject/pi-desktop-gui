@@ -404,7 +404,7 @@ export function createAgentHandlers(context: AgentHandlerContext) {
         type: 'warning',
         message: '停止所有会话的任务？',
         detail:
-          '所有正在运行的会话都将停止，未发送的队列内容会恢复到各自草稿。通过 nohup、后台运行等方式脱离 Pi 的服务可能继续运行，请到终端停止这些服务并释放端口。',
+          '所有正在运行的会话都将停止，未发送的队列内容会恢复到各自草稿。另行启动的后台服务可能继续运行，请在终端中单独停止。',
         buttons: ['取消', '停止所有会话'],
         defaultId: 0,
         cancelId: 0,
@@ -421,7 +421,7 @@ export function createAgentHandlers(context: AgentHandlerContext) {
         type: 'warning',
         message: '强制结束当前 Pi 会话进程？',
         detail:
-          '会强制关闭 Pi 及它启动的命令，已写入的文件会保留。放到后台单独运行的服务不会被关闭，需要自己在终端停止。',
+          '会强制关闭 Pi 及它启动的命令，已修改的文件会保留。另行启动的后台服务可能继续运行，请在终端中单独停止。',
         buttons: ['继续等待', '强制结束'],
         defaultId: 0,
         cancelId: 0,

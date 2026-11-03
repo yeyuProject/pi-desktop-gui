@@ -12,6 +12,7 @@ interface ShortcutsOptions {
   inspector: boolean;
   ownRunning: boolean;
   createSession: () => Promise<void>;
+  flushDraft: () => Promise<void>;
   openSettings: (tab?: string) => void;
   action: (fn: () => Promise<unknown>) => Promise<void>;
   attempt: <T>(fn: () => Promise<T>) => Promise<T | undefined>;
@@ -69,7 +70,12 @@ export function useShortcuts(options: ShortcutsOptions) {
       output: () => o.selectTab('output'),
       settings: () => o.openSettings(),
       editDraft: () => {
-        if (o.selected) void o.action(() => window.desktop.invoke('editDraft', o.selected!.id));
+        const id = o.selected?.id;
+        if (id)
+          void o.action(async () => {
+            await o.flushDraft();
+            if (latest.current.selected?.id === id) await window.desktop.invoke('editDraft', id);
+          });
       },
       shortcuts: () => o.setShortcutsOpen((value) => !value),
     };

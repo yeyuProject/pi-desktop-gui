@@ -38,6 +38,29 @@ export function ToolCard({
   const [copyState, setCopyState] = useState<'idle' | 'copied' | 'error'>('idle');
   const [showAll, setShowAll] = useState(false);
   const [completeOutput, setCompleteOutput] = useState<string>();
+  const [outputError, setOutputError] = useState('');
+  const settledOutput = tool.status === 'running' ? undefined : tool.output;
+  useEffect(() => {
+    if (!showAll || !sessionId || tool.status === 'running') return;
+    let active = true;
+    setCompleteOutput(undefined);
+    void api
+      .invoke('getToolOutput', sessionId, tool.id)
+      .then((text) => {
+        if (active) {
+          setCompleteOutput(text);
+        }
+      })
+      .catch(() => {
+        if (active) {
+          setOutputError('无法读取完整输出，请重试。');
+          setShowAll(false);
+        }
+      });
+    return () => {
+      active = false;
+    };
+  }, [showAll, sessionId, tool.id, tool.status, settledOutput]);
   const outputTail = useMemo(
     () => tool.output.split('\n').slice(-300).join('\n').slice(-65536),
     [tool.output],
@@ -218,21 +241,26 @@ export function ToolCard({
                   tool.output.split('\n').length >= 200) && (
                   <button
                     onClick={() => {
-                      if (sessionId)
-                        void api
-                          .invoke('getToolOutput', sessionId, tool.id)
-                          .then((text) => {
-                            setCompleteOutput(text);
-                            setShowAll(true);
-                          })
-                          .catch(() => setCopyState('error'));
-                      else setShowAll(true);
+                      setOutputError('');
+                      setShowAll(true);
                     }}
                   >
                     显示全部
                   </button>
                 )}
-              <AnsiOutput text={(showAll ? (completeOutput ?? tool.output) : outputTail) || '等待输出…'} />
+              {outputError && <span role="alert">{outputError}</span>}
+              {showAll && tool.status === 'running' && (
+                <small role="status">命令仍在运行，当前显示最近输出；结束后会自动读取完整输出。</small>
+              )}
+              <AnsiOutput
+                text={
+                  (showAll
+                    ? tool.status === 'running'
+                      ? tool.output
+                      : (completeOutput ?? tool.output)
+                    : outputTail) || '等待输出…'
+                }
+              />
             </>
           )}
           <div className="tool-actions">

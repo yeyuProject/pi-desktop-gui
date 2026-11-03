@@ -11,7 +11,7 @@ import type { ReactNode } from 'react';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { SessionSearch } from '../lib/session-search';
 import { messagePageSize, messageWindow, windowConversation } from '../lib/message-window';
-import { placeRuntimeTools, turnThinking } from '../lib/conversation-layout';
+import { RuntimeToolPlacer, turnThinking } from '../lib/conversation-layout';
 import { ToolGroupCard } from './conversation/ToolGroupCard';
 import { TurnOutline } from './conversation/TurnOutline';
 import { RetryErrorGroup } from './conversation/RetryErrorGroup';
@@ -143,9 +143,10 @@ export function Conversation(
     };
   }, [approvals, selected?.id]);
   const tools = ownRuntime ? runtime.tools : [];
+  const toolPlacer = useMemo(() => new RuntimeToolPlacer(), [selected?.id]);
   const placedTools = useMemo(
-    () => placeRuntimeTools(messages, tools),
-    [messages, runtime.tools, ownRuntime],
+    () => toolPlacer.place(messages, tools),
+    [toolPlacer, messages, runtime.tools, ownRuntime],
   );
   const modelState = sessionModelState(runtime, selected, state.settings);
   const search = useMemo(() => new SessionSearch(), [selected?.id, findOpen]);

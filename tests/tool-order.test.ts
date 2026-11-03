@@ -1,8 +1,8 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { AgentService } from '../electron/agent';
-import { placeRuntimeTools } from '../src/lib/conversation-layout';
-import type { Message, ToolActivity } from '../shared/types';
+import { placeRuntimeTools, RuntimeToolPlacer } from '../src/lib/conversation-layout';
+import { messageArrayChanges, type Message, type ToolActivity } from '../shared/types';
 
 const activity = (id: string, parentToolCallId?: string): ToolActivity => ({
   id,
@@ -30,6 +30,52 @@ const result: Message = {
     ],
   },
 };
+
+test('incremental tool placement matches a full calculation through stream updates and history replacement', () => {
+  const placer = new RuntimeToolPlacer();
+  let messages: Message[] = [request];
+  let tools = [activity('script'), activity('script/1', 'script')];
+  const check = () => assert.deepEqual(placer.place(messages, tools), placeRuntimeTools(messages, tools));
+  check();
+  messages = [...messages, result, { role: 'assistant', content: 'one' }];
+  check();
+  const previous = messages;
+  messages = [...messages.slice(0, -1), { role: 'assistant', content: 'two' }];
+  messageArrayChanges.set(messages, { previous: new WeakRef(previous), from: 2 });
+  check();
+  tools = tools.map((tool) => ({ ...tool, status: 'running', output: 'latest' }));
+  check();
+  messages = messages.slice(0, 1);
+  check();
+  messages = [
+    { ...result, nestedCalls: { complete: true, calls: [{ id: 'other', name: 'bash', status: 'ok' }] } },
+  ];
+  check();
+  tools = [activity('other')];
+  check();
+  messages = [];
+  tools = [];
+  check();
+});
+
+test('a hinted text patch does not read the completed 5000-message prefix', () => {
+  const placer = new RuntimeToolPlacer();
+  let reads = 0;
+  const prefix = Array.from({ length: 5000 }, (_, index) => ({
+    get role() {
+      reads++;
+      return index % 2 ? ('assistant' as const) : ('user' as const);
+    },
+    content: 'history',
+  }));
+  const previous: Message[] = [...prefix, { role: 'assistant', content: 'one' }];
+  placer.place(previous, []);
+  reads = 0;
+  const next: Message[] = [...prefix, { role: 'assistant', content: 'two' }];
+  messageArrayChanges.set(next, { previous: new WeakRef(previous), from: 5000 });
+  placer.place(next, []);
+  assert.equal(reads, 0);
+});
 
 test('parallel nested commands stay with their script before the final answer and later turns', () => {
   const messages: Message[] = [

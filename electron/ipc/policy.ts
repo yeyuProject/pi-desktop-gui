@@ -19,7 +19,6 @@ export const IPC_POLICIES: Record<keyof ApiMap, IpcPolicy> = {
   logRendererError: { ...read, duringDialog: true, duringUpdate: true },
   getToolOutput: { ...read, duringDialog: true },
   draftFlushed: { ...read, duringDialog: true, duringUpdate: true },
-  recheckCrash: engineRead,
   retryStorage: read,
   rendererReady: read,
   clearLocalData: engineRead,

@@ -766,6 +766,40 @@ test('undoing a restore preserves renamed, deleted and newly created files', asy
   assert.deepEqual(await fs.readdir(path.join(workspace['dataDir'], 'restore-backups')), []);
 });
 
+test('idle cleanup removes restore copies from an ended app and preserves this app’s live copy', async (t) => {
+  const { project, workspace, sessionId, write, data, directory } = await fixture(t);
+  await write('a.txt', 'before');
+  const checkpoint = (await workspace.captureCheckpoint(project, sessionId, 1))!;
+  await write('a.txt', 'after');
+  await workspace.revert(project, ['a.txt'], undefined, { sessionId, checkpointId: checkpoint.id });
+  const root = path.join(data, 'restore-backups');
+  const live = await fs.readdir(root);
+  assert.equal(live.length, 1);
+  await workspace.cleanup();
+  assert.deepEqual(await fs.readdir(root), live, 'this run can still undo its restore');
+  await workspace.undoLastRestore(project, (file) => fs.rm(file));
+  assert.equal(await fs.readFile(path.join(directory, 'a.txt'), 'utf8'), 'after');
+  // A fresh Workspace has no in-memory undo referring to a previous run’s files.
+  await new Workspace(data).cleanup();
+  assert.deepEqual(await fs.readdir(root), []);
+});
+
+test('restore-copy cleanup never follows a redirected backup directory', async (t) => {
+  const { workspace, data } = await fixture(t);
+  const target = path.join(data, 'retained-files', randomUUID());
+  await fs.mkdir(target, { recursive: true });
+  const file = path.join(target, 'keep.txt');
+  await fs.writeFile(file, 'keep');
+  const link = path.join(data, 'restore-backups');
+  await fs.symlink(path.dirname(target), link, 'junction');
+  try {
+    await workspace.cleanup();
+    assert.equal(await fs.readFile(file, 'utf8'), 'keep');
+  } finally {
+    await fs.unlink(link);
+  }
+});
+
 test('switching away and back between observations still invalidates checkpoints', async (t) => {
   const { project, workspace, sessionId, write, git, data } = await fixture(t);
   await write('a.txt', 'original');

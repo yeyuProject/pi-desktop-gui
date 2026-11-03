@@ -86,6 +86,14 @@ function interrupted(f: ReturnType<typeof fixture>) {
   f.store.session('one').draft = 'unsent recovered draft';
 }
 
+test('retry banners explain a provider failure and preserve raw details only in diagnostics', (t) => {
+  const f = fixture(t);
+  f.retry();
+  assert.equal(f.service.runtime.retry?.error, '无法连接模型服务');
+  assert.doesNotMatch(f.service.runtime.notices.join('\n'), /Connection error/);
+  assert.ok(f.service.runtime.diagnostic.some((line) => line.includes('Connection error.')));
+});
+
 test('a new run clears failed retry notices before its first published starting state', async (t) => {
   const f = fixture(t);
   f.retry();

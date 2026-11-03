@@ -26,6 +26,20 @@ test('system error messages explain the cause without exposing errno or English 
   assert.match(readableError(new Error('InvalidRequestError: malformed')), /内部错误/);
 });
 
+test('Chinese context cannot make a raw stack or SQL error user-facing', () => {
+  for (const detail of [
+    '保存失败：TypeError: cannot read properties of undefined',
+    '更新出错\n    at run (main.js:100)',
+    '查询失败：SELECT secret FROM config',
+    '操作失败：Command failed: git status',
+  ])
+    assert.equal(readableError(new Error(detail)), '操作没有完成，详情已记入诊断。');
+  assert.equal(
+    readableError(new Error('文件在确认后又被修改，请重新查看清单。')),
+    '文件在确认后又被修改，请重新查看清单。',
+  );
+});
+
 // Synthetic messages in provider/SDK formats; no credentials or user requests are recorded here.
 const samples: [ModelErrorKind, string][] = [
   [

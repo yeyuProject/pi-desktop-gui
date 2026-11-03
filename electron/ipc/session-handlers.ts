@@ -131,7 +131,7 @@ export function createSessionHandlers(context: SessionHandlerContext) {
         type: 'question',
         message: `启用项目 ${p.name}`,
         detail: `Pi 将使用当前用户权限读取、修改文件、执行命令，并加载项目配置、Skills 和扩展。项目扩展可以直接执行代码，请只启用可信项目。\n\n${p.path}`,
-        buttons: ['取消', '信任并启用'],
+        buttons: ['取消', '启用项目'],
         defaultId: 0,
         cancelId: 0,
       });

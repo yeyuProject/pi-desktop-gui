@@ -693,8 +693,8 @@ export function SettingsModal(
               className="primary"
               disabled={pending && !running}
               onClick={async () => {
-                await saveSettings();
-                setSaved(true);
+                setSaved(false);
+                setSaved(await saveSettings());
               }}
             >
               {pending ? <LoaderCircle size={14} className="spin" /> : <Check size={14} />}保存设置

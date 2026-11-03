@@ -8,8 +8,6 @@ import { Toasts as ToastsView } from './components/Toasts';
 import { WorkbenchDialogs as WorkbenchDialogsView } from './components/WorkbenchDialogs';
 import { Composer as ComposerView } from './components/Composer';
 import { StorageBanner } from './components/StorageBanner';
-import { AutomaticUpdate } from './components/AutomaticUpdate';
-import { CrashCard } from './components/CrashCard';
 import { Suspense, memo, useEffect, useMemo, useState } from 'react';
 import { UpdateBadge } from './components/Updates';
 import { ResizeHandle } from './components/ResizeHandle';
@@ -20,6 +18,8 @@ import {
   CheckpointDialog,
   SideChatPanel,
   UpdateDialog,
+  CrashCard,
+  AutomaticUpdate,
 } from './lib/lazy-dialogs';
 const Sidebar = memo(SidebarView);
 const WorkspaceHeader = memo(WorkspaceHeaderView);
@@ -62,23 +62,25 @@ export default function App() {
   const recovery = useMemo(
     () =>
       model.ownRuntime && model.runtime.crash && model.selected ? (
-        <CrashCard
-          key={model.runtime.crash.at}
-          crash={model.runtime.crash}
-          projectId={model.project?.id}
-          sessionId={model.selected.id}
-          disabled={model.pending || model.running || !model.storage.writable}
-          recover={(prompt) =>
-            model.action(() => window.desktop.invoke('recover', model.selected!.id, prompt))
-          }
-          inspect={() => {
-            model.setChangeMode('run');
-            model.setTab('changes');
-            model.setInspector(true);
-          }}
-          undo={() => model.revert(null)}
-          diagnostic={() => model.openSettings('diagnostic')}
-        />
+        <Suspense fallback={<p role="status">正在读取中断的任务…</p>}>
+          <CrashCard
+            key={model.runtime.crash.at}
+            crash={model.runtime.crash}
+            projectId={model.project?.id}
+            sessionId={model.selected.id}
+            disabled={model.pending || model.running || !model.storage.writable}
+            recover={(prompt) =>
+              model.action(() => window.desktop.invoke('recover', model.selected!.id, prompt))
+            }
+            inspect={() => {
+              model.setChangeMode('run');
+              model.setTab('changes');
+              model.setInspector(true);
+            }}
+            undo={() => model.revert(null)}
+            diagnostic={() => model.openSettings('diagnostic')}
+          />
+        </Suspense>
       ) : null,
     [
       model.ownRuntime,
@@ -143,12 +145,14 @@ export default function App() {
   };
   return (
     <div className="app-shell">
-      <AutomaticUpdate
-        updates={model.updates}
-        busy={updateBusy}
-        install={installUpdate}
-        flushDraft={model.flushDraft}
-      />
+      <Suspense fallback={null}>
+        <AutomaticUpdate
+          updates={model.updates}
+          busy={updateBusy}
+          install={installUpdate}
+          flushDraft={model.flushDraft}
+        />
+      </Suspense>
       <Sidebar
         {...pick(model, [
           'activities',

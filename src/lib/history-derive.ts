@@ -25,7 +25,7 @@ export class HistoryDeriver {
     const change = messageArrayChanges.get(messages);
     const common =
       messages.length >= this.source.length &&
-      (change?.previous === this.source
+      (change?.previous.deref() === this.source
         ? change.from >= this.boundary
         : this.source.slice(0, -1).every((message, index) => message === messages[index]));
     let boundary = this.boundary;
@@ -38,7 +38,7 @@ export class HistoryDeriver {
       if (messages[index].role === 'user') boundary = index;
     if (!common || boundary !== this.boundary) this.prefix = deriveHistory(messages.slice(0, boundary));
     const tailOnly =
-      change?.previous === this.source &&
+      change?.previous.deref() === this.source &&
       change.from >= this.source.length - 1 &&
       messages.length === this.source.length &&
       messages.at(-1)?.stopReason === this.source.at(-1)?.stopReason &&
@@ -47,7 +47,7 @@ export class HistoryDeriver {
     this.boundary = boundary;
     const result = this.prefix.concat(deriveHistory(messages, boundary));
     messageArrayChanges.set(result, {
-      previous: this.result,
+      previous: new WeakRef(this.result),
       from:
         tailOnly && result.length === this.result.length
           ? Math.max(0, result.length - 1)

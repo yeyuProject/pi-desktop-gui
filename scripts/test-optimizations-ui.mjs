@@ -49,6 +49,8 @@ try {
     const original = ipcMain._invokeHandlers.get('desktop:invoke');
     globalThis.optimizationRuntime = runtime;
     globalThis.optimizationCalls = [];
+    globalThis.optimizationCompleteOutput = 'BEGIN_FULL\n' + '\u001b[31mred\u001b[0m\n'.repeat(10000);
+    globalThis.optimizationFailSettings = false;
     ipcMain.removeHandler('desktop:invoke');
     ipcMain.handle('desktop:invoke', async (event, method, args) => {
       globalThis.optimizationCalls.push({
@@ -59,13 +61,15 @@ try {
         return globalThis.optimizationRuntime.messages;
       if (method === 'cleanupEmptySessions' || method === 'installUpdate' || method === 'revokeApproval')
         return method === 'cleanupEmptySessions' ? null : undefined;
-      if (method === 'getToolOutput') return 'BEGIN_FULL\n' + '\u001b[31mred\u001b[0m\n'.repeat(10000);
-      if (method === 'recheckCrash') {
-        globalThis.optimizationRuntime.crash.cleanup = 'confirmed';
-        BrowserWindow.getAllWindows()[0].webContents.send('desktop:event', {
-          type: 'runtime',
-          runtime: globalThis.optimizationRuntime,
-        });
+      if (method === 'getToolOutput') {
+        const tool = globalThis.optimizationRuntime.tools.find((tool) => tool.id === args[1]);
+        return tool?.status === 'running' ? tool.output : globalThis.optimizationCompleteOutput;
+      }
+      if (method === 'saveSettings' && globalThis.optimizationFailSettings)
+        throw new Error('EACCES: settings write denied');
+      if (method === 'editDraft') {
+        const snapshot = await original(event, 'bootstrap', []);
+        globalThis.optimizationEditedDraft = snapshot.state.sessions.find((s) => s.id === args[0])?.draft;
         return;
       }
       if (method === 'respond') {
@@ -137,6 +141,18 @@ try {
   await page.reload();
   await input.waitFor();
   result.checks.push('发送原因、项目焦点和 Node 入口');
+  await app.evaluate(({ BrowserWindow }, storage) => {
+    BrowserWindow.getAllWindows()[0].webContents.send('desktop:event', {
+      type: 'storage',
+      storage: { ...storage, writable: false, problem: '测试目录暂时不能保存' },
+    });
+  }, bootstrap.storage);
+  await expect(page.locator('.send-button')).toHaveAttribute('title', /本地数据暂时无法保存/);
+  await page.locator('.send-wrapper').click();
+  await expect(page.getByRole('button', { name: '打开数据目录', exact: true })).toBeFocused();
+  await app.evaluate(({ BrowserWindow }, storage) => {
+    BrowserWindow.getAllWindows()[0].webContents.send('desktop:event', { type: 'storage', storage });
+  }, bootstrap.storage);
 
   await inject({
     connected: true,
@@ -213,11 +229,24 @@ try {
     },
   });
   await expect(page.getByRole('button', { name: '重新连接并继续', exact: true })).toBeDisabled();
+  await expect(page.locator('.send-button')).toHaveAttribute(
+    'title',
+    /上次的命令可能还在运行，结束它们并重启应用后才能继续/,
+  );
+  await page.locator('.send-wrapper').click();
+  await expect(page.locator('.crash-card')).toBeFocused();
   await expect(page.getByText(/退出码：1/)).not.toBeVisible();
-  await page.getByRole('button', { name: '重新检查', exact: true }).click();
-  await expect(page.getByRole('button', { name: '重新连接并继续', exact: true })).toBeEnabled();
+  await expect(page.getByRole('button', { name: '重新检查', exact: true })).toHaveCount(0);
+  await expect(page.locator('.crash-card')).toContainText('仅重启应用不会结束这些命令');
+  await page.locator('.crash-card .button-row > details > summary').click();
+  await expect(
+    page.locator('.crash-card').getByRole('button', { name: '重新连接', exact: true }),
+  ).toBeDisabled();
+  await expect(
+    page.locator('.crash-card').getByRole('button', { name: '撤销本轮修改', exact: true }),
+  ).toBeDisabled();
   await inject({ crash: undefined, connected: true, status: 'idle' });
-  result.checks.push('崩溃详情折叠和重新检查后恢复操作');
+  result.checks.push('残留命令未确认时仍禁止重连和撤销，无重新检查入口；提示手动结束后重启、发送原因及焦点');
   const full = 'BEGIN_FULL\n' + '\u001b[31mred\u001b[0m\n'.repeat(10000);
   await inject({
     messages: [
@@ -292,13 +321,26 @@ try {
         id: 'huge-log',
         name: 'bash',
         args: { command: 'echo logs' },
-        status: 'done',
+        status: 'running',
         startedAt: 2,
         output: full.slice(-65536),
       },
     ],
   });
   await page.getByRole('button', { name: '显示全部', exact: true }).click();
+  await expect(page.locator('.tool-body')).toContainText('命令仍在运行');
+  await app.evaluate(() => {
+    globalThis.optimizationCompleteOutput += '\nAFTER_SHOW_ALL';
+  });
+  await inject({ tools: [{ ...runtime.tools[0], output: runtime.tools[0].output + '\nAFTER_SHOW_ALL' }] });
+  await expect(page.locator('.tool-body')).toContainText('AFTER_SHOW_ALL');
+  await app.evaluate(() => {
+    globalThis.optimizationCompleteOutput += '\nFINAL_OUTPUT';
+  });
+  await inject({
+    tools: [{ ...runtime.tools[0], status: 'done', output: runtime.tools[0].output + '\nFINAL_OUTPUT' }],
+  });
+  await expect(page.locator('.tool-body')).toContainText('FINAL_OUTPUT');
   await expect(page.locator('.tool-body')).toContainText('BEGIN_FULL');
   await page.getByRole('button', { name: '复制输出', exact: true }).click();
   assert.ok(
@@ -335,7 +377,14 @@ try {
   await page.getByRole('button', { name: '取消重启', exact: true }).click();
   await expect(automatic).not.toBeChecked();
   await automatic.check();
-  await expect(page.locator('.automatic-update')).toBeVisible();
+  await expect(page.locator('.automatic-update')).not.toBeVisible();
+  await page.waitForTimeout(5200);
+  assert.equal(
+    await app.evaluate(
+      () => globalThis.optimizationCalls.filter((call) => call.method === 'installUpdate').length,
+    ),
+    0,
+  );
   await inject({ status: 'running' });
   await expect(page.locator('.automatic-update')).not.toBeVisible();
   await inject({ status: 'idle' });
@@ -363,6 +412,17 @@ try {
   await expect(page.locator('.settings-content')).toContainText('未保存');
   await page.getByRole('button', { name: '保存设置', exact: true }).click();
   await expect(page.locator('.settings-footer-note')).toContainText('已保存');
+  await expect(page.locator('.settings-footer-note')).not.toContainText('已保存', { timeout: 4000 });
+  await app.evaluate(() => {
+    globalThis.optimizationFailSettings = true;
+  });
+  await page.getByRole('button', { name: '保存设置', exact: true }).click();
+  await expect(page.locator('.modal .error-banner')).toBeVisible();
+  await expect(page.locator('.settings-footer-note')).not.toContainText('已保存');
+  await app.evaluate(() => {
+    globalThis.optimizationFailSettings = false;
+  });
+  await page.getByRole('button', { name: '关闭设置错误', exact: true }).click();
   await page.getByRole('button', { name: '诊断与数据', exact: true }).click();
   await page.getByRole('button', { name: '清理空会话', exact: true }).click();
   await expect(page.locator('.toast').filter({ hasText: '未清理会话' })).toHaveCount(0);
@@ -416,6 +476,12 @@ try {
   await page.locator(`[data-session-id="${fixture.sessionId}"] > button`).first().click();
   await expect(input).toHaveValue('a'.repeat(50) + 'before-switchexternal-switch');
   result.checks.push('原生菜单新建会话前保存尚未发出的首条草稿');
+  await input.pressSequentially('external-editor-latest');
+  await page.keyboard.press(process.platform === 'darwin' ? 'Meta+g' : 'Control+g');
+  await expect
+    .poll(() => app.evaluate(() => globalThis.optimizationEditedDraft))
+    .toMatch(/external-editor-latest$/);
+  result.checks.push('外部编辑快捷键先保存尚未满 200 ms 的输入');
   await fs.mkdir('test-results', { recursive: true });
   for (const uiStyle of ['classic', 'codex', 'claude']) {
     await page.evaluate(
