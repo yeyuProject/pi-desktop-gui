@@ -105,7 +105,7 @@ try {
   // replacing the fixture directory with a file for the shell safety check.
   const stopping = page.evaluate((id) => window.desktop.invoke('forceStop', id), session.id);
   const stopDialog = page.getByRole('dialog', { name: '强制结束当前 Pi 会话进程？', exact: true });
-  await expect(stopDialog).toContainText('放到后台单独运行的服务不会被关闭');
+  await expect(stopDialog).toContainText('另行启动的后台服务可能继续运行，请在终端中单独停止');
   await stopDialog.getByRole('button', { name: '强制结束', exact: true }).click();
   assert.equal(await stopping, true);
 
