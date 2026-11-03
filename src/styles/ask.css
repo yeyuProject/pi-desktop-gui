@@ -9,9 +9,6 @@
   background: var(--surface);
   overflow: hidden;
 }
-.conversation:has(.ask-panel) > .new-content {
-  bottom: calc(var(--ask-composer-height) + 12px);
-}
 .ask-header,
 .ask-footer {
   display: flex;

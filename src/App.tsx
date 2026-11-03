@@ -414,7 +414,7 @@ export default function App() {
           />
         </div>
       </main>
-      <Toasts {...pick(model, ['notice', 'noticeAction', 'setDismissed', 'toasts'])} />
+      <Toasts {...pick(model, ['notice', 'noticeAction', 'setDismissed', 'setToastsPaused', 'toasts'])} />
       {(model.searchOpen ||
         model.shortcutsOpen ||
         model.rename ||

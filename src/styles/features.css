@@ -32,7 +32,7 @@
 }
 .toast {
   border-radius: 10px;
-  animation: rise 160ms ease-out;
+  animation: rise var(--motion-base) var(--ease-out);
 }
 .search-results > button:hover,
 .search-results > button:focus-visible {
@@ -216,7 +216,7 @@
 }
 .context-menu {
   z-index: 25;
-  animation: rise 120ms ease-out;
+  animation: rise var(--motion-fast) var(--ease-out);
 }
 .context-menu > button {
   min-height: 30px;
@@ -344,7 +344,7 @@
   font-size: calc(11px * var(--font-scale));
   font-variant-numeric: tabular-nums;
   opacity: 0;
-  transition: opacity 120ms ease;
+  transition: opacity var(--motion-fast) ease;
   min-width: 0;
   overflow: hidden;
   white-space: nowrap;

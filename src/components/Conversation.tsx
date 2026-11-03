@@ -8,7 +8,7 @@ const api = window.desktop;
 import type { Workbench } from '../hooks/useWorkbench';
 import { messageText, type AppState, type ToolActivity } from '../../shared/types';
 import type { ReactNode } from 'react';
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { SessionSearch } from '../lib/session-search';
 import { messagePageSize, messageWindow, windowConversation } from '../lib/message-window';
 import { RuntimeToolPlacer, turnThinking } from '../lib/conversation-layout';
@@ -22,6 +22,8 @@ import { SelectionMenu } from './conversation/SelectionMenu';
 import { quoteMessageIndex, type DraftQuote } from '../../shared/message-content';
 import { APPROVAL_ALWAYS, grantLabel } from '../../shared/approval';
 import { ConversationDeriver } from '../lib/conversation-derive';
+import { isFollowing, keyIntent, nextReleased, wheelIntent } from '../lib/follow-scroll';
+import { smoothBehavior } from '../lib/motion';
 
 function turnScrollTop(container: HTMLElement, target: HTMLElement) {
   const bounds = (target.querySelector('.message.user') ?? target).getBoundingClientRect();
@@ -116,6 +118,24 @@ export function Conversation(
   const findInput = useRef<HTMLInputElement>(null);
   const threadContent = useRef<HTMLDivElement>(null);
   const threadViewport = useRef({ width: 0, height: 0 });
+  const followReleased = useRef(false);
+  // The last position the reader actually saw, saved when they switch away by keyboard
+  // as well as by moving the pointer out (PRD: 切换会话时保存滚动位置).
+  const lastView = useRef<{ id: string; top: number } | undefined>(undefined);
+  const latestExpanded = useRef(expanded);
+  latestExpanded.current = expanded;
+  useLayoutEffect(() => {
+    const id = selected?.id;
+    const writable = storage.writable;
+    return () => {
+      // Layout cleanup runs before the next session's scroll events can replace `lastView`.
+      const view = lastView.current;
+      lastView.current = undefined;
+      followReleased.current = false;
+      if (id && writable && view?.id === id)
+        void attempt(() => api.invoke('saveView', id, view.top, latestExpanded.current));
+    };
+  }, [selected?.id]);
   const [projectApproval, setProjectApproval] = useState<'auto' | 'confirm'>('auto');
   const [approvalVisible, setApprovalVisible] = useState(false);
   const focusApproval = () => {
@@ -385,6 +405,7 @@ export function Conversation(
     setQuoteTarget(undefined);
     setJumpIndex(null);
     autoScroll.current = true;
+    followReleased.current = false;
     requestAnimationFrame(() => thread.current?.scrollTo({ top: thread.current.scrollHeight }));
     setNewContent(false);
   };
@@ -450,11 +471,11 @@ export function Conversation(
       if (jumpIndex.turn) {
         const top = turnScrollTop(container, target);
         if (Math.abs(container.scrollTop - top) <= 2) requestedTurn.current = undefined;
-        container.scrollTo({ top, behavior: 'smooth' });
+        container.scrollTo({ top, behavior: smoothBehavior() });
       } else
         target.scrollIntoView({
           block: activeMatch ? 'center' : 'start',
-          behavior: activeMatch ? 'instant' : 'smooth',
+          behavior: activeMatch ? 'instant' : smoothBehavior(),
         });
     });
     return () => cancelAnimationFrame(timer);
@@ -691,8 +712,9 @@ export function Conversation(
         onScrollEnd={() => {
           requestedTurn.current = undefined;
         }}
-        onWheel={() => {
+        onWheel={(event) => {
           requestedTurn.current = undefined;
+          followReleased.current = nextReleased(followReleased.current, wheelIntent(event));
         }}
         onTouchStart={() => {
           requestedTurn.current = undefined;
@@ -706,18 +728,19 @@ export function Conversation(
             ['ArrowUp', 'ArrowDown', 'PageUp', 'PageDown', 'Home', 'End', ' '].includes(event.key)
           )
             requestedTurn.current = undefined;
+          followReleased.current = nextReleased(followReleased.current, keyIntent(event));
         }}
         onScroll={() => {
           const el = thread.current;
           if (!el) return;
-          const atBottom =
-            endIndex === messages.length && el.scrollHeight - el.scrollTop - el.clientHeight < 24;
+          const atBottom = endIndex === messages.length && isFollowing(el, followReleased.current);
           // Resizing can emit a scroll event before the ResizeObserver catches up.
           const sameViewport =
             el.clientWidth === threadViewport.current.width &&
             el.clientHeight === threadViewport.current.height;
           if (atBottom || sameViewport) autoScroll.current = atBottom;
           setNewContent(!autoScroll.current);
+          if (selected) lastView.current = { id: selected.id, top: el.scrollTop };
           const top = el.getBoundingClientRect().top;
           if (requestedTurn.current !== undefined) {
             const target = el.querySelector<HTMLElement>(`[data-turn="${requestedTurn.current}"]`);

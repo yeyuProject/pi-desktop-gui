@@ -146,6 +146,7 @@
 .session-row > .icon-button {
   align-self: center;
   opacity: 0;
+  transition: opacity var(--motion-fast) ease;
   width: 32px;
   margin-right: 2px;
 }

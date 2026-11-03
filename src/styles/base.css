@@ -36,6 +36,10 @@
   --radius-control: 8px;
   --radius-panel: 14px;
   --content-width: 760px;
+  /* Motion: popovers and hover feedback use fast, dialogs and toasts use base. */
+  --motion-fast: 120ms;
+  --motion-base: 160ms;
+  --ease-out: cubic-bezier(0.2, 0, 0, 1);
   color-scheme: light;
 }
 .feature-content {
@@ -369,9 +373,9 @@ button {
   cursor: pointer;
   line-height: 1.4;
   transition:
-    background 140ms ease,
-    border-color 140ms ease,
-    color 140ms ease;
+    background var(--motion-fast) ease,
+    border-color var(--motion-fast) ease,
+    color var(--motion-fast) ease;
 }
 button:hover {
   background: var(--hover);

@@ -54,21 +54,14 @@ export function AskPanel({
     }
   };
   useLayoutEffect(() => {
+    // The 「回到最新」 offset above the composer is measured by Composer itself.
     const container = root.current?.closest<HTMLElement>('.conversation');
-    const composer = root.current?.closest<HTMLElement>('.composer-wrap');
-    if (!container || !composer) return;
-    const measure = () => {
-      setHeight(container.getBoundingClientRect().height / 2);
-      container.style.setProperty('--ask-composer-height', `${composer.getBoundingClientRect().height}px`);
-    };
+    if (!container) return;
+    const measure = () => setHeight(container.getBoundingClientRect().height / 2);
     measure();
     const observer = new ResizeObserver(measure);
     observer.observe(container);
-    observer.observe(composer);
-    return () => {
-      observer.disconnect();
-      container.style.removeProperty('--ask-composer-height');
-    };
+    return () => observer.disconnect();
   }, []);
   useEffect(() => {
     const active = document.activeElement;

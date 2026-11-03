@@ -1,7 +1,7 @@
 .sidebar .project-row > .project-chevron {
   display: block;
   flex: 0 0 auto;
-  transition: transform 120ms ease;
+  transition: transform var(--motion-fast) ease;
 }
 .sidebar .project-row[aria-expanded='false'] > .project-chevron,
 .older-sessions-toggle[aria-expanded='false'] > svg {

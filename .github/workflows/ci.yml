@@ -110,6 +110,9 @@ jobs:
       - name: Test user bubble width, action footer and keyboard navigation
         if: matrix.os == 'ubuntu-latest'
         run: xvfb-run -a -s "-screen 0 1920x1080x24" npm run test:user-bubble-ui
+      - name: Test motion, auto-follow, toasts and list hover
+        if: matrix.os == 'ubuntu-latest'
+        run: xvfb-run -a -s "-screen 0 1920x1080x24" npm run test:motion-ui
       - name: Test native Linux appearance and confirmation lifecycle
         if: matrix.os == 'ubuntu-latest'
         env:

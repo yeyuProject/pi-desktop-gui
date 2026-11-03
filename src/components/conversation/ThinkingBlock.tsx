@@ -2,6 +2,7 @@ import { useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { ArrowDown } from 'lucide-react';
 import type { SessionMatch } from '../../lib/session-search';
 import { SearchHighlight } from './SearchHighlight';
+import { isFollowing, nextReleased, wheelIntent } from '../../lib/follow-scroll';
 
 export function ThinkingBlock({
   text,
@@ -33,10 +34,12 @@ export function ThinkingBlock({
   const output = useRef<HTMLPreElement>(null);
   const following = useRef(streaming && !match);
   const viewport = useRef({ width: 0, height: 0 });
+  const released = useRef(false);
   const [paused, setPaused] = useState(false);
   useEffect(() => {
     if (streaming && !match) {
       following.current = true;
+      released.current = false;
       setPaused(false);
     }
   }, [streaming]);
@@ -67,10 +70,13 @@ export function ThinkingBlock({
       {open && (
         <pre
           ref={output}
+          onWheel={(event) => {
+            released.current = nextReleased(released.current, wheelIntent(event));
+          }}
           onScroll={(event) => {
             const element = event.currentTarget;
             if (!element.clientHeight) return;
-            const atBottom = element.scrollHeight - element.scrollTop - element.clientHeight < 24;
+            const atBottom = isFollowing(element, released.current);
             const sameViewport =
               element.clientWidth === viewport.current.width &&
               element.clientHeight === viewport.current.height;
@@ -87,6 +93,7 @@ export function ThinkingBlock({
           title="滚到底部并继续跟随思考输出"
           onClick={() => {
             following.current = true;
+            released.current = false;
             if (output.current) output.current.scrollTop = output.current.scrollHeight;
             setPaused(false);
           }}
