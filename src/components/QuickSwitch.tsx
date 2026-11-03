@@ -185,7 +185,8 @@ export function QuickSwitch({
                 key={r.key}
                 role="option"
                 aria-selected={i === index}
-                onMouseEnter={() => setIndex(i)}
+                // Not mouseenter: keyboard scrolling must not hand the selection to a resting pointer.
+                onMouseMove={() => setIndex(i)}
                 onClick={r.run}
               >
                 {r.icon}

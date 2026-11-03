@@ -260,12 +260,16 @@ export function useWorkbench() {
     setExpanded(selected.expandedTools ?? []);
   }, [selected?.id]);
 
+  // Hovering or focusing the toast stack holds every auto-dismiss timer; leaving restarts them.
+  const [toastsPaused, setToastsPaused] = useState(false);
+  const noticeHasAction = !!notice && noticeAction?.text === notice;
   useEffect(() => {
-    if (notice) {
-      const timer = setTimeout(() => setNotice(''), 3500);
+    if (notice && !toastsPaused) {
+      // A notice with an action (撤销) needs time to reach the button, not only to read.
+      const timer = setTimeout(() => setNotice(''), noticeHasAction ? 6000 : 3500);
       return () => clearTimeout(timer);
     }
-  }, [notice]);
+  }, [notice, noticeHasAction, toastsPaused]);
   useEffect(() => {
     if (!menuId) return;
     const outside = (e: MouseEvent) => {
@@ -283,13 +287,14 @@ export function useWorkbench() {
     [runtime.notifications, seenNotification, dismissed],
   );
   useEffect(() => {
+    if (toastsPaused) return;
     const timers = toasts
       .filter((n) => n.level !== 'error')
       .map((n) =>
         setTimeout(() => setDismissed((v) => [...v, n.id].slice(-20)), n.level === 'warning' ? 9000 : 5000),
       );
     return () => timers.forEach(clearTimeout);
-  }, [toasts.map((n) => n.id).join(',')]);
+  }, [toasts.map((n) => n.id).join(','), toastsPaused]);
   useEffect(() => {
     setSeenNotification(Math.max(0, ...(runtime.notifications ?? []).map((n) => n.id)));
     setDismissed([]);
@@ -836,6 +841,7 @@ export function useWorkbench() {
       setNotice,
       noticeAction,
       setNoticeAction,
+      setToastsPaused,
       setShortcutsOpen,
       stopArmed,
       dragging,

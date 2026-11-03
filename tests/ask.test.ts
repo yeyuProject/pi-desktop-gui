@@ -244,6 +244,21 @@ test('Goal timeout chooses recommendations, cancellation wins over timeout, and 
   assert.equal(h.calls(), 2, 'an already-aborted call never opens a question');
 });
 
+test('a Goal timeout that resolves slightly early still counts; an early undefined reply is cancelled', async () => {
+  const h = askHarness();
+  h.goal();
+  h.input(async () => {
+    h.tick(7); // The 10 ms timer fired 3 ms early on the wall clock.
+    return undefined;
+  });
+  assert.equal(readAskDetails((await h.call()).details)?.status, 'timeout_recommended');
+  h.input(async () => {
+    h.tick(2); // Closed long before the timeout: not a timeout.
+    return undefined;
+  });
+  assert.equal(readAskDetails((await h.call()).details)?.status, 'cancelled');
+});
+
 test('invalid and forged timeout replies are cancelled instead of reaching the model as answers', async (t) => {
   t.mock.method(console, 'error', () => {});
   const h = askHarness();

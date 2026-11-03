@@ -201,7 +201,7 @@
   border-radius: 12px;
   box-shadow: var(--shadow);
   padding: 5px;
-  animation: rise 140ms ease-out;
+  animation: rise var(--motion-fast) var(--ease-out);
 }
 .approval-menu button {
   width: 100%;

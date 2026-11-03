@@ -102,7 +102,7 @@
   gap: 1px;
   margin-left: auto;
   opacity: 0;
-  transition: opacity 120ms ease;
+  transition: opacity var(--motion-fast) ease;
 }
 .message-actions .icon-button {
   width: 26px;
@@ -337,9 +337,11 @@
 }
 .new-content {
   position: absolute;
-  bottom: 200px;
+  bottom: calc(var(--composer-offset, 188px) + 12px);
   left: 50%;
-  transform: translateX(-50%);
+  /* `translate` composes with the `rise` transform instead of being replaced by it. */
+  translate: -50% 0;
+  animation: rise var(--motion-fast) var(--ease-out);
   background: var(--surface);
   box-shadow: var(--shadow);
   border-radius: 20px;

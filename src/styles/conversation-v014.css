@@ -129,6 +129,7 @@
   right: 24px;
   top: 8px;
   z-index: 20;
+  animation: rise var(--motion-fast) var(--ease-out);
   display: flex;
   align-items: center;
   gap: 6px;

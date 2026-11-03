@@ -12,12 +12,16 @@
   position: absolute;
   inset: 0 1px;
   background: transparent;
-  transition: background-color 80ms 150ms;
+  transition: background-color 80ms;
 }
 .column-resize-handle:hover::after,
 .column-resize-handle:focus-visible::after,
 .column-resize-handle:active::after {
   background: var(--accent);
+}
+/* Hover intent: passing over the edge should not flash; leaving clears at once. */
+.column-resize-handle:hover::after {
+  transition-delay: 150ms;
 }
 .resizing-columns,
 .resizing-columns * {

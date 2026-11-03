@@ -25,6 +25,9 @@ const launch = async () => {
   await page.getByText('想一起完成什么？').or(page.locator('.message')).first().waitFor();
 };
 // A cold Pi process on Windows can take over 25 seconds to initialize.
+// WorkspaceHeader labels the shortcut per platform (`shortcut()` in src/lib/platform.ts).
+const mod = process.platform === 'darwin' ? 'Meta' : 'Control';
+const collapseSidebar = `收起项目侧栏 ${process.platform === 'darwin' ? '⌘B' : 'Ctrl+B'}`;
 const waitStatus = async (s) =>
   page.locator('.run-meta .status.' + s).waitFor({ timeout: DESKTOP_TIMEOUTS.pi });
 try {
@@ -32,9 +35,9 @@ try {
   assert.equal(await page.locator('.inspector').count(), 0);
   await page.evaluate(() => document.fonts.ready);
   await page.screenshot({ path: path.join(output, 'workspace-empty.png'), animations: 'disabled' });
-  await page.getByRole('button', { name: '收起项目侧栏 Ctrl+B', exact: true }).click();
+  await page.getByRole('button', { name: collapseSidebar, exact: true }).click();
   assert.equal(await page.locator('.sidebar').isVisible(), false);
-  await page.keyboard.press('Control+b');
+  await page.keyboard.press(mod + '+b');
   assert.equal(await page.locator('.sidebar').isVisible(), true);
   await page.getByRole('button', { name: '理解项目', exact: true }).click();
   assert.match(await page.getByRole('textbox', { name: '任务输入' }).inputValue(), /梳理这个项目/);
@@ -82,7 +85,7 @@ try {
   await page.getByRole('button', { name: '关闭', exact: true }).last().click();
   await page.screenshot({ path: path.join(output, 'workspace-dark.png'), animations: 'disabled' });
   await page.getByRole('textbox', { name: '任务输入' }).fill('不会自动发送的持久草稿');
-  await page.getByRole('button', { name: '收起项目侧栏 Ctrl+B', exact: true }).click();
+  await page.getByRole('button', { name: collapseSidebar, exact: true }).click();
   await page.waitForTimeout(300);
   await app.close();
   app = undefined;
@@ -90,7 +93,7 @@ try {
   await page.getByRole('textbox', { name: '任务输入' }).waitFor();
   assert.equal(await page.getByRole('textbox', { name: '任务输入' }).inputValue(), '不会自动发送的持久草稿');
   assert.equal(await page.locator('.sidebar').isVisible(), false);
-  await page.keyboard.press('Control+b');
+  await page.keyboard.press(mod + '+b');
   assert.ok((await page.locator('.message').count()) > 0);
   assert.equal(await page.locator('.run-meta .running').count(), 0);
   console.log('PASS UI theme, draft and history after restart');

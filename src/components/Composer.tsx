@@ -384,6 +384,27 @@ export function Composer(props: ComposerProps) {
                   (!draft.trim() && !images.length && !snippets.length && !draftQuotes.length
                     ? '先输入内容'
                     : ''));
+  const wrap = useRef<HTMLDivElement>(null);
+  useLayoutEffect(() => {
+    // Floating controls above the input (「回到最新」) follow the composer's real height:
+    // feedback cards, Goal and plan cards and a resized textarea all push its top up.
+    const composer = wrap.current;
+    const container = composer?.closest<HTMLElement>('.conversation');
+    if (!composer || !container) return;
+    const measure = () =>
+      container.style.setProperty(
+        '--composer-offset',
+        `${Math.max(0, container.getBoundingClientRect().bottom - composer.getBoundingClientRect().top)}px`,
+      );
+    measure();
+    const observer = new ResizeObserver(measure);
+    observer.observe(container);
+    observer.observe(composer);
+    return () => {
+      observer.disconnect();
+      container.style.removeProperty('--composer-offset');
+    };
+  }, []);
   const explainSend = () => {
     if (selectionChanging) return;
     const target = !storage.writable
@@ -413,7 +434,7 @@ export function Composer(props: ComposerProps) {
   };
 
   return (
-    <div className="composer-wrap">
+    <div className="composer-wrap" ref={wrap}>
       <ComposerFeedback {...props} handleModelError={handleModelError} />
       {goal && goalView.visible && (
         <GoalCard
@@ -732,7 +753,8 @@ export function Composer(props: ComposerProps) {
                   role="option"
                   aria-selected={commandIndex === i}
                   onMouseDown={(e) => e.preventDefault()}
-                  onMouseEnter={() => setCommandIndex(i)}
+                  // Not mouseenter: keyboard scrolling must not hand the selection to a resting pointer.
+                  onMouseMove={() => setCommandIndex(i)}
                   onClick={() => completeCommand(c)}
                 >
                   <code>

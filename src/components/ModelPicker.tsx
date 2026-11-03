@@ -183,7 +183,8 @@ export function ModelPicker({
                           aria-selected={i === index}
                           aria-current={key === current || undefined}
                           disabled={locked}
-                          onMouseEnter={() => setIndex(i)}
+                          // Not mouseenter: keyboard scrolling must not hand the selection to a resting pointer.
+                          onMouseMove={() => setIndex(i)}
                           onClick={() => choose(key)}
                         >
                           <span className="model-name">

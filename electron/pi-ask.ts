@@ -9,6 +9,8 @@ import {
 } from '../shared/ask';
 import { DESKTOP_ASK_PREFIX } from '../shared/pi-bridge';
 
+const TIMER_SLACK_MS = 1000;
+
 export function registerDesktopAsk(
   pi: ExtensionAPI,
   isGoalActive: () => boolean,
@@ -119,7 +121,10 @@ export function registerDesktopAsk(
           timeout !== undefined &&
           !signal?.aborted &&
           isGoalActive() &&
-          now() - started >= timeout
+          // Node starts timers from the event loop's cached clock, so the dialog timeout can
+          // resolve a few milliseconds before `timeout` has passed on `now()`. Without slack a
+          // Goal timeout was reported as a cancellation.
+          now() - started >= timeout - Math.min(TIMER_SLACK_MS, timeout / 2)
         ) {
           answer = { status: 'timeout_recommended', answers: recommendedAnswers(request) };
         }

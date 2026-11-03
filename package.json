@@ -1,6 +1,6 @@
 {
   "name": "pi-desktop-gui",
-  "version": "0.14.65",
+  "version": "0.14.66",
   "private": true,
   "description": "A local desktop workspace for the Pi coding agent",
   "author": "yeyuProject",
@@ -41,6 +41,7 @@
     "test:optimizations-ui": "node --import tsx scripts/test-optimizations-ui.mjs",
     "test:connection-ui": "node --import tsx scripts/test-connection-ui.mjs",
     "test:user-bubble-ui": "node --import tsx scripts/test-user-bubble-ui.mjs",
+    "test:motion-ui": "node --import tsx scripts/test-motion-interaction-ui.mjs",
     "test:performance-ipc": "node --import tsx scripts/test-streaming-main.ts && node --import tsx scripts/test-streaming-ipc.ts",
     "test:checkpoint-scale": "node --import tsx scripts/test-checkpoint-scale.ts",
     "test:transcript-ui": "node --import tsx scripts/test-transcript-ui.mjs",

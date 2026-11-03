@@ -61,7 +61,7 @@
   inset: 1px 0;
   background: var(--accent);
   opacity: 0;
-  transition: opacity 150ms;
+  transition: opacity var(--motion-fast) ease;
 }
 .inspector-divider:hover::after,
 .inspector-divider:focus-visible::after {

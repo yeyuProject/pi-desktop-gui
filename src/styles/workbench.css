@@ -4,6 +4,10 @@
     transition: none !important;
     scroll-behavior: auto !important;
   }
+  /* Rotation in place is not vestibular motion, and a frozen spinner reads as a hang. */
+  .spin {
+    animation: spin 1.2s linear infinite !important;
+  }
 }
 
 /* Visual system v0.3 */

@@ -101,7 +101,9 @@ try {
   await input.fill('界'.repeat(350000));
   await expect(page.locator('.send-button')).toHaveAttribute('title', /内容超过 1 MiB/);
   await input.fill('');
-  const environment = (await page.evaluate(() => window.desktop.invoke('bootstrap'))).environment;
+  // `bootstrap` starts a detection without awaiting it; its late broadcast would replace the
+  // injected Node error below. `detect` returns only after its own broadcast has been sent.
+  const environment = await page.evaluate(() => window.desktop.invoke('detect'));
   await inject({ connected: false });
   await app.evaluate(
     ({ BrowserWindow }, environment) =>
