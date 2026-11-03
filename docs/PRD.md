@@ -4,7 +4,7 @@
 
 界面用词见[术语表](glossary.md)。本次优化的实现和验证记录见[测试记录](testing/optimization-prd.md)。
 
-## 动画与交互细节（已实现，待发布）
+## 动画与交互细节（已实现，v0.14.66）
 
 实现与验证见[动画与交互测试记录](testing/motion-interaction.md)。
 
