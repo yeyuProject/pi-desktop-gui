@@ -111,6 +111,7 @@ try {
 
   await fs.writeFile(path.join(fixture.projectDir, '已有修改.txt'), 'manual change stays\n');
   await page.keyboard.press('Alt+1');
+  await page.locator('.message.user').first().hover();
   const undo = page
     .locator('.message.user')
     .first()

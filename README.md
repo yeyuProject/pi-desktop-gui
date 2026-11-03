@@ -74,6 +74,8 @@ Sessions and workspaces stay on your machine. Model requests go to whichever pro
 
 See the [release notes](docs/releases/) for what changed in each version, and the [UI terminology](docs/glossary.md) for interface wording.
 
+User messages use compact, right-aligned bubbles in all three styles. Hover over or focus a message to show its actions below the bubble; a full-content copy option appears only when it differs from the regular copy.
+
 <table>
   <tr>
     <td width="50%"><img src="docs/assets/screenshots/workspace-codex-light.png" width="100%" alt="Codex Day style with neutral surfaces and a right-aligned user message" /></td>

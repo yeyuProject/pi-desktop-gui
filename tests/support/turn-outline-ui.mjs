@@ -457,6 +457,7 @@ export async function verifyNativeSkillUI({ app, page, fixture, provider }) {
   await expect(user.locator('.user-message-text')).toHaveText('帮我看看');
   await expect(user.locator('.skill-toggle')).toHaveAttribute('aria-expanded', 'false');
   const clipboard = () => app.evaluate(({ clipboard }) => clipboard.readText());
+  await user.hover();
   await user.getByRole('button', { name: '复制消息', exact: true }).click();
   await expect.poll(clipboard).toBe('/skill:ui7 帮我看看');
   await user.getByRole('button', { name: '更多消息操作', exact: true }).click();
@@ -572,6 +573,9 @@ export async function verifyMessageContentUI({ app, page, output }) {
         }),
       )
       .toBe(true);
+    // Keyboard navigation keeps the outline focused; close its overlay before using message actions.
+    await page.keyboard.press('Escape');
+    await expect(outline).not.toHaveClass(/expanded/);
   };
   const savedExpansion = async (key) =>
     page.evaluate(async (key) => {
@@ -593,6 +597,9 @@ export async function verifyMessageContentUI({ app, page, output }) {
     .evaluate((element) => ({
       height: element.getBoundingClientRect().height,
       line: parseFloat(getComputedStyle(element).lineHeight),
+      padding:
+        parseFloat(getComputedStyle(element).paddingTop) +
+        parseFloat(getComputedStyle(element).paddingBottom),
       parts: [...element.children].map((node) => ({
         className: node.className,
         height: node.getBoundingClientRect().height,
@@ -601,8 +608,8 @@ export async function verifyMessageContentUI({ app, page, output }) {
       })),
     }));
   assert.ok(
-    bubble.height <= bubble.line * 3 + 1,
-    `collapsed skill and prompt should fit within three lines: ${JSON.stringify(bubble)}`,
+    bubble.height - bubble.padding <= bubble.line * 3 + 1,
+    `collapsed skill and prompt content should fit within three lines: ${JSON.stringify(bubble)}`,
   );
   await skill.click();
   await expect(user(1).locator('.skill-content li')).toHaveCount(300);
@@ -617,6 +624,7 @@ export async function verifyMessageContentUI({ app, page, output }) {
   await expect.poll(() => savedExpansion('skill:1800000000100')).toBe(false);
   await jump(2);
   await expect(user(2).locator('.user-message-text')).toHaveText('使用技能 x');
+  await user(2).hover();
   await user(2).getByRole('button', { name: '复制消息', exact: true }).click();
   await expect.poll(clipboard).toBe('/skill:x');
 
@@ -715,8 +723,8 @@ export async function verifyMessageContentUI({ app, page, output }) {
   await jump(6);
   await expect(user(6).getByRole('button', { name: '展开全文（共 1 行）' })).toBeVisible();
   await jump(1);
-  // Collapsed rows expose only their tick; expand before targeting the row actions.
-  await row(5).locator('.turn-tick').hover();
+  // Escape suppresses hover until the pointer leaves; keyboard focus explicitly opens the outline.
+  await row(5).focus();
   await expect(outline).toHaveClass(/expanded/);
   await row(5).hover();
   const before = await thread.evaluate((element) => element.scrollTop);

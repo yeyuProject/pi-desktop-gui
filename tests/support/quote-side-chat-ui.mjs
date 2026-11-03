@@ -80,6 +80,7 @@ export async function verifyQuoteSideChatUI({ app, page, fixture, provider, outp
   await expect
     .poll(() => page.evaluate(() => [...(CSS.highlights.get('conversation-quote') ?? [])][0]?.toString()))
     .toBe('OK');
+  await quoted.hover();
   await quoted.getByRole('button', { name: '编辑后重新发送', exact: true }).click();
   await expect(input).toHaveValue('这两处冲突吗');
   await expect(page.locator('.draft-quotes > span')).toHaveCount(2);

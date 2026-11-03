@@ -414,18 +414,13 @@ kbd {
   background: var(--hover);
 }
 .message.user {
-  max-width: 90%;
-  width: fit-content;
-  margin-left: auto;
-}
-.message.user .message-heading {
-  justify-content: flex-end;
-  margin-bottom: 6px;
-  color: var(--muted);
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
 }
 .message.user .message-actions {
   margin-left: 0;
-  order: -1;
 }
 .tool-card:hover,
 .tool-card[open] {

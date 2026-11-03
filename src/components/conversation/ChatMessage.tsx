@@ -163,6 +163,7 @@ export const ChatMessage = memo(
       );
     if (m.role !== 'user' && m.role !== 'assistant') return null;
     const content = messageText(m);
+    const input = m.role === 'user' ? userMessageInput(content) : content;
     const checkpoint = m.role === 'user' ? ctx.checkpointFor?.(m) : undefined;
     if (
       m.role === 'assistant' &&
@@ -179,72 +180,50 @@ export const ChatMessage = memo(
     )
       return null;
     return (
-      <article className={'message ' + m.role}>
-        <div className="message-heading">
-          {m.role === 'assistant' && (
+      <article className={'message ' + m.role} tabIndex={m.role === 'user' ? 0 : undefined}>
+        {m.role === 'user' ? (
+          <div className="message-heading">
+            <strong>你</strong>
+          </div>
+        ) : (
+          <div className="message-heading">
             <span className="avatar assistant" aria-hidden="true">
               π
             </span>
-          )}
-          <strong>{m.role === 'user' ? '你' : 'Pi'}</strong>
-          {goalStart && <span className="goal-message-badge">◎ Goal</span>}
-          {m.timestamp && <time>{time(m.timestamp)}</time>}
-          {m.role === 'assistant' && <ReplyMeta message={m} />}
-          <span className="message-actions">
-            <IconButton
-              title="复制消息"
-              onClick={() => ctx.copy(m.role === 'user' ? userMessageInput(content) : content)}
-            >
-              <Copy size={13} />
-            </IconButton>
-            {m.role === 'user' && <UserMessageMenu text={content} copy={ctx.copy} />}
-            {m.role === 'assistant' && content.trim() && (
-              <IconButton
-                title="侧边提问"
-                onClick={() =>
-                  window.dispatchEvent(
-                    new CustomEvent('pi:side', { detail: { replyTimestamp: m.timestamp } }),
-                  )
-                }
-              >
-                <MessagesSquare size={13} />
+            <strong>Pi</strong>
+            {goalStart && <span className="goal-message-badge">◎ Goal</span>}
+            {m.timestamp && <time>{time(m.timestamp)}</time>}
+            <ReplyMeta message={m} />
+            <span className="message-actions">
+              <IconButton title="复制消息" onClick={() => ctx.copy(content)}>
+                <Copy size={13} />
               </IconButton>
-            )}
-            {m.role === 'user' && m.timestamp && (
-              <>
-                {checkpoint && ctx.undo && (
-                  <IconButton
-                    title={checkpoint.disabledReason || '撤销此轮起的文件修改'}
-                    disabled={ctx.locked || Boolean(checkpoint.disabledReason)}
-                    onClick={() => ctx.undo?.(m)}
-                  >
-                    <Undo2 size={13} />
-                  </IconButton>
-                )}
+              {content.trim() && (
                 <IconButton
-                  title={ctx.running ? '本会话正在使用这段历史，请停止任务后编辑' : '编辑后重新发送'}
-                  disabled={ctx.locked}
-                  onClick={() => ctx.act(m, 'edit')}
+                  title="侧边提问"
+                  onClick={() =>
+                    window.dispatchEvent(
+                      new CustomEvent('pi:side', { detail: { replyTimestamp: m.timestamp } }),
+                    )
+                  }
                 >
-                  <Pencil size={13} />
+                  <MessagesSquare size={13} />
                 </IconButton>
-                <IconButton title="从这里分支到新会话" onClick={() => ctx.act(m, 'fork')}>
-                  <GitBranch size={13} />
+              )}
+              {m.timestamp && last && (
+                <IconButton
+                  title={ctx.running ? '本会话正在执行，请停止任务后重新生成' : '重新生成这条回复'}
+                  disabled={ctx.locked}
+                  onClick={() => ctx.act(m, 'regenerate')}
+                >
+                  <RefreshCw size={13} />
                 </IconButton>
-              </>
-            )}
-            {m.role === 'assistant' && m.timestamp && last && (
-              <IconButton
-                title={ctx.running ? '本会话正在执行，请停止任务后重新生成' : '重新生成这条回复'}
-                disabled={ctx.locked}
-                onClick={() => ctx.act(m, 'regenerate')}
-              >
-                <RefreshCw size={13} />
-              </IconButton>
-            )}
-          </span>
-        </div>
+              )}
+            </span>
+          </div>
+        )}
         <div className="message-content">
+          {m.role === 'user' && goalStart && <span className="goal-message-badge">◎ Goal</span>}
           {!hideThinking &&
             typeof m.content !== 'string' &&
             m.content
@@ -294,6 +273,40 @@ export const ChatMessage = memo(
                 </div>
               ))}
         </div>
+        {m.role === 'user' && (
+          <div className="message-footer">
+            {m.timestamp && <time>{time(m.timestamp)}</time>}
+            <span className="message-actions">
+              <IconButton title="复制消息" onClick={() => ctx.copy(input)}>
+                <Copy size={13} />
+              </IconButton>
+              {m.timestamp && (
+                <>
+                  {checkpoint && ctx.undo && (
+                    <IconButton
+                      title={checkpoint.disabledReason || '撤销此轮起的文件修改'}
+                      disabled={ctx.locked || Boolean(checkpoint.disabledReason)}
+                      onClick={() => ctx.undo?.(m)}
+                    >
+                      <Undo2 size={13} />
+                    </IconButton>
+                  )}
+                  <IconButton
+                    title={ctx.running ? '本会话正在使用这段历史，请停止任务后编辑' : '编辑后重新发送'}
+                    disabled={ctx.locked}
+                    onClick={() => ctx.act(m, 'edit')}
+                  >
+                    <Pencil size={13} />
+                  </IconButton>
+                  <IconButton title="从这里分支到新会话" onClick={() => ctx.act(m, 'fork')}>
+                    <GitBranch size={13} />
+                  </IconButton>
+                </>
+              )}
+              {input !== content && <UserMessageMenu text={content} copy={ctx.copy} />}
+            </span>
+          </div>
+        )}
         {m.role === 'assistant' && (
           <div className="reply-footer">
             <ReplySpeed message={m} />

@@ -154,15 +154,6 @@
 [data-style='claude'] .message.user .message-content {
   background: var(--bubble);
   border-radius: 12px;
-  width: fit-content;
-  max-width: min(80%, 620px);
-  margin-left: auto;
-}
-[data-style='claude'] .message.user .message-heading {
-  justify-content: flex-end;
-}
-[data-style='claude'] .message.user .message-actions {
-  margin-left: 0;
 }
 [data-style='claude'] .message.assistant .avatar {
   display: none;

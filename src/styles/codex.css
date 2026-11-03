@@ -150,15 +150,6 @@
 [data-style='codex'] .message.user .message-content {
   background: var(--bubble);
   border-radius: 12px;
-  width: fit-content;
-  max-width: min(80%, 620px);
-  margin-left: auto;
-}
-[data-style='codex'] .message.user .message-heading {
-  justify-content: flex-end;
-}
-[data-style='codex'] .message.user .message-actions {
-  margin-left: 0;
 }
 [data-style='codex'] .message.assistant .avatar {
   display: none;
