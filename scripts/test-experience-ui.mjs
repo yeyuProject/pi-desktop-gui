@@ -192,10 +192,12 @@ try {
   });
   const child = app.process();
   const closed = app.waitForEvent('close', { timeout: 15000 });
-  await app.evaluate(({ BrowserWindow }) => {
+  await app.evaluate(({ app, BrowserWindow }) => {
     const window = BrowserWindow.getAllWindows()[0];
     const bounds = window.getNormalBounds();
-    window.close();
+    // macOS only hides the window on close; quitting runs the same close handler there.
+    if (process.platform === 'darwin') app.quit();
+    else window.close();
     // A late resize must not cancel the save awaited by the close handler.
     window.setSize(bounds.width + 20, bounds.height + 20);
   });
