@@ -4,6 +4,75 @@
 
 界面用词见[术语表](glossary.md)。本次优化的实现和验证记录见[测试记录](testing/optimization-prd.md)。
 
+## 用户消息气泡（待实现）
+
+### UI10 用户消息气泡：短句不折行、操作栏移到气泡下方
+
+基线为 v0.14.64（`c6cc979`）。行号以基线为准。
+
+**背景与问题。**
+
+1. **短句也被折成两行。**
+   - 外层 `.message.user` 设为 `width: fit-content; max-width: 90%`（`src/styles/dialogs.css:416-420`），宽度由内容决定。
+   - Codex 和 Claude 风格的气泡 `.message-content` 又设了 `width: fit-content; max-width: min(80%, 620px)`（`src/styles/codex.css:150-156`、`src/styles/claude.css:154-160`）。这里的 80% 相对外层计算。
+   - 外层先按气泡一行能放下的宽度确定，气泡再取外层的 80%，结果总比一行窄。例如 17 个字的「我记得jb公司也出了几款轻量的编辑器」在窗口很宽时也会断成「…轻量 / 的编辑器」。
+2. **两个复制入口，用户分不清。**
+   - 复制按钮复制 `userMessageInput(content)`（`src/components/conversation/ChatMessage.tsx:194-199`，`shared/message-content.ts:153-156`）：技能消息复制为 `/skill:名称 正文`，其余为正文。
+   - 「…」菜单（`ChatMessage.tsx:27-66`）只有一项「复制完整内容」。普通消息两者内容相同，菜单只是多出一个入口。
+3. **操作栏位置和顺序。**
+   - 操作栏在气泡上方的标题行，顺序是 复制、…、撤销、编辑、分支。「…」夹在中间，不符合「更多放在最后」的惯例。
+   - 操作栏隐藏时只是 `opacity: 0`（`src/styles/conversation.css:100-119`），标题行仍占约 28px（`min-height: 28px`，`:87-94`）。每条用户消息上方都空出一行。
+4. **气泡内行高偏松。** `.message-content` 的行高 1.85（`conversation.css:141-145`）适合长回复；用在一两行的气泡里显得稀疏。
+
+**目标。**
+
+- 短句在一行内显示；长消息达到上限宽度后再折行。
+- 只有内容确实不同时，才出现第二个复制入口。
+- 平时不显示操作栏，也不为它留出空行；鼠标悬停或键盘聚焦时，在气泡下方显示。
+
+**不做。**
+
+- 不改 assistant 消息的布局和操作。
+- 不改长提问折叠（UI7）、引用、技能块、粘贴片段在气泡内的显示。
+- 不改各个操作的行为，例如编辑后重新发送、分支、撤销此轮。
+
+**方案。**
+
+1. **宽度**
+   - `.message.user` 去掉 `width: fit-content` 和 `max-width: 90%`，改为占满对话列：`display: flex; flex-direction: column; align-items: flex-end`。
+   - 气泡保持 `width: fit-content; max-width: min(80%, 620px)`。这样 80% 相对整列计算。
+   - 经典风格（`conversation.css:146-150`、`workbench.css:263-267`）同样设 `width: fit-content; max-width: min(80%, 620px)`，三套外观的宽度规则一致。
+   - 带图片、文件引用、技能块的气泡仍以 `620px` 为上限，内部元素不得溢出。
+2. **操作栏移到气泡下方**
+   - 用户消息的时间和操作按钮从 `.message-heading` 移到气泡之后的 `.message-footer`，右对齐，显示在气泡正下方。
+   - `.message-footer` 平时 `visibility: hidden`，只在 `.message:hover` 或 `.message:focus-within` 时显示。footer 叠放在下一条消息的上边距里，或者用固定的小高度，不额外撑高消息间距。实现时任选一种，但验收第 3 条必须满足。
+   - 用户消息的 `.message-heading` 只保留读屏用的「你」。Codex 和 Claude 风格已经隐藏了它（`codex.css:167-176`）；经典风格也改成视觉隐藏，不再单独占一行。
+   - 按钮顺序：复制、撤销此轮（如果有）、编辑、分支、…。
+3. **复制入口**
+   - 只有 `userMessageInput(content) !== content` 时才显示「…」，例如技能消息、带文件块的消息。菜单项保持「复制完整内容」。
+   - 两者相同时，只显示复制按钮。
+4. **排版**
+   - 用户气泡内的行高改为 1.6。
+   - 内边距改为 `10px 14px`。圆角三套外观保持现状。
+
+**验收标准。**
+
+1. 窗口宽度 ≥ 1200px、侧栏和变更面板展开时，30 个汉字以内的用户消息只占一行。
+2. 长消息的气泡宽度不超过 620px，也不超过对话列宽度的 80%，左侧始终留白。
+3. 不悬停也不聚焦时，相邻两条用户消息的间距与相邻两条 assistant 消息的间距之差不超过 8px。
+4. 悬停时，操作栏出现在气泡正下方并右对齐，顺序为 复制、撤销此轮、编辑、分支、…。用 Tab 键可以依次聚焦到这些按钮。
+5. 普通文字消息没有「…」；技能消息有「…」，其中「复制完整内容」复制的是完整内容。
+6. 经典、Codex、Claude 三套外观的明暗两种模式下，单行、多行、带图片、带技能块、带文件引用的气泡截图都没有溢出或错位。
+
+**测试。**
+
+- 在 `scripts/test-style-ui.mjs`（或新增 `scripts/test-user-bubble-ui.mjs`）中加入以下检查：
+  - 用 `getBoundingClientRect` 检查短消息气泡的高度等于单行高度；长消息气泡的宽度 ≤ 620px，且 ≤ 列宽 × 0.8。
+  - 未悬停时 footer 不可见，消息间距符合验收第 3 条；悬停或 Tab 聚焦后可见，按钮顺序正确。
+  - 普通消息没有「更多消息操作」按钮，技能消息有。
+- `tests/support/turn-outline-ui.mjs:462` 点击了「更多消息操作」。如果那条消息是普通文字，改用技能消息，或改为点击复制按钮。
+- 截图 `test-results/user-bubble-{classic,codex,claude}-{light,dark}.png`，并更新受影响的 README 截图。
+
 ## 资源占用、交互与文案优化（v0.14.64 已交付，复查发现未完成项）
 
 2026-11-03 复查：本节不能标为全部完成。UX5 改为移除无效的重新检查入口，保留未确认命令结束时的重连和撤销限制；命令进程记录另立待办。PF3 的 5,000 条消息更新耗时尚需按渲染进程 JS 耗时复测。日志刷新、保存结果、自动更新时机、草稿和旧会话标题等回归，修复及重新验证记录见[测试记录](testing/optimization-prd.md)。不能将“有代码”视作已通过验收。
