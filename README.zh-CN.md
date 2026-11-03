@@ -236,6 +236,8 @@ npm ci
 npm run dev
 ```
 
+macOS 执行 `npm run package` 后，产物保存在 `release/mac-builds.noindex/`，防止测试副本进入系统搜索和启动台。手动解压安装包做验证时也请使用 `.noindex` 目录，详见 [CONTRIBUTING.md](CONTRIBUTING.md)。
+
 ## 致谢
 
 - 核心智能体引擎基于 [@earendil-works/pi-coding-agent](https://www.npmjs.com/package/@earendil-works/pi-coding-agent)。

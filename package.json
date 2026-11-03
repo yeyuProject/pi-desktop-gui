@@ -50,6 +50,7 @@
   "build": {
     "appId": "io.yeyuproject.pi-desktop",
     "productName": "Pi Desktop",
+    "beforePack": "scripts/mac-builds.mjs",
     "afterPack": "scripts/after-pack.mjs",
     "afterSign": "scripts/after-sign.mjs",
     "afterAllArtifactBuild": "scripts/verify-mac-package.mjs",

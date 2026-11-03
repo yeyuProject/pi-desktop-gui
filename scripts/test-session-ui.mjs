@@ -10,6 +10,7 @@ import { Workspace } from '../electron/workspace.ts';
 import { readSessionFile } from '../electron/store.ts';
 import { createLocalProvider, prepareRealPiFixture } from '../tests/support/local-provider.ts';
 import { reportSessionSwitchBudget } from './session-switch-budget.mjs';
+import { packagedExecutable, unregisterMacTestApp } from './mac-builds.mjs';
 import {
   observeSessionSelections,
   sessionSelectionReady,
@@ -148,13 +149,7 @@ f.store.selectSession(a.id);
 await f.store.save();
 const packaged = process.argv.includes('--packaged');
 let executablePath = process.env.PI_DESKTOP_EXE;
-if (packaged && !executablePath)
-  executablePath =
-    process.platform === 'win32'
-      ? path.resolve('release/win-unpacked/Pi Desktop.exe')
-      : path.resolve(
-          `release/mac${process.arch === 'arm64' ? '-arm64' : ''}/Pi Desktop.app/Contents/MacOS/Pi Desktop`,
-        );
+if (packaged && !executablePath) executablePath = packagedExecutable();
 let app, page, testError, firstColdOpen, lastMeasurementSamples;
 const errors = [];
 const nodeLaunch = {};
@@ -973,8 +968,11 @@ try {
   }
   throw error;
 } finally {
-  const cleanupError = await cleanupApp();
+  let cleanupError = await cleanupApp();
   await provider.close();
+  await unregisterMacTestApp(executablePath).catch((error) => {
+    cleanupError ??= error;
+  });
   if (cleanupError) {
     // eslint-disable-next-line no-unsafe-finally -- Preserve the original failure; fail teardown only after a successful test.
     if (!testError) throw cleanupError;

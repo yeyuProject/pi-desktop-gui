@@ -5,6 +5,7 @@ import path from 'node:path';
 import { AgentService } from '../electron/agent.ts';
 import { Workspace } from '../electron/workspace.ts';
 import { createLocalProvider, prepareRealPiFixture } from '../tests/support/local-provider.ts';
+import { packagedExecutable, unregisterMacTestApp } from './mac-builds.mjs';
 
 // Real Pi, an isolated native session and a local provider; never calls the user's model service.
 const provider = await createLocalProvider();
@@ -36,14 +37,7 @@ try {
   await seed.dispose();
 }
 const executable =
-  process.env.PI_DESKTOP_EXE ||
-  (process.argv.includes('--packaged')
-    ? path.resolve(
-        process.platform === 'win32'
-          ? 'release/win-unpacked/Pi Desktop.exe'
-          : `release/mac${process.arch === 'arm64' ? '-arm64' : ''}/Pi Desktop.app/Contents/MacOS/Pi Desktop`,
-      )
-    : undefined);
+  process.env.PI_DESKTOP_EXE || (process.argv.includes('--packaged') ? packagedExecutable() : undefined);
 const output = path.resolve('output/playwright', `transcript-${process.platform}`);
 await fs.mkdir(output, { recursive: true });
 let app, page;
@@ -130,4 +124,5 @@ try {
 } finally {
   await close();
   await provider.close();
+  await unregisterMacTestApp(executable);
 }

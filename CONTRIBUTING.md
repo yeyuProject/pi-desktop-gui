@@ -40,6 +40,8 @@ npm run dev
 
 No test ever talks to a real model provider or reads your own Pi credentials. Setting `PI_DESKTOP_DATA_DIR` isolates app data and disables update checks.
 
+On macOS, `npm run package` and `npm run package:dir` write to `release/mac-builds.noindex/` so unpacked apps stay out of Spotlight and the Apps list. The packaged acceptance scripts use that location and unregister their test app after closing it. The packaging hook rejects Mac output paths outside a real `.noindex` directory, including symlinks that resolve outside one. For manual build or release verification, extract `.app` copies into a `.noindex` directory too; install only the intended release in `/Applications`. Windows and Linux output remains in `release/`.
+
 README captures also need Playwright's headless Chromium. Install it once with `npx playwright install chromium --only-shell` (on Linux, use `npx playwright install --with-deps chromium --only-shell`). Run `npm run build` before capturing; the GIF additionally requires `ffmpeg` on `PATH`. These scripts use mock data and a loopback-only server, not your Pi sessions or credentials.
 
 ## Project layout
@@ -99,6 +101,7 @@ By contributing, you agree that your contributions will be licensed under the [M
 - 提交前先搜索[已有 Issue](https://github.com/yeyuProject/pi-desktop-gui/issues)；较大的改动请先开 Issue 讨论方案。
 - 安全问题请不要公开提交，按 [SECURITY.md](SECURITY.md) 私下报告。
 - 本地开发：`npm ci` 后运行 `npm run dev`。开发依赖已锁定 Pi 版本，无需全局安装。
+- macOS 打包产物位于 `release/mac-builds.noindex/`，目录版验收自动使用这个位置，退出后移除测试应用登记。打包钩子会拒绝不在真实 `.noindex` 目录中的 Mac 输出；手动解压验证发布包时也应使用 `.noindex` 目录，避免测试副本进入启动台。Windows/Linux 仍输出到 `release/`。
 - 提交 PR 前至少运行 `npm run build`、`npm test`、`npm run test:integration` 、`npm run format:check` 和 `npm run lint`。
 - 用户可见的改动请同步更新 [README.md](README.md) 与 [README.zh-CN.md](README.zh-CN.md)；界面改动用 `npm run screenshots` 重新生成截图，演示流程有变化时用 `npm run demo-gif` 重录 GIF。
 - 首次生成素材前运行 `npx playwright install chromium --only-shell` 安装无头浏览器（Linux 加上 `--with-deps`），再运行 `npm run build`；GIF 还需要 PATH 中有 `ffmpeg`。素材脚本只使用示例数据和本机临时服务器。

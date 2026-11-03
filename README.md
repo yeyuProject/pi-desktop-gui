@@ -241,6 +241,8 @@ npm ci
 npm run dev
 ```
 
+Mac builds from `npm run package` are saved in `release/mac-builds.noindex/`, keeping test copies out of Spotlight and the Apps list. Use a `.noindex` directory when extracting packages for manual testing too; see [CONTRIBUTING.md](CONTRIBUTING.md).
+
 ## Acknowledgements
 
 - Built on [@earendil-works/pi-coding-agent](https://www.npmjs.com/package/@earendil-works/pi-coding-agent).

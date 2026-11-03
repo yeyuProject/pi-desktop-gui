@@ -27,12 +27,15 @@ import { Store } from '../electron/store';
 import writeWindowsUpdateFileChecks from './after-sign.mjs';
 import { completeExpectedExit } from './expected-exit.ts';
 import { testMacUpdateSafety } from './mac-update-safety';
+import requireMacBuildIsolation, { unregisterMacTestApp } from './mac-builds.mjs';
 
 // Build two copies of the production app. Only identity, data directory and update transport differ.
 // The fixture has its own installer GUID and never installs or removes the user's Pi Desktop.
 if (!['win32', 'linux', 'darwin'].includes(process.platform)) throw new Error('Unsupported update platform');
 const exec = promisify(execFile);
-const root = await fs.realpath(await fs.mkdtemp(path.join(os.tmpdir(), 'pi-update-roundtrip-')));
+const temporaryRoot = await fs.realpath(await fs.mkdtemp(path.join(os.tmpdir(), 'pi-update-roundtrip-')));
+const root = process.platform === 'darwin' ? path.join(temporaryRoot, 'apps.noindex') : temporaryRoot;
+await fs.mkdir(root, { recursive: true });
 const name = 'pi-desktop-update-fixture-' + randomUUID().slice(0, 8);
 const guid = randomUUID();
 const productName = 'Pi Update Fixture ' + name.slice(-8);
@@ -356,6 +359,7 @@ try {
         electronVersion: config.devDependencies.electron,
         electronDist,
         directories: { output: out },
+        beforePack: requireMacBuildIsolation,
         afterSign: writeWindowsUpdateFileChecks,
         files: [...config.build.files],
         compression: 'store',
@@ -966,5 +970,7 @@ try {
   }
   if (previousFixtureSigning === undefined) delete process.env.CSC_FOR_PULL_REQUEST;
   else process.env.CSC_FOR_PULL_REQUEST = previousFixtureSigning;
+  if (process.platform === 'darwin')
+    await unregisterMacTestApp(path.join(installDir, productName + '.app/Contents/MacOS', productName), root);
   console.log(`Update fixture artifacts: ${root}`);
 }

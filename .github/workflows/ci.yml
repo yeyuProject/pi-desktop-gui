@@ -162,6 +162,8 @@ jobs:
 
   package:
     needs: [build-and-test, update-roundtrip]
+    env:
+      PACKAGE_OUTPUT: ${{ matrix.os == 'macos-latest' && 'release/mac-builds.noindex' || 'release' }}
     if: >-
       ${{
         always() && !cancelled() &&
@@ -191,13 +193,13 @@ jobs:
         with:
           name: pi-desktop-${{ matrix.os }}
           path: |
-            release/*.exe
-            release/*.dmg
-            release/*.zip
-            release/*.AppImage
-            release/*.deb
-            release/latest*.yml
-            release/*.blockmap
+            ${{ env.PACKAGE_OUTPUT }}/*.exe
+            ${{ env.PACKAGE_OUTPUT }}/*.dmg
+            ${{ env.PACKAGE_OUTPUT }}/*.zip
+            ${{ env.PACKAGE_OUTPUT }}/*.AppImage
+            ${{ env.PACKAGE_OUTPUT }}/*.deb
+            ${{ env.PACKAGE_OUTPUT }}/latest*.yml
+            ${{ env.PACKAGE_OUTPUT }}/*.blockmap
           if-no-files-found: error
           compression-level: 0
 
