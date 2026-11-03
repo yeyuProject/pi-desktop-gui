@@ -98,6 +98,9 @@ jobs:
       - name: Test feature panels and approvals
         if: matrix.os == 'ubuntu-latest'
         run: xvfb-run -a -s "-screen 0 1920x1080x24" npm run test:features-ui
+      - name: Test model connection errors and copied details
+        if: matrix.os == 'ubuntu-latest'
+        run: xvfb-run -a -s "-screen 0 1920x1080x24" npm run test:connection-ui
       - name: Test built-in Goal controls
         if: matrix.os == 'ubuntu-latest'
         run: xvfb-run -a -s "-screen 0 1920x1080x24" npm run test:goal-ui

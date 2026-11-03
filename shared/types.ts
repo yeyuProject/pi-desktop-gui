@@ -11,7 +11,7 @@ import type { PromptTemplateInput, PromptTemplateDocument } from './prompts';
 import type { LocalUsageSummary } from './usage';
 import type { PiCompatibility } from './pi-version';
 import type { UpdateState } from './app-update';
-import type { ModelErrorKind } from './errors';
+import type { ModelErrorDescription, ModelErrorKind } from './errors';
 import type { DraftSnippet } from './draft';
 import type { DraftQuote } from './message-content';
 import type { SideChat, SideChatRequest } from './side-chat';
@@ -537,7 +537,12 @@ export interface ApiMap {
   connect: { args: [string]; result: void };
   readModels: { args: [string]; result: Model[] };
   recover: { args: [string, string?]; result: void };
-  testConnection: { args: [string]; result: { elapsed: number; text: string } };
+  testConnection: {
+    args: [string];
+    result:
+      | { ok: true; elapsed: number; text: string }
+      | { ok: false; error: ModelErrorDescription; details: string };
+  };
   send: { args: [string, string, string[], SendMode, ImageAttachment[]?, GoalStartInput?]; result: void };
   openGoal: { args: [sessionId: string]; result: void };
   goalAction: { args: [sessionId: string, action: GoalAction]; result: void };

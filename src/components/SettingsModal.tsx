@@ -18,7 +18,6 @@ import {
 } from 'lucide-react';
 import { platform } from '../lib/platform';
 import { readableError } from '../lib/format';
-import { classifyModelError, redact } from '../../shared/errors';
 import { useEffect, useState } from 'react';
 import { IconButton } from './IconButton';
 import { Modal } from './Modal';
@@ -373,13 +372,13 @@ export function SettingsModal(
                           setConnectionError('');
                           try {
                             const r = await api.invoke('testConnection', selected!.id);
-                            setTestResult(`连接成功 · ${r.elapsed} ms · ${r.text.slice(0, 100)}`);
+                            if (r.ok) setTestResult(`连接成功 · ${r.elapsed} ms · ${r.text.slice(0, 100)}`);
+                            else {
+                              setConnectionError(r.details);
+                              setTestResult(`${r.error.title}。${r.error.detail}`);
+                            }
                           } catch (e) {
-                            const raw = e instanceof Error ? e.message : String(e);
-                            setConnectionError(redact(raw));
-                            const description = classifyModelError(raw);
-                            readableError(e);
-                            setTestResult(`${description.title}。${description.detail}`);
+                            setTestResult(readableError(e));
                           }
                         })
                       }

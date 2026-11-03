@@ -6,6 +6,7 @@ import { promisify } from 'node:util';
 import { validateGoalAction } from '../../shared/goal';
 import { validateGoalStartInput } from '../../shared/goal-input';
 import { validatePromptTemplate } from '../../shared/prompts';
+import { classifyModelError, redact } from '../../shared/errors';
 import type { ResourceCatalog } from '../../shared/types';
 import { Configuration } from '../configuration';
 import { agentDirectory, requireSupportedPi, resolvePi } from '../environment';
@@ -147,7 +148,23 @@ export function createAgentHandlers(context: AgentHandlerContext) {
     },
     testConnection: async (id) => {
       text(id, 100);
-      return service.get(id).testConnection(id);
+      const agent = service.get(id);
+      try {
+        return { ok: true, ...(await agent.testConnection(id)) };
+      } catch (error) {
+        const raw = error instanceof Error ? error.message : String(error);
+        const diagnostic =
+          error instanceof Error
+            ? [error.stack ?? raw, error.cause instanceof Error ? error.cause.stack : error.cause]
+                .filter(Boolean)
+                .join('\n')
+            : raw;
+        agent.runtime.diagnostic = [
+          ...agent.runtime.diagnostic,
+          `testConnection sessionId=${id}\n${redact(diagnostic).slice(-4000)}`,
+        ].slice(-100);
+        return { ok: false, error: classifyModelError(raw), details: redact(raw) };
+      }
     },
     send: async (id, prompt, attachments, mode, images = [], goalStart) => {
       text(id, 100);
