@@ -54,7 +54,8 @@ export function useLayer(
     if (backdrop) backdrop.style.zIndex = String(1000 + layers.length);
     if (trap && topLayer() === layer)
       (
-        element.querySelector<HTMLElement>('[data-autofocus],input:not(:disabled),textarea:not(:disabled)') ??
+        element.querySelector<HTMLElement>('[data-autofocus]:not(:disabled)') ??
+        element.querySelector<HTMLElement>('input:not(:disabled),textarea:not(:disabled)') ??
         element.querySelector<HTMLElement>(focusable)
       )?.focus();
     return () => {

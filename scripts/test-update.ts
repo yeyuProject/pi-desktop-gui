@@ -9,7 +9,7 @@ import path from 'node:path';
 import http from 'node:http';
 import { createHash, randomUUID, generateKeyPairSync, sign } from 'node:crypto';
 import { updateSigningPayload } from '../shared/update-signature';
-import { execFile, spawn, type ChildProcess } from 'node:child_process';
+import { execFile, spawn, type ChildProcess, type ExecFileException } from 'node:child_process';
 import { promisify } from 'node:util';
 import { createRequire } from 'node:module';
 import { build as bundle } from 'esbuild';
@@ -197,7 +197,7 @@ if ($env:PI_UPDATE_TARGET) {
     {
       env: { ...env, PI_UPDATE_LINK: startMenuShortcut, PI_UPDATE_TARGET: target, PI_UPDATE_GUID: guid },
       windowsHide: true,
-      timeout: 10000,
+      timeout: 30000,
     },
   );
   return JSON.parse(stdout) as { shortcut: string; registeredDirectory: string };
@@ -912,10 +912,30 @@ try {
   );
 } catch (error) {
   await fs.mkdir('test-results', { recursive: true });
+  const commandError = error as ExecFileException & {
+    stdout?: string;
+    stderr?: string;
+  };
   await fs.writeFile(
     'test-results/update-roundtrip.json',
     JSON.stringify(
-      { passed: false, platform: process.platform, root, requests, error: String(error) },
+      {
+        passed: false,
+        platform: process.platform,
+        root,
+        requests,
+        error: String(error),
+        command:
+          error && typeof error === 'object' && 'cmd' in error
+            ? {
+                code: commandError.code,
+                signal: commandError.signal,
+                killed: commandError.killed,
+                stdout: commandError.stdout,
+                stderr: commandError.stderr,
+              }
+            : undefined,
+      },
       null,
       2,
     ),

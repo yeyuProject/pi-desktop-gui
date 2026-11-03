@@ -167,3 +167,9 @@ Remove-Item Env:PI_DESKTOP_TEST_CLIPBOARD
 macOS、Linux 的原生窗口和系统通知没有在本机运行。平台相关测试的跳过不能算作这些平台的运行证明。
 
 本机系统剪贴板回读为空：在改前、改后的 Electron，以及 PowerShell 的 `Set-Clipboard` / `Get-Clipboard` 都能复现。后续聊天、渲染界面测试显式设置 `PI_DESKTOP_TEST_CLIPBOARD=memory`，只替换测试进程的文字剪贴板，检查复制请求传递的实际文本；不修改产品代码，正常测试默认仍使用系统剪贴板。这里的通过结果不能当作系统剪贴板回读的证明。
+
+## v0.14.65 的 CI 复查
+
+首轮 CI `41589156603` 的 Windows 应用验收和 Linux 更新检查通过。Linux 优化界面检查发现「选择 Node」后的输入焦点不稳定：弹窗的默认聚焦与设置页的动画帧聚焦同时工作。修复为在 Node 输入框标记 `data-autofocus`，弹窗先查指定目标，再查普通输入框；移除设置页的动画帧操作。现有真实界面断言保留，Windows 本机重跑 11 组优化检查全部通过，ANSI 更新 P95 为 6.4ms。
+
+同一轮 Windows 更新测试已确认升级后的应用启动成功，但读取快捷方式及注册表的 PowerShell 命令在 10 秒处失败。旧记录只保存 `String(error)`，没有保存退出码、信号和超时标志，不能据此认定安装器有错或已经排除问题。将这一步的等待上限改为 30 秒，并在失败报告保留 `code/signal/killed/stdout/stderr`；快捷方式目标和安装目录的断言均未减少。需要用后续 CI 的完整结果确认。

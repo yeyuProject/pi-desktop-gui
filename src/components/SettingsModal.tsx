@@ -145,17 +145,6 @@ export function SettingsModal(
     const patch = Object.fromEntries(appearanceKeys.map((key) => [key, value[key]]));
     void attempt(() => api.invoke('saveSettings', patch));
   };
-  useEffect(() => {
-    if (
-      !settingsOpen ||
-      !prefs ||
-      settingsTab !== 'environment' ||
-      !/Node/i.test(environment?.errors[0] ?? '')
-    )
-      return;
-    const frame = requestAnimationFrame(() => document.getElementById('settings-node')?.focus());
-    return () => cancelAnimationFrame(frame);
-  }, [settingsOpen, settingsTab, Boolean(prefs)]);
   const requestClose = () => {
     if (!pending) guard.confirmLeave(() => setSettingsOpen(false));
   };
@@ -247,6 +236,7 @@ export function SettingsModal(
                     <input
                       aria-label="Node.js 入口"
                       id="settings-node"
+                      data-autofocus={/Node/i.test(environment?.errors[0] ?? '') || undefined}
                       value={prefs.nodePath}
                       placeholder={environment?.nodePath || '自动检测'}
                       onChange={(e) => setPrefs({ ...prefs, nodePath: e.target.value })}
