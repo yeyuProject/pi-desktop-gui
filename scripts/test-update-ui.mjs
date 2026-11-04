@@ -135,7 +135,7 @@ try {
     .getByRole('button', { name: '关闭', exact: true })
     .click();
   await page.getByRole('button', { name: 'v0.9.1 可用', exact: true }).click();
-  const progressDialog = page.getByRole('dialog', { name: 'Pi Desktop v0.9.1', exact: true });
+  const progressDialog = page.getByRole('dialog', { name: '更新到 v0.9.1', exact: true });
   await expect(progressDialog.getByText('安装包 116.5 MB', { exact: true })).toBeVisible();
   await update({ size: undefined });
   await expect(progressDialog.locator('.update-package-size')).toHaveCount(0);
@@ -397,6 +397,8 @@ try {
   await page.getByRole('button', { name: '稍后', exact: true }).click();
   await page.getByRole('textbox', { name: '任务输入' }).fill('重启前最后编辑的草稿');
   await page.getByRole('button', { name: '重启以更新到 v0.9.1', exact: true }).click();
+  await fs.mkdir('test-results', { recursive: true });
+  await page.locator('.modal').screenshot({ path: 'test-results/update-dialog-ready.png' });
   await restart.click();
   await expect
     .poll(() => app.evaluate(() => globalThis.updateUiFixture.installs), { timeout: 30000 })

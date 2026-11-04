@@ -221,7 +221,7 @@ export function AboutUpdates({
     </section>
   );
 }
-function RestartAfterTasks({ updates }: { updates: UpdateStore }) {
+export function RestartAfterTasks({ updates }: { updates: UpdateStore }) {
   const checked = useSyncExternalStore(updates.subscribe, updates.getRestartWhenIdle);
   return (
     <label className="check-row">
