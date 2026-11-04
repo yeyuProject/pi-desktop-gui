@@ -21,6 +21,7 @@ import {
   type ContentBlock,
   type MessageAction,
 } from '../../shared/types';
+import { userMessageInput } from '../../shared/message-content';
 
 import { readableError } from '../lib/format';
 import { PI_SOURCE_URL } from '../../shared/pi-version';
@@ -30,6 +31,18 @@ import { useLayer } from './useLayer';
 import { type MessageContext } from '../components/conversation/ChatMessage';
 const api = window.desktop;
 const noTools: ToolActivity[] = [];
+export interface OutgoingMessage {
+  id: number;
+  sessionId: string;
+  text: string;
+  images: number;
+  /** Sent while a task was running: it joins the queue rather than the transcript. */
+  queued: boolean;
+  /** User messages already shown when this one was sent. */
+  baseline: number;
+  /** Pi has accepted it; waiting for the transcript entry to replace the placeholder. */
+  accepted: boolean;
+}
 export function useWorkbench() {
   const [errors, setErrors] = useState<Record<string, string>>({});
   const [settingsOpen, setSettingsOpen] = useState(false),
@@ -49,6 +62,9 @@ export function useWorkbench() {
     updates,
   } = useRuntime(setError, setPrefs);
   const [pendingSessions, setPendingSessions] = useState<Record<string, number>>({});
+  /** The message just sent, shown until its real transcript entry or queue item arrives. */
+  const [outgoing, setOutgoing] = useState<OutgoingMessage>();
+  const outgoingSequence = useRef(0);
   const [selectionTransition, setSelectionTransition] = useState<{
     request: number;
     revision?: number;
@@ -169,6 +185,9 @@ export function useWorkbench() {
     flushDraft,
     isReadingAttachments,
     getDraftRevision,
+    holdSentDraft,
+    releaseSentDraft,
+    restoreUnsentDraft,
     draftGoal,
     openGoalComposer,
     editGoal,
@@ -195,6 +214,20 @@ export function useWorkbench() {
   const asks = useMemo(() => runtime.dialogs.filter((d) => d.ask), [runtime.dialogs]);
   const prompts = useMemo(() => runtime.dialogs.filter((d) => !d.approval && !d.ask), [runtime.dialogs]);
   const lastAssistant = messages.findLast((m) => m.role === 'assistant');
+  const userMessages = useMemo(() => messages.filter((m) => m.role === 'user').length, [messages]);
+  useEffect(() => {
+    if (!outgoing?.accepted || outgoing.sessionId !== selected?.id) return;
+    if (userMessages > outgoing.baseline) {
+      setOutgoing(undefined);
+      return;
+    }
+    // Some accepted prompts never add a user message (extensions may handle them).
+    const timer = setTimeout(
+      () => setOutgoing((current) => (current?.id === outgoing.id ? undefined : current)),
+      15000,
+    );
+    return () => clearTimeout(timer);
+  }, [outgoing, userMessages, selected?.id]);
   const actionsLocked = pending || running || !sessionEnabled;
   const visibleMessages = useMemo(() => messages.slice(-messageLimit), [messages, messageLimit]);
   const transcriptIndex = useMemo(() => new TranscriptIndex(), [selected?.id]);
@@ -356,9 +389,28 @@ export function useWorkbench() {
     if (!selected || (!sent.trim() && !images.length) || pending) return;
     setError('');
     setPending(true);
+    // An ordinary message leaves the composer at once and appears as "发送中" until Pi
+    // accepts it. Commands, Goal input and shell runs keep the original flow.
+    const optimistic = !draftGoal && !rawCommand && !/^\s*[/!]/.test(sent);
+    // Start the flush before clearing, so the store receives the text that is being sent.
+    const flushing = optimistic ? flushDraft() : undefined;
+    const held = optimistic ? holdSentDraft() : undefined;
+    let delivered = false;
+    if (held) autoScroll.current = true;
+    if (held)
+      setOutgoing({
+        id: ++outgoingSequence.current,
+        sessionId: target,
+        text: userMessageInput(sent),
+        images: images.length,
+        queued: ownRunning,
+        baseline: messages.filter((message) => message.role === 'user').length,
+        accepted: false,
+      });
     await attempt(async () => {
-      await flushDraft();
-      if (getDraftRevision() !== draftRevision) {
+      await (flushing ?? flushDraft());
+      // Typing into the already cleared composer starts the next draft; it does not change this one.
+      if (!held && getDraftRevision() !== draftRevision) {
         setNotice('草稿在准备发送时发生变化，请确认后重新发送', { level: 'warning' });
         return;
       }
@@ -428,8 +480,26 @@ export function useWorkbench() {
       } else if (/^\/\/\S/.test(sent)) {
         await api.invoke('send', selected.id, sent.slice(1), attachments, sendMode, images);
         await api.invoke('consumeDraft', selected.id, sent, attachments, images);
-      } else await api.invoke('send', selected.id, sent, attachments, sendMode, images);
+      } else {
+        await api.invoke('send', selected.id, sent, attachments, sendMode, images);
+        delivered = true;
+      }
     });
+    if (held) {
+      setOutgoing((current) =>
+        current?.sessionId !== target
+          ? current
+          : delivered && !current.queued
+            ? { ...current, accepted: true }
+            : undefined,
+      );
+      const unsent = releaseSentDraft(held, !delivered);
+      if (unsent)
+        setNotice('上一条消息没发出去，已保留在这里。', {
+          level: 'warning',
+          action: { label: '恢复到输入框', run: () => restoreUnsentDraft(unsent) },
+        });
+    }
     setPending(false);
     autoScroll.current = true;
     input.current?.focus();
@@ -805,6 +875,13 @@ export function useWorkbench() {
       anyRunning,
       modelLocked,
       messages,
+      // Hide the placeholder in the same render that shows the real message.
+      outgoing:
+        outgoing &&
+        outgoing.sessionId === selected?.id &&
+        !(outgoing.accepted && userMessages > outgoing.baseline)
+          ? outgoing
+          : undefined,
       approvals,
       lastAssistant,
       visibleMessages,

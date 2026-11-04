@@ -233,6 +233,7 @@ export default function App() {
                 'ownRuntime',
                 'running',
                 'messages',
+                'outgoing',
                 'approvals',
                 'lastAssistant',
                 'visibleMessages',
@@ -255,6 +256,7 @@ export default function App() {
             <Composer
               {...pick(model, [
                 'messages',
+                'outgoing',
                 'expanded',
                 'toggleTool',
                 'storage',

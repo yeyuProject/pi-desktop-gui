@@ -20,6 +20,7 @@ export class SessionAgents extends EventEmitter {
   private collecting = false;
   private visible = true;
   private sentState = '';
+  private sentDrafts = new Map<string, unknown[]>();
   setVisible(visible: boolean) {
     this.visible = visible;
     for (const agent of this.agents.values()) agent.setVisible(visible);
@@ -99,7 +100,22 @@ export class SessionAgents extends EventEmitter {
           draftGoal: session.draftGoal,
         })),
       });
-      if (!force && signature === this.sentState) return;
+      // Draft contents are compared by reference: writers replace these fields, and
+      // serializing up to 1 MiB of draft text on every save would be wasteful.
+      const drafts = new Map<string, unknown[]>(
+        state.sessions.map((session: import('../shared/types').Session) => [
+          session.id,
+          [session.draft, session.attachments, session.images, session.draftSnippets, session.draftQuotes],
+        ]),
+      );
+      const draftChanged =
+        drafts.size !== this.sentDrafts.size ||
+        [...drafts].some(([id, fields]) => {
+          const before = this.sentDrafts.get(id);
+          return !before || fields.some((field, index) => field !== before[index]);
+        });
+      this.sentDrafts = drafts;
+      if (!force && !draftChanged && signature === this.sentState) return;
       this.sentState = signature;
       this.emit('state', state);
     });

@@ -34,7 +34,10 @@ export function ComposerFeedback(
     storage,
     handleModelError,
     selected,
+    outgoing,
   } = props;
+  // A message sent during a run joins the queue once Pi accepts it; show it there meanwhile.
+  const sendingToQueue = outgoing?.queued && !outgoing.accepted ? outgoing : undefined;
   const now = useNow(ownRuntime && runtime.status === 'retrying' && Boolean(runtime.retry));
   return (
     <>
@@ -111,7 +114,7 @@ export function ComposerFeedback(
           )}
         </ErrorFeedback>
       )}
-      {ownRuntime && (runtime.steering.length > 0 || runtime.followUp.length > 0) && (
+      {ownRuntime && (runtime.steering.length > 0 || runtime.followUp.length > 0 || sendingToQueue) && (
         <div className="queue">
           <div>
             <span>待处理</span>
@@ -131,6 +134,12 @@ export function ComposerFeedback(
               {q.slice(0, 180)}
             </p>
           ))}
+          {sendingToQueue && (
+            <p className="outgoing-queue-item" aria-busy="true">
+              <span>发送中</span>
+              {sendingToQueue.text.slice(0, 180)}
+            </p>
+          )}
         </div>
       )}
       {ownRuntime &&

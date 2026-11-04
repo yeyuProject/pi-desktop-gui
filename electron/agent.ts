@@ -1633,6 +1633,7 @@ export class AgentService extends EventEmitter {
         const state = await this.rpc!.request('get_state');
         if (!state.isStreaming && !state.isCompacting && !state.pendingMessageCount) this.status('idle');
       }
+      let draftConsumed = false;
       if (
         consumeDraft &&
         this.store.matchesDraft(session, goalStart?.draftText ?? text, attachments, images) &&
@@ -1644,6 +1645,7 @@ export class AgentService extends EventEmitter {
         session.images = [];
         session.draftSnippets = [];
         session.draftQuotes = [];
+        draftConsumed = true;
       }
       if (
         (session.title === '新会话' || session.title === '新对话') &&
@@ -1653,6 +1655,9 @@ export class AgentService extends EventEmitter {
         void this.rpc!.request('set_session_name', { name: session.title }).catch(() => {});
       }
       this.activity();
+      // The renderer keeps the sent text out of the composer only until this state arrives;
+      // save now instead of after the 2 s busy-period delay that activity() schedules.
+      if (draftConsumed) this.save();
     } catch (e) {
       this.setError(errorText(e));
       if (!isActive && !this.stopRequested) {

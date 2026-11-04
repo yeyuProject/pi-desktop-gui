@@ -67,6 +67,28 @@ test('state deduplication keeps Goal editor changes while merging busy timestamp
   assert.equal(states.length, 4, 'explicit editor results also refresh renderer-owned buffers');
 });
 
+test('state deduplication still broadcasts draft changes while the run status is unchanged', async (t) => {
+  const { agents, store, a } = await fixture(t);
+  const agent = agents.get(a.id);
+  const states: unknown[] = [];
+  agents.on('state', (state) => states.push(structuredClone(state)));
+  a.lastStatus = 'running';
+  a.draft = '已发送的文字';
+  agent.emit('state', store.state);
+  agent.emit('state', store.state);
+  assert.equal(states.length, 1);
+  // Sending clears the stored draft while the list status stays "running".
+  a.draft = '';
+  a.attachments = [];
+  agent.emit('state', store.state);
+  assert.equal(states.length, 2, 'a cleared draft must reach the composer during a run');
+  a.draftQuotes = [];
+  agent.emit('state', store.state);
+  assert.equal(states.length, 3, 'replaced quotes, snippets and images count as draft changes');
+  agent.emit('state', store.state);
+  assert.equal(states.length, 3);
+});
+
 test('idle background processes and cached runtimes are released, selected and busy sessions survive', async (t) => {
   const { agents, store, a, b, runtimes } = await fixture(t);
   const first = agents.get(a.id),

@@ -116,6 +116,9 @@ jobs:
       - name: Test local feedback, notification motion and placement
         if: matrix.os == 'ubuntu-latest'
         run: xvfb-run -a -s "-screen 0 1920x1080x24" npm run test:feedback-motion-ui
+      - name: Test composer clearing and pending messages on send
+        if: matrix.os == 'ubuntu-latest'
+        run: xvfb-run -a -s "-screen 0 1920x1080x24" npm run test:send-latency-ui
       - name: Test native Linux appearance and confirmation lifecycle
         if: matrix.os == 'ubuntu-latest'
         env:

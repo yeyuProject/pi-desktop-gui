@@ -49,6 +49,20 @@ interface DraftOptions {
   attempt: <T>(fn: () => Promise<T>) => Promise<T | undefined>;
   setError: (value: string) => void;
 }
+type DraftContents = {
+  draft: string;
+  attachments: string[];
+  images: ImageAttachment[];
+  snippets: DraftSnippet[];
+  quotes: DraftQuote[];
+};
+export interface HeldDraft {
+  sessionId: string;
+  snapshot: DraftContents;
+  revision: number;
+  /** Pi accepted it; the hold ends when the cleared draft arrives in the next state. */
+  delivered?: boolean;
+}
 export function useDraft({
   state,
   stateRef,
@@ -81,6 +95,9 @@ export function useDraft({
   const recall = useRef(-1);
   const composerDraft = useRef({ draft, attachments, images, snippets, quotes: draftQuotes });
   const draftRevision = useRef(0);
+  /** A sent draft shown as empty until the main process accepts or rejects it. */
+  const heldDraft = useRef<HeldDraft | undefined>(undefined);
+  const [heldExpired, setHeldExpired] = useState(0);
   const pasteCaret = useRef<{ sessionId: string | undefined; revision: number; offset: number }>(undefined);
   const savingDraft = useRef(Promise.resolve<unknown>(undefined));
   const pendingDrafts = useRef(0);
@@ -317,6 +334,65 @@ export function useDraft({
     if (pendingDrafts.current) await api.invoke('flushDraft');
     await savingDraft.current;
   };
+  /** Show an empty composer at once; the stored draft is cleared only after Pi accepts it. */
+  const holdSentDraft = (): HeldDraft | undefined => {
+    if (!selected) return undefined;
+    const held = { sessionId: selected.id, snapshot: composerDraft.current, revision: draftRevision.current };
+    heldDraft.current = held;
+    composerDraft.current = { draft: '', attachments: [], images: [], snippets: [], quotes: [] };
+    setDraft('');
+    setAttachments([]);
+    setImages([]);
+    setSnippets([]);
+    setDraftQuotes([]);
+    recall.current = -1;
+    return held;
+  };
+  /**
+   * After a failed send, put the text back unless the user has typed something new;
+   * in that case return the snapshot so the caller can offer to restore it.
+   */
+  const releaseSentDraft = (held: HeldDraft, failed: boolean): DraftContents | undefined => {
+    if (heldDraft.current !== held) return undefined;
+    if (!failed) {
+      // The send response can arrive before the state that clears the stored draft. Keep the
+      // composer empty until then; if the store keeps the text (it did not match), show it again.
+      held.delivered = true;
+      setTimeout(() => {
+        if (heldDraft.current !== held) return;
+        heldDraft.current = undefined;
+        setHeldExpired((value) => value + 1);
+      }, 3000);
+      return undefined;
+    }
+    heldDraft.current = undefined;
+    if (stateRef.current?.selectedSessionId !== held.sessionId) return undefined;
+    if (draftRevision.current !== held.revision) return held.snapshot;
+    const { snapshot } = held;
+    composerDraft.current = snapshot;
+    setDraft(snapshot.draft);
+    setAttachments(snapshot.attachments);
+    setImages(snapshot.images);
+    setSnippets(snapshot.snippets);
+    setDraftQuotes(snapshot.quotes);
+    return undefined;
+  };
+  /** Put an unsent snapshot in front of what the user typed since. */
+  const restoreUnsentDraft = (snapshot: DraftContents) => {
+    const current = composerDraft.current;
+    const separator = snapshot.draft && current.draft ? '\n\n' : '';
+    const shift = snapshot.draft.length + separator.length;
+    persistDraft(
+      snapshot.draft + separator + current.draft,
+      [...new Set([...snapshot.attachments, ...current.attachments])],
+      [...snapshot.images, ...current.images],
+      [
+        ...snapshot.snippets,
+        ...current.snippets.map((piece) => ({ ...piece, offset: piece.offset + shift })),
+      ],
+      mergeDraftQuotes(snapshot.quotes, current.quotes),
+    );
+  };
   const composeDraft = (body = composerDraft.current.draft) =>
     composeQuotedInput(
       composeDraftText(
@@ -538,6 +614,16 @@ export function useDraft({
   }, [selected?.id]);
   useLayoutEffect(() => {
     if (!selected) return;
+    const held = heldDraft.current;
+    // Until Pi accepts the message, the store still holds the sent text. Keep the composer empty.
+    if (
+      held?.sessionId === selected.id &&
+      loadedDraft.current === selected.id &&
+      selected.draft === held.snapshot.draft &&
+      selected.attachments.join('|') === held.snapshot.attachments.join('|')
+    )
+      return;
+    if (held?.delivered && held.sessionId === selected.id) heldDraft.current = undefined;
     if (loadedDraft.current !== selected.id && queuedSave.current) {
       clearTimeout(draftTimer.current);
       const save = queuedSave.current;
@@ -567,12 +653,21 @@ export function useDraft({
     selected?.attachments.join('|'),
     selected?.draftSnippets,
     selected?.draftQuotes,
+    heldExpired,
   ]);
   // Text/state broadcasts must not cancel an in-flight image read. A separate
   // effect owns image identity; its result merges into the latest typed draft.
   useLayoutEffect(() => {
     if (!selected) return;
     if (pendingDrafts.current && selected.id === imageSession.current) return;
+    const held = heldDraft.current;
+    if (
+      held?.sessionId === selected.id &&
+      imageSession.current === selected.id &&
+      (selected.images ?? []).map((image) => image.id).join('|') ===
+        held.snapshot.images.map((image) => image.id).join('|')
+    )
+      return;
     const currentImages = composerDraft.current.images;
     const sameImages =
       imageSession.current === selected.id &&
@@ -616,7 +711,7 @@ export function useDraft({
         active = false;
       };
     }
-  }, [selected?.id, selected?.images?.map((i) => i.id).join('|')]);
+  }, [selected?.id, selected?.images?.map((i) => i.id).join('|'), heldExpired]);
   useEffect(() => {
     setFileResults([]);
     setFileIndex(0);
@@ -709,6 +804,9 @@ export function useDraft({
     persistDraft,
     flushDraft,
     getDraftRevision: () => draftRevision.current,
+    holdSentDraft,
+    releaseSentDraft,
+    restoreUnsentDraft,
     onDraft,
     focusComposer,
     attachmentsPending: isReadingAttachments(),

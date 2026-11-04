@@ -46,6 +46,7 @@ export type ComposerProps = Pick<
   | 'environment'
   | 'runtime'
   | 'messages'
+  | 'outgoing'
   | 'expanded'
   | 'toggleTool'
   | 'error'

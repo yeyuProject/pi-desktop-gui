@@ -4,6 +4,7 @@ import { TranscriptIndex } from '../src/lib/transcript-index';
 import * as goalInput from '../shared/goal-input';
 import * as goal from '../shared/goal';
 import * as ask from '../shared/ask';
+import * as messageContent from '../shared/message-content';
 import test, { type TestContext } from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
@@ -178,6 +179,13 @@ function harness(
     flushDraft: async () => {},
     isReadingAttachments: () => false,
     getDraftRevision: () => 0,
+    holdSentDraft: (() => ({
+      sessionId: '',
+      snapshot: { draft: '', attachments: [], images: [], snippets: [], quotes: [] },
+      revision: 0,
+    })) as () => unknown,
+    releaseSentDraft: (() => undefined) as (...args: unknown[]) => unknown,
+    restoreUnsentDraft: noOp,
     snippets: [],
     draftQuotes: [],
     addQuote: noOp,
@@ -209,6 +217,7 @@ function harness(
     '../../shared/goal-input': goalInput,
     '../../shared/goal': goal,
     '../../shared/ask': ask,
+    '../../shared/message-content': messageContent,
     '../lib/format': { readableError },
     '../lib/conversation-layout': { hideRecoveredErrors },
     '../lib/plan-transcript': { hidePlanTools },
@@ -793,7 +802,7 @@ test('only the current session restores its saved scroll position', async () => 
   f.unmount();
 });
 
-test('edits during the draft save barrier cancel the old send snapshot', async () => {
+test('edits during the draft save barrier cancel the old snapshot of a non-optimistic send', async () => {
   const calls: string[] = [];
   const saving = deferred();
   const f = harness(async (method) => {
@@ -801,7 +810,8 @@ test('edits during the draft save barrier cancel the old send snapshot', async (
     return [];
   });
   let revision = 0;
-  f.draft.composeDraft = () => 'same prompt';
+  // Slash commands keep the original flow: the composer is not cleared before Pi accepts them.
+  f.draft.composeDraft = () => '/same prompt';
   f.draft.getDraftRevision = () => revision;
   f.draft.flushDraft = () => saving.promise;
   f.view.environment.supported = true;
@@ -818,6 +828,48 @@ test('edits during the draft save barrier cancel the old send snapshot', async (
   assert.ok(!calls.includes('send'));
   assert.deepEqual(f.current.attachments, ['added-during-save.txt']);
   assert.ok(f.noticeStore.get().some((item) => /草稿.*变化/.test(item.text)));
+  f.unmount();
+});
+
+test('an ordinary message clears the composer first, so later edits start the next draft', async () => {
+  const calls: { method: string }[] = [];
+  const saving = deferred();
+  const f = harness(async (method) => {
+    calls.push({ method });
+    return [];
+  });
+  let revision = 0,
+    held = 0;
+  const released: boolean[] = [];
+  f.draft.composeDraft = () => 'same prompt';
+  f.draft.getDraftRevision = () => revision;
+  f.draft.flushDraft = () => saving.promise;
+  f.draft.holdSentDraft = () => {
+    held++;
+    return { sessionId: 'A', snapshot: { draft: 'same prompt' }, revision: 0 };
+  };
+  f.draft.releaseSentDraft = (_held: unknown, failed: unknown) => {
+    released.push(Boolean(failed));
+    return undefined;
+  };
+  f.view.environment.supported = true;
+  f.select('A');
+  f.flush();
+  const sending = f.current.send();
+  f.flush();
+  assert.equal(held, 1, 'the composer is cleared before the save barrier resolves');
+  assert.equal(f.current.outgoing?.text, 'same prompt');
+  revision++;
+  f.render();
+  saving.resolve();
+  await sending;
+  await f.settle();
+  assert.ok(
+    calls.some((call) => call.method === 'send'),
+    'later edits do not cancel the send',
+  );
+  assert.deepEqual(released, [false]);
+  assert.ok(!f.noticeStore.get().some((item) => /草稿.*变化/.test(item.text)));
   f.unmount();
 });
 

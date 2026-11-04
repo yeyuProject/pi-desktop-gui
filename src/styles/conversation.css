@@ -686,3 +686,23 @@
   white-space: pre-wrap;
   overflow-wrap: anywhere;
 }
+/* UI12: a sent message waiting for Pi to accept it. */
+.outgoing-message .message-content {
+  opacity: 0.65;
+}
+.outgoing-message .message-content > small {
+  display: block;
+  color: var(--muted);
+}
+.outgoing-status {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 6px;
+  margin: 4px 0 0;
+  color: var(--muted);
+  font-size: calc(11px * var(--font-scale));
+}
+.queue .outgoing-queue-item {
+  opacity: 0.65;
+}

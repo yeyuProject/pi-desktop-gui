@@ -1,4 +1,4 @@
-import { ArrowDown, ArrowUp, CircleHelp, Search, X } from 'lucide-react';
+import { ArrowDown, ArrowUp, CircleHelp, LoaderCircle, Search, X } from 'lucide-react';
 import { ThinkingBlock } from './conversation/ThinkingBlock';
 import { ToolCard } from './conversation/ToolCard';
 import { ApprovalCard } from './Approval';
@@ -56,6 +56,7 @@ export function Conversation(
     | 'ownRuntime'
     | 'running'
     | 'messages'
+    | 'outgoing'
     | 'approvals'
     | 'lastAssistant'
     | 'visibleMessages'
@@ -93,6 +94,7 @@ export function Conversation(
     ownRuntime,
     running,
     messages,
+    outgoing,
     approvals,
     lastAssistant,
     visibleMessages,
@@ -887,6 +889,23 @@ export function Conversation(
             </button>
           )}
           {endIndex === messages.length && placedTools.trailing.map(renderTool)}
+          {endIndex === messages.length && outgoing && !outgoing.queued && (
+            <article className="message user outgoing-message" aria-busy="true">
+              <div className="message-heading">
+                <strong>你</strong>
+              </div>
+              <div className="message-content">
+                <div className={'user-message-text' + (outgoing.text.length > 600 ? ' collapsed' : '')}>
+                  <p>{outgoing.text.slice(0, 4000)}</p>
+                </div>
+                {outgoing.images > 0 && <small>{outgoing.images} 张图片</small>}
+              </div>
+              <p className="outgoing-status" role="status">
+                <LoaderCircle size={12} className="spin" />
+                发送中…
+              </p>
+            </article>
+          )}
           {ownRuntime &&
             approvals.map((d, i) => (
               <ApprovalCard
