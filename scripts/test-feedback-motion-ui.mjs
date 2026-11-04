@@ -255,8 +255,11 @@ try {
       await notify('相同提示', 'info');
       const firstId = Number(await page.locator('.toast').getAttribute('data-notice-id'));
       await page.evaluate(() => window.feedbackNotify('相同提示'));
-      await expect(page.locator('.toast')).toHaveCount(2);
-      assert.ok(Number(await page.locator('.toast').last().getAttribute('data-notice-id')) > firstId);
+      // A repeat replays the same toast instead of stacking a copy.
+      await expect
+        .poll(async () => Number(await page.locator('.toast').getAttribute('data-notice-id')))
+        .toBeGreaterThan(firstId);
+      await expect(page.locator('.toast')).toHaveCount(1);
       await dismissAll();
       for (const width of [900, 1600]) {
         await page.setViewportSize({ width, height: 1000 });

@@ -68,12 +68,22 @@ export class NoticeStore {
   }
   notice = (text: string, options: NoticeOptions = {}) => {
     if (!text.trim()) return;
+    const level = options.level ?? 'success';
+    // Repeating a notice replays it instead of stacking an identical copy.
+    const same = (item: Entry) =>
+      item.value.text === text && item.value.level === level && !item.value.leaving;
+    for (const item of this.entries.filter(same)) {
+      this.cancel(item.timer);
+      this.cancel(item.motionTimer);
+    }
+    this.entries = this.entries.filter((item) => !same(item));
+    this.waiting = this.waiting.filter((item) => !same(item));
     const entry: Entry = {
       value: {
         ...options,
         id: ++this.sequence,
         text,
-        level: options.level ?? 'success',
+        level,
         entering: true,
         leaving: false,
       },

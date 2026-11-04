@@ -44,26 +44,30 @@ test('notice duration follows character count, severity and action time', () => 
   assert.equal(noticeDuration('错误', { level: 'error' }), Infinity);
 });
 
-test('identical text gets another id, another entrance and its own deadline', () => {
+test('identical text replays in place with another id, entrance and a fresh deadline', () => {
   const clock = new ManualClock(),
     store = new NoticeStore(clock);
   const first = store.notice('相同提示');
+  store.notice('另一条');
   clock.advance(1000);
   const second = store.notice('相同提示');
   assert.ok(second! > first!);
+  assert.deepEqual(
+    store.get().map((item) => item.text),
+    ['另一条', '相同提示'],
+    'the repeat replaces the visible copy instead of stacking',
+  );
   assert.equal(store.get()[1].entering, true);
   clock.advance(NOTICE_ENTER_MS);
   assert.equal(store.get()[1].entering, false);
   clock.advance(3500 - 1000 - NOTICE_ENTER_MS);
   assert.equal(store.get()[0].leaving, true);
   assert.equal(store.get()[1].leaving, false);
-  clock.advance(NOTICE_EXIT_MS);
-  assert.deepEqual(
-    store.get().map((item) => item.id),
-    [second],
-  );
-  clock.advance(1000);
+  clock.advance(NOTICE_EXIT_MS + 1000);
   assert.deepEqual(store.get(), []);
+  assert.equal(store.notice('相同提示', { level: 'warning' }) !== undefined, true);
+  store.notice('相同提示');
+  assert.equal(store.get().length, 2, 'a different level is a different notice');
   store.dispose();
 });
 

@@ -4,6 +4,8 @@
 
 **2026-11-04 移植后已在 Windows 本机验证：** `npm run build`、`lint`、`format:check` 通过；`npm test` 845 项，835 通过、10 项平台跳过、0 失败；`test:feedback-motion-ui`（三套外观 × 明暗）、UI11 的 `test:motion-ui`、`test:optimizations-ui`、`test:connection-ui`、`test:pi-settings-ui`、`test-coding-ui` 通过。首次运行 `test:feedback-motion-ui` 发现并修正：保存按钮最小宽度被 `.modal footer button` 覆盖；测试脚本在第二套外观前没有恢复侧栏，以及几处与 UI11 计时（悬停暂停全部、重新完整计时）不符的等待。macOS、Linux 未在本机运行。
 
+**2026-11-04 补充修正。** 推送后运行 `test:chat-ui` 发现：同一句提示连续出现两次（例如选区跨消息时的引用提示）会叠出两条相同的提示，旧的单条提示状态不会这样。现在同级别、同文字的提示再次出现时替换原来那条：生成新 id、重新播放进场并重新计时，不再叠加。`notice-store.test.ts` 和 `test:feedback-motion-ui` 已按此更新。
+
 ## 改动
 
 - `src/lib/notice-store.ts` 持有提示和计时器，只有 `Toasts` 通过 `useSyncExternalStore` 订阅。`useWorkbench` 不再保存提示状态，运行时通知按会话和递增 ID 转入 store，切换会话时不重放旧通知。
