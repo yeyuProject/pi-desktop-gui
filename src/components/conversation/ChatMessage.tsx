@@ -258,7 +258,8 @@ export const ChatMessage = memo(
           ) : m.role === 'assistant' && ctx.running ? (
             <span className="stream-cursor" />
           ) : null}
-          {m.errorMessage && <ErrorFeedback message={m.errorMessage} />}
+          {/* A transcript error is history, not a live alert. */}
+          {m.errorMessage && <ErrorFeedback message={m.errorMessage} role={undefined} />}
           <MessageImages message={m} />
           {ctx.running &&
             typeof m.content !== 'string' &&

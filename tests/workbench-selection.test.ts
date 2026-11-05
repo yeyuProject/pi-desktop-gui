@@ -204,7 +204,7 @@ function harness(
     clearTimeout: (id) => clear(id as number),
   });
   const dependencies: Record<string, unknown> = {
-    '../lib/notice-store': { notice: noticeStore.notice },
+    '../lib/notice-store': { notice: noticeStore.notice, dismissNotice: noticeStore.dismiss },
     react: hooks,
     './useRuntime': { useRuntime: () => view },
     './useDraft': { useDraft: () => draft },

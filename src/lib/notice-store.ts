@@ -194,3 +194,4 @@ export class NoticeStore {
 }
 export const notices = new NoticeStore();
 export const notice = notices.notice;
+export const dismissNotice = notices.dismiss;

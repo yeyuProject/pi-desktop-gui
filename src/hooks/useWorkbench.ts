@@ -25,7 +25,7 @@ import { userMessageInput } from '../../shared/message-content';
 
 import { readableError } from '../lib/format';
 import { PI_SOURCE_URL } from '../../shared/pi-version';
-import { notice as setNotice } from '../lib/notice-store';
+import { notice as setNotice, dismissNotice } from '../lib/notice-store';
 
 import { useLayer } from './useLayer';
 import { type MessageContext } from '../components/conversation/ChatMessage';
@@ -84,6 +84,8 @@ export function useWorkbench() {
     [rename, setRename] = useState<{ kind: 'project' | 'session'; id: string; name: string }>(),
     [menuId, setMenuId] = useState('');
   const notificationCursor = useRef<{ sessionId?: string; id: number }>({ id: 0 });
+  /** Toasts raised by the shown session's runtime; they belong to that session and close on switch. */
+  const runtimeNotices = useRef<number[]>([]);
   const [testResult, setTestResult] = useState(''),
     [diagnostic, setDiagnostic] = useState('');
   const [shortcutsOpen, setShortcutsOpen] = useState(false),
@@ -306,7 +308,14 @@ export function useWorkbench() {
     const current = notificationCursor.current;
     const notifications = runtime.notifications ?? [];
     if (current.sessionId === runtime.sessionId) {
-      for (const item of notifications) if (item.id > current.id) setNotice(item.text, { level: item.level });
+      for (const item of notifications)
+        if (item.id > current.id) {
+          const id = setNotice(item.text, { level: item.level });
+          if (id !== undefined) runtimeNotices.current.push(id);
+        }
+    } else {
+      for (const id of runtimeNotices.current) dismissNotice(id);
+      runtimeNotices.current = [];
     }
     notificationCursor.current = {
       sessionId: runtime.sessionId,
