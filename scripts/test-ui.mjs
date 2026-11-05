@@ -101,7 +101,10 @@ try {
   await page.getByRole('button', { name: '发送任务', exact: true }).click();
   await waitStatus('running');
   await page.getByRole('textbox', { name: '任务输入' }).fill('停止后恢复这条后续任务');
-  await page.getByLabel('运行中发送方式').selectOption('followUp');
+  await page
+    .getByRole('radiogroup', { name: '运行中发送方式' })
+    .getByRole('radio', { name: '完成后执行' })
+    .click();
   await page.getByRole('button', { name: '发送任务', exact: true }).click();
   await page.locator('.queue').getByText('停止后恢复这条后续任务', { exact: false }).waitFor();
   await page.getByRole('button', { name: '停止任务', exact: true }).click();

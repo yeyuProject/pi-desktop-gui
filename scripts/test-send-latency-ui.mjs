@@ -149,7 +149,7 @@ try {
   await expect.poll(async () => (await snapshot()).runtime.status, { timeout: 60000 }).toBe('running');
   await delaySend(1000);
   await input().fill('UI12_QUEUE 补充要求');
-  // Running controls: quiet mode menu, stop, and the send button keeps its icon.
+  // Running controls: icon mode choice, stop, and the send button keeps its icon.
   const sendButton = page.locator('.send-button');
   await expect(sendButton).toHaveAttribute('title', /立即补充/);
   assert.equal((await sendButton.innerText()).trim(), '', 'the send button shows an icon, not text');
@@ -159,9 +159,14 @@ try {
     await page.waitForFunction((theme) => document.documentElement.dataset.theme === theme, theme);
     await page.locator('.composer').screenshot({ path: `test-results/composer-running-${theme}.png` });
   }
-  await page.getByLabel('运行中发送方式').selectOption('followUp');
+  const modes = page.getByRole('radiogroup', { name: '运行中发送方式' });
+  await modes.getByRole('radio', { name: '完成后执行' }).click();
+  await expect(modes.getByRole('radio', { name: '完成后执行' })).toHaveAttribute('aria-checked', 'true');
   await expect(sendButton).toHaveAttribute('title', /完成后执行/);
-  await page.getByLabel('运行中发送方式').selectOption('steer');
+  // Arrow keys move between the two choices.
+  await modes.getByRole('radio', { name: '完成后执行' }).press('ArrowLeft');
+  await expect(modes.getByRole('radio', { name: '立即补充' })).toHaveAttribute('aria-checked', 'true');
+  await expect(modes.getByRole('radio', { name: '立即补充' })).toBeFocused();
   await startFrames('UI12_QUEUE');
   await input().press('Enter');
   await expect(page.locator('.outgoing-queue-item')).toBeVisible();

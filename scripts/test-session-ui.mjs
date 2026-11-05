@@ -658,10 +658,7 @@ try {
       'Browsing saved history must not start a Pi process',
     );
     assert.equal((await diagnostic()).sessionSwitch, undefined);
-    assert.equal(
-      await page.locator('.stop-button, .elapsed, select[aria-label="运行中发送方式"]').count(),
-      0,
-    );
+    assert.equal(await page.locator('.stop-button, .elapsed, [aria-label="运行中发送方式"]').count(), 0);
     // Menu metadata and the actual chat connection are distinct operations.
     const modelOpening = await measureModelOpen(fixture, 'cross-directory-first-visit');
     const explicitConnection = await measureExplicitConnection(fixture, 'cross-directory-first-visit');

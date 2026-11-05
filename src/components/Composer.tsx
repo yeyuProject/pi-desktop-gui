@@ -6,7 +6,8 @@ import { GoalBudgetPicker } from './GoalBudgetPicker';
 import { topLayer } from '../hooks/useLayer';
 import {
   ArrowUp,
-  ListPlus,
+  ListEnd,
+  CornerDownRight,
   Square,
   Search,
   X,
@@ -119,6 +120,11 @@ export type ComposerProps = Pick<
   | 'setThinking'
   | 'inspectFile'
 > & { state: AppState };
+/** Running send modes: join the current turn now, or wait until it finishes. */
+const sendModes = [
+  { mode: 'steer', label: '立即补充', hint: '插入正在进行的这一轮', Icon: CornerDownRight },
+  { mode: 'followUp', label: '完成后执行', hint: '排在这一轮结束之后', Icon: ListEnd },
+] as const;
 export function Composer(props: ComposerProps) {
   const {
     state,
@@ -919,16 +925,35 @@ export function Composer(props: ComposerProps) {
               </span>
             )}
             {ownRunning && !connecting && !goalMode && !ask ? (
-              <select
+              <div
                 className="send-mode"
+                role="radiogroup"
                 aria-label="运行中发送方式"
-                title="Enter 发送的方式"
-                value={sendMode}
-                onChange={(e) => setSendMode(e.target.value as typeof sendMode)}
+                onKeyDown={(event) => {
+                  if (!['ArrowLeft', 'ArrowRight', 'ArrowUp', 'ArrowDown'].includes(event.key)) return;
+                  event.preventDefault();
+                  const next = sendMode === 'steer' ? 'followUp' : 'steer';
+                  setSendMode(next);
+                  event.currentTarget.querySelector<HTMLElement>(`[data-mode="${next}"]`)?.focus();
+                }}
               >
-                <option value="steer">立即补充</option>
-                <option value="followUp">完成后执行</option>
-              </select>
+                {sendModes.map(({ mode, label, hint, Icon }) => (
+                  <button
+                    key={mode}
+                    type="button"
+                    role="radio"
+                    data-mode={mode}
+                    aria-checked={sendMode === mode}
+                    aria-label={label}
+                    title={`${label}：${hint}`}
+                    tabIndex={sendMode === mode ? 0 : -1}
+                    className={sendMode === mode ? 'active' : undefined}
+                    onClick={() => setSendMode(mode)}
+                  >
+                    <Icon size={14} />
+                  </button>
+                ))}
+              </div>
             ) : (
               <span className="composer-hint">
                 <kbd>↵</kbd> 发送
@@ -994,8 +1019,6 @@ export function Composer(props: ComposerProps) {
                   ) : (
                     '开始 Goal'
                   )
-                ) : ownRunning && sendMode === 'followUp' ? (
-                  <ListPlus size={18} />
                 ) : (
                   <ArrowUp size={19} />
                 )}

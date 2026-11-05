@@ -251,7 +251,7 @@ try {
       !window.chatUiRuntimes.get(window.chatUiState.selectedSessionId)?.connected &&
       !document.querySelector('.stop-button') &&
       !document.querySelector('.run-meta')?.textContent.includes('正在连接 Pi') &&
-      !document.querySelector('select[aria-label="运行中发送方式"]') &&
+      !document.querySelector('[aria-label="运行中发送方式"]') &&
       !document.querySelector('.elapsed'),
   );
   await picker

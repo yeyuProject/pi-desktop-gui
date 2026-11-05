@@ -706,16 +706,35 @@
 .queue .outgoing-queue-item {
   opacity: 0.65;
 }
-/* Running send mode: a quiet text menu beside the stop and send buttons. */
-.composer-toolbar select.send-mode {
+/* Running send mode: two icon choices beside the stop and send buttons. */
+.send-mode {
+  display: inline-flex;
+  gap: 2px;
+  padding: 2px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+}
+.send-mode > button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 26px;
+  height: 26px;
+  padding: 0;
+  border: 0;
+  border-radius: 6px;
   background: transparent;
   color: var(--muted);
-  border-radius: 7px;
-  padding: 5px 6px;
-  cursor: pointer;
 }
-.composer-toolbar select.send-mode:hover,
-.composer-toolbar select.send-mode:focus-visible {
+.send-mode > button:hover {
   background: var(--hover);
   color: var(--ink);
+}
+.send-mode > button.active {
+  background: var(--hover);
+  color: var(--ink);
+}
+.send-mode > button:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
 }
