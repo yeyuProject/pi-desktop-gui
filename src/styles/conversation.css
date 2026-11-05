@@ -706,3 +706,16 @@
 .queue .outgoing-queue-item {
   opacity: 0.65;
 }
+/* Running send mode: a quiet text menu beside the stop and send buttons. */
+.composer-toolbar select.send-mode {
+  background: transparent;
+  color: var(--muted);
+  border-radius: 7px;
+  padding: 5px 6px;
+  cursor: pointer;
+}
+.composer-toolbar select.send-mode:hover,
+.composer-toolbar select.send-mode:focus-visible {
+  background: var(--hover);
+  color: var(--ink);
+}

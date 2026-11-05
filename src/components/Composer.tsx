@@ -6,6 +6,7 @@ import { GoalBudgetPicker } from './GoalBudgetPicker';
 import { topLayer } from '../hooks/useLayer';
 import {
   ArrowUp,
+  ListPlus,
   Square,
   Search,
   X,
@@ -412,6 +413,16 @@ export function Composer(props: ComposerProps) {
       container.style.removeProperty('--composer-offset');
     };
   }, []);
+  const sendLabel = answering
+    ? '发送回答'
+    : editingGoal
+      ? '保存修改'
+      : goalMode && !localGoalCommand
+        ? '开始 Goal'
+        : '发送任务';
+  // While running, the button keeps its icon; the mode menu beside it and the tooltip say what it does.
+  const sendHint =
+    ownRunning && sendLabel === '发送任务' ? (sendMode === 'steer' ? '立即补充' : '完成后执行') : sendLabel;
   const explainSend = () => {
     if (selectionChanging) return;
     const target = !storage.writable
@@ -909,7 +920,9 @@ export function Composer(props: ComposerProps) {
             )}
             {ownRunning && !connecting && !goalMode && !ask ? (
               <select
+                className="send-mode"
                 aria-label="运行中发送方式"
+                title="Enter 发送的方式"
                 value={sendMode}
                 onChange={(e) => setSendMode(e.target.value as typeof sendMode)}
               >
@@ -956,25 +969,8 @@ export function Composer(props: ComposerProps) {
               <button
                 aria-describedby={sendDisabledReason ? 'send-disabled-reason' : undefined}
                 className={'send-button' + (goalMode && !localGoalCommand ? ' goal-send-button' : '')}
-                aria-label={
-                  answering
-                    ? '发送回答'
-                    : editingGoal
-                      ? '保存修改'
-                      : goalMode && !localGoalCommand
-                        ? '开始 Goal'
-                        : '发送任务'
-                }
-                title={
-                  sendDisabledReason ||
-                  (answering
-                    ? '发送回答'
-                    : editingGoal
-                      ? '保存修改'
-                      : goalMode && !localGoalCommand
-                        ? '开始 Goal'
-                        : '发送任务')
-                }
+                aria-label={sendLabel}
+                title={sendDisabledReason || sendHint}
                 disabled={
                   (!draft.trim() && !images.length && !snippets.length && !draftQuotes.length) ||
                   (!editingGoal && attachmentBytes > 1024 * 1024) ||
@@ -998,12 +994,8 @@ export function Composer(props: ComposerProps) {
                   ) : (
                     '开始 Goal'
                   )
-                ) : ownRunning ? (
-                  sendMode === 'steer' ? (
-                    '补充'
-                  ) : (
-                    '排队'
-                  )
+                ) : ownRunning && sendMode === 'followUp' ? (
+                  <ListPlus size={18} />
                 ) : (
                   <ArrowUp size={19} />
                 )}

@@ -149,6 +149,19 @@ try {
   await expect.poll(async () => (await snapshot()).runtime.status, { timeout: 60000 }).toBe('running');
   await delaySend(1000);
   await input().fill('UI12_QUEUE 补充要求');
+  // Running controls: quiet mode menu, stop, and the send button keeps its icon.
+  const sendButton = page.locator('.send-button');
+  await expect(sendButton).toHaveAttribute('title', /立即补充/);
+  assert.equal((await sendButton.innerText()).trim(), '', 'the send button shows an icon, not text');
+  await fs.mkdir('test-results', { recursive: true });
+  for (const theme of ['light', 'dark']) {
+    await page.evaluate((theme) => window.desktop.invoke('saveSettings', { theme }), theme);
+    await page.waitForFunction((theme) => document.documentElement.dataset.theme === theme, theme);
+    await page.locator('.composer').screenshot({ path: `test-results/composer-running-${theme}.png` });
+  }
+  await page.getByLabel('运行中发送方式').selectOption('followUp');
+  await expect(sendButton).toHaveAttribute('title', /完成后执行/);
+  await page.getByLabel('运行中发送方式').selectOption('steer');
   await startFrames('UI12_QUEUE');
   await input().press('Enter');
   await expect(page.locator('.outgoing-queue-item')).toBeVisible();
