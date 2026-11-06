@@ -6,7 +6,7 @@ import { readableError } from '../lib/format';
 import { Modal } from './Modal';
 import { RichText } from './conversation/Markdown';
 import { ErrorFeedback } from './ErrorFeedback';
-import { RestartAfterTasks, UpdateActions } from './UpdateDetails';
+import { RestartAfterTasks, UpdateActions, UpdateStatus, restartHint } from './UpdateDetails';
 type UpdateSubscription = { updates: UpdateStore; busy: boolean; install: () => Promise<void> };
 export function UpdateDialog({ updates, busy, install, close }: UpdateSubscription & { close: () => void }) {
   const update = useSyncExternalStore(updates.subscribe, updates.get);
@@ -48,17 +48,7 @@ export function UpdateDialog({ updates, busy, install, close }: UpdateSubscripti
       close={close}
     >
       <div className="modal-body update-dialog">
-        {status && (
-          <div className={`update-status ${update.state}`}>
-            <span className="update-status-icon" aria-hidden="true">
-              {status.icon}
-            </span>
-            <div>
-              <p className="update-status-title">{status.title}</p>
-              {status.detail && <p className="update-status-detail">{status.detail}</p>}
-            </div>
-          </div>
-        )}
+        {status && <UpdateStatus state={update.state} {...status} />}
         {update.notes ? (
           <section className="update-notes" aria-label="更新内容">
             <h3>更新内容</h3>
@@ -84,11 +74,7 @@ export function UpdateDialog({ updates, busy, install, close }: UpdateSubscripti
             <ErrorFeedback message={error || update.error} role={error ? 'alert' : undefined} />
             <div className="update-restart-option">
               <RestartAfterTasks updates={updates} />
-              <small id="update-restart-hint">
-                {busy
-                  ? '任务或审批进行中，结束后才能重启。'
-                  : '勾选后，下一个任务结束时先倒计时 5 秒，可以取消。'}
-              </small>
+              <small id="update-restart-hint">{restartHint(busy)}</small>
             </div>
           </>
         ) : (

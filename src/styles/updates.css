@@ -21,6 +21,44 @@
 .about-updates .button-row {
   margin-block: 14px;
 }
+/* Checkboxes start on the same edge as the buttons and the version card. */
+.about-updates .check-row > input {
+  margin-left: 0;
+}
+/* Everything about the new version sits in one card: status, progress or restart choice, actions, notes. */
+.about-update {
+  display: grid;
+  gap: 14px;
+  max-width: 560px;
+  margin-top: 6px;
+  padding: 16px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-panel);
+  background: var(--rail);
+}
+.about-update > *,
+.about-update .button-row,
+.about-update .update-progress {
+  margin: 0;
+}
+.about-update .update-restart-option {
+  background: var(--surface);
+}
+.about-update .update-notes {
+  max-height: none;
+  margin: 0;
+  padding-top: 12px;
+  border-top: 1px solid var(--line);
+}
+.about-update .update-notes > summary {
+  width: fit-content;
+  color: var(--muted);
+  font-size: calc(12px * var(--font-scale));
+  cursor: pointer;
+}
+.about-update .update-notes[open] > summary {
+  margin-bottom: 8px;
+}
 .update-progress {
   display: grid;
   gap: 6px;

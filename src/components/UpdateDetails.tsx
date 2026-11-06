@@ -1,5 +1,5 @@
-import { useState, useSyncExternalStore } from 'react';
-import { Download, RefreshCw, ExternalLink } from 'lucide-react';
+import { useState, useSyncExternalStore, type ReactNode } from 'react';
+import { CircleCheck, Download, RefreshCw, ExternalLink, Sparkles } from 'lucide-react';
 import {
   installationLabels,
   releaseUrl,
@@ -20,8 +20,36 @@ interface UpdateProps {
   busy: boolean;
   install: () => Promise<void>;
   updates?: UpdateStore;
+  /** The settings card already shows the package size in its status line. */
+  sizeInStatus?: boolean;
 }
 type UpdateSubscription = Omit<UpdateProps, 'update'> & { updates: UpdateStore };
+/** Icon, title and one-line explanation shared by the update dialog and the settings card. */
+export function UpdateStatus({
+  state,
+  icon,
+  title,
+  detail,
+}: {
+  state: UpdateState['state'];
+  icon: ReactNode;
+  title: string;
+  detail?: string;
+}) {
+  return (
+    <div className={`update-status ${state}`}>
+      <span className="update-status-icon" aria-hidden="true">
+        {icon}
+      </span>
+      <div>
+        <p className="update-status-title">{title}</p>
+        {detail && <p className="update-status-detail">{detail}</p>}
+      </div>
+    </div>
+  );
+}
+export const restartHint = (busy: boolean) =>
+  busy ? '任务或审批进行中，结束后才能重启。' : '勾选后，下一个任务结束时先倒计时 5 秒，可以取消。';
 export function DownloadProgress({ update }: { update: UpdateState }) {
   const download = update.download;
   if (!download) return null;
@@ -68,10 +96,11 @@ export function DownloadProgress({ update }: { update: UpdateState }) {
     </div>
   );
 }
-export function UpdateActions({ update, busy, install, updates }: UpdateProps) {
+export function UpdateActions({ update, busy, install, updates, sizeInStatus }: UpdateProps) {
   const [error, setError] = useState('');
   const [pending, setPending] = useState(false);
   const installNotice = updateInstallNotice(update);
+  const ready = update.mode === 'auto' && update.state === 'ready';
   const run = async (action: () => Promise<unknown>) => {
     setError('');
     setPending(true);
@@ -85,7 +114,7 @@ export function UpdateActions({ update, busy, install, updates }: UpdateProps) {
   };
   return (
     <>
-      {update.state === 'available' && update.size !== undefined && (
+      {update.state === 'available' && update.size !== undefined && !sizeInStatus && (
         <p className="update-package-size">安装包 {formatBytes(update.size)}</p>
       )}
       {update.state === 'downloading' && <DownloadProgress update={update} />}
@@ -95,14 +124,17 @@ export function UpdateActions({ update, busy, install, updates }: UpdateProps) {
           {installNotice}
         </p>
       )}
-      {update.state === 'ready' && busy && (
-        <p className="environment-note">当前任务或审批结束后可重启更新。</p>
+      {ready && updates && (
+        <div className="update-restart-option">
+          <RestartAfterTasks updates={updates} />
+          <small id="about-update-restart-hint">{restartHint(busy)}</small>
+        </div>
       )}
       <div className="button-row">
-        {update.state === 'ready' && updates && <RestartAfterTasks updates={updates} />}
-        {update.mode === 'auto' && update.state === 'ready' ? (
+        {ready ? (
           <button
             className="primary"
+            aria-describedby={updates ? 'about-update-restart-hint' : undefined}
             disabled={busy || pending || update.installing}
             onClick={() => void run(install)}
           >
@@ -118,7 +150,8 @@ export function UpdateActions({ update, busy, install, updates }: UpdateProps) {
             {update.state === 'error' ? '重试下载' : '下载更新'}
           </button>
         ) : null}
-        {(update.version || update.state === 'error' || installNotice) && (
+        {/* A downloaded update only needs a restart; the download page is a fallback for the rest. */}
+        {!ready && (update.version || update.state === 'error' || installNotice) && (
           <button
             onClick={() =>
               void run(() =>
@@ -209,17 +242,46 @@ export function AboutUpdates({
         </button>
       </div>
       {update.state === 'idle' && update.checkedAt && <p className="environment-note">当前已是最新版本。</p>}
-      {update.version && <h4>新版本 v{update.version}</h4>}
       <ErrorFeedback message={error} />
-      <UpdateActions update={update} busy={busy} install={install} updates={updates} />
-      {update.notes && (
-        <details className="update-notes">
-          <summary>更新说明</summary>
-          <RichText text={update.notes} />
-        </details>
+      {update.version ? (
+        <div className="about-update" role="group" aria-label={`新版本 v${update.version}`}>
+          <UpdateStatus state={update.state} {...aboutStatus(update)} />
+          <UpdateActions update={update} busy={busy} install={install} updates={updates} sizeInStatus />
+          {update.notes && (
+            <details className="update-notes">
+              <summary>更新说明</summary>
+              <RichText text={update.notes} />
+            </details>
+          )}
+        </div>
+      ) : (
+        <UpdateActions update={update} busy={busy} install={install} updates={updates} />
       )}
     </section>
   );
+}
+function aboutStatus(update: UpdateState): { icon: ReactNode; title: string; detail?: string } {
+  const version = `v${update.version}`;
+  if (update.mode === 'auto' && update.state === 'ready')
+    return {
+      icon: <CircleCheck size={18} />,
+      title: `${version} 已下载`,
+      detail: '重启后生效，草稿会先保存。',
+    };
+  if (update.state === 'downloading')
+    return {
+      icon: <Download size={18} />,
+      title: `正在下载 ${version}`,
+      detail: '下载在后台进行，不会中断当前任务。',
+    };
+  return {
+    icon: <Sparkles size={18} />,
+    title: `发现新版本 ${version}`,
+    detail:
+      update.state === 'available' && update.size !== undefined
+        ? `安装包 ${formatBytes(update.size)}`
+        : undefined,
+  };
 }
 export function RestartAfterTasks({ updates }: { updates: UpdateStore }) {
   const checked = useSyncExternalStore(updates.subscribe, updates.getRestartWhenIdle);

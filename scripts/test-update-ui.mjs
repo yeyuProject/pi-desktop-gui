@@ -380,6 +380,22 @@ try {
     { installation: 'mac', state: 'ready', version: '0.9.1', progress: 100, lastInstall: undefined },
     runtime,
   );
+  // Settings groups the downloaded version into one card: status, restart choice, then actions.
+  const readyPanel = await about();
+  const card = readyPanel.getByRole('group', { name: '新版本 v0.9.1', exact: true });
+  await expect(card.getByText('v0.9.1 已下载', { exact: true })).toBeVisible();
+  await expect(card).toContainText('任务或审批进行中，结束后才能重启。');
+  assert.equal(await card.getByRole('button', { name: '前往下载', exact: true }).count(), 0);
+  const restartChoice = await card.getByRole('checkbox', { name: '任务结束后自动重启' }).boundingBox();
+  const restartButton = await card.getByRole('button', { name: '立即重启', exact: true }).boundingBox();
+  assert.ok(restartChoice.y + restartChoice.height < restartButton.y, 'restart choice sits above the action');
+  assert.equal(await card.getByRole('button', { name: '立即重启', exact: true }).isDisabled(), true);
+  await page
+    .getByRole('dialog', { name: '设置', exact: true })
+    .locator(':scope > footer')
+    .getByRole('button', { name: '关闭', exact: true })
+    .click();
+  console.log('PASS settings groups a downloaded update with its restart choice and no download link');
   await page.getByRole('button', { name: '重启以更新到 v0.9.1', exact: true }).click();
   const restart = page.getByRole('button', { name: '立即重启', exact: true });
   assert.equal(await restart.isDisabled(), true);
