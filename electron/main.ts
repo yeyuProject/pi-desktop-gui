@@ -1318,7 +1318,18 @@ else {
           if (appDialogs.size && !policy.duringDialog) throw new Error('请先完成当前确认');
           trackedOperation = policy.tracked;
           if (trackedOperation) activeOperations++;
-          const invoke = () => ipcHandlers[method as keyof ApiMap](...args);
+          const invoke = () => {
+            // Relocation commits must not race deletion, project removal or draft
+            // replacement. Read-only navigation remains available throughout.
+            if (policy.access === 'write' && method !== 'moveSession') {
+              const id = typeof args[0] === 'string' ? args[0] : undefined;
+              if (id && store.state.sessions.some((session) => session.id === id))
+                service.assertNoSessionMove(id);
+              else if (['removeProject', 'cleanupEmptySessions', 'clearLocalData'].includes(method))
+                service.assertNoSessionMove();
+            }
+            return ipcHandlers[method as keyof ApiMap](...args);
+          };
           const execute = async () => {
             const projectId =
               policy.workspace === 'project'

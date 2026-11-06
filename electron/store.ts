@@ -416,7 +416,29 @@ export class Store extends EventEmitter {
     }
     await this.replace('state.backup-1.json', contents);
   }
-  save(retry = false) {
+  private stagedMove?: { id: string; patch: Pick<Session, 'projectId' | 'cwd' | 'file' | 'attachments'> };
+
+  /** Persist relocation without exposing a half-committed session to readers or other saves. */
+  async commitSessionMove(id: string, patch: Pick<Session, 'projectId' | 'cwd' | 'file' | 'attachments'>) {
+    if (this.stagedMove) throw new Error('另一个会话正在保存移动结果，请稍后重试');
+    await this.flush();
+    if (this.stagedMove) throw new Error('另一个会话正在保存移动结果，请稍后重试');
+    const session = this.session(id);
+    this.stagedMove = { id, patch };
+    try {
+      await this.save(false, true);
+      Object.assign(session, patch);
+      if (!patch.projectId) delete session.projectId;
+      if (!patch.cwd) delete session.cwd;
+      if (this.state.selectedSessionId === id) this.state.selectedProjectId = patch.projectId;
+    } finally {
+      this.stagedMove = undefined;
+    }
+  }
+  save(retry = false, committingMove = false): Promise<void> {
+    // Capture ordinary saves only after the relocation resolves: their snapshots must
+    // never overwrite a newly committed location or persist an uncommitted one.
+    if (this.stagedMove && !committingMove) return this.writing.catch(() => {}).then(() => this.save(retry));
     const deferred = this.deferredSave;
     this.deferredSave = undefined;
     if (deferred) clearTimeout(deferred.timer);
@@ -425,6 +447,19 @@ export class Store extends EventEmitter {
     // state and backups must describe the same acknowledged save, not later mutations.
     const images = new Map<string, string>();
     const state = this.persistentState();
+    if (committingMove && this.stagedMove) {
+      const { id, patch } = this.stagedMove;
+      state.sessions = state.sessions.map((session) =>
+        session.id === id ? { ...session, ...patch } : session,
+      );
+      // Explicitly moving a placeholder makes its chosen location durable.
+      if (!state.sessions.some((session) => session.id === id))
+        state.sessions.push({ ...this.session(id), ...patch });
+      if (this.state.selectedSessionId === id) {
+        state.selectedSessionId = id;
+        state.selectedProjectId = patch.projectId;
+      }
+    }
     const contents = JSON.stringify({
       ...state,
       version: 2,
@@ -454,7 +489,14 @@ export class Store extends EventEmitter {
           this.writtenImages.add(file);
         }
         await this.replace('state.json', contents);
-        await this.backup(contents);
+        try {
+          await this.backup(contents);
+        } catch (error) {
+          // state.json has already committed. A backup failure cannot turn a
+          // successful relocation into a rollback that deletes its new history.
+          if (!committingMove) throw error;
+          console.error('session.move backup failed after commit', { id: this.stagedMove?.id }, error);
+        }
         // Release bodies only after durable image files exist. Late draft edits
         // keep their own identities and cannot be replaced by this older save.
         for (const session of this.state.sessions) {

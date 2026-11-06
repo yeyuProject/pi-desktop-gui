@@ -8,6 +8,7 @@ import { removeSessionScratch } from '../local-data';
 import { pathKey, samePath } from '../platform';
 import { fillSessionUsage, hasSessionData, isEmptySession } from '../session-maintenance';
 import { SideChats } from '../side-chats';
+import { createSessionMoveHandlers } from './session-move';
 import type { HandlerContext, HandlerMap } from './handler-context';
 
 interface SessionHandlerContext extends Pick<
@@ -33,6 +34,9 @@ export type SessionHandlerName =
   | 'importSession'
   | 'selectSession'
   | 'renameSession'
+  | 'sessionMoveStatus'
+  | 'previewSessionMove'
+  | 'moveSession'
   | 'deleteSession'
   | 'pinSession'
   | 'cleanupEmptySessions'
@@ -60,6 +64,7 @@ export function createSessionHandlers(context: SessionHandlerContext) {
   const text: HandlerContext['text'] = context.text;
   let searchController: AbortController | undefined;
   const handlers: HandlerMap<SessionHandlerName> = {
+    ...createSessionMoveHandlers(context),
     addProject: async () => {
       const chosen = await dialog.showOpenDialog(context.window!, {
         title: '添加本地项目',

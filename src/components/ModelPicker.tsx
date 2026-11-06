@@ -207,12 +207,45 @@ export function ModelPicker({
           {selection.thinkingLevels.length > 0 && (
             <div className="thinking-row">
               <span>推理级别</span>
-              <div role="radiogroup" aria-label="推理级别">
+              <div
+                role="radiogroup"
+                aria-label="推理级别"
+                onKeyDown={(event) => {
+                  if (
+                    !['ArrowLeft', 'ArrowRight', 'ArrowUp', 'ArrowDown', 'Home', 'End'].includes(event.key) ||
+                    thinkingLocked
+                  )
+                    return;
+                  event.preventDefault();
+                  const buttons = Array.from(
+                    event.currentTarget.querySelectorAll<HTMLButtonElement>('button:not(:disabled)'),
+                  );
+                  const current = buttons.indexOf(document.activeElement as HTMLButtonElement);
+                  const next =
+                    event.key === 'Home'
+                      ? 0
+                      : event.key === 'End'
+                        ? buttons.length - 1
+                        : (current +
+                            (event.key === 'ArrowLeft' || event.key === 'ArrowUp' ? -1 : 1) +
+                            buttons.length) %
+                          buttons.length;
+                  buttons[next]?.focus();
+                  buttons[next]?.click();
+                }}
+              >
                 {selection.thinkingLevels.map((level) => (
                   <button
                     key={level}
                     role="radio"
                     aria-checked={selection.thinking === level}
+                    tabIndex={
+                      selection.thinking === level ||
+                      (!selection.thinkingLevels.includes(selection.thinking ?? '') &&
+                        level === selection.thinkingLevels[0])
+                        ? 0
+                        : -1
+                    }
                     disabled={thinkingLocked}
                     onClick={() => setThinking(level)}
                   >

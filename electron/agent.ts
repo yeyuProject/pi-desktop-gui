@@ -2084,6 +2084,9 @@ export class AgentService extends EventEmitter {
       true,
     );
   }
+  moveCopy(id: string, targetCwd: string) {
+    return this.readTask(id, (rpc) => rpc.bridge('move_copy', { targetCwd }));
+  }
   private async forkCopy(id: string, kind: 'fork' | 'clone', entryId?: string) {
     const old = this.store.session(id);
     const result = await this.readTask(id, (rpc) => rpc.bridge('fork_copy', { kind, entryId }));

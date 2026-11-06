@@ -10,6 +10,15 @@ import { agentDirectory } from './environment';
 /** Each connected conversation owns its process, queue and operation ordering. */
 export class SessionAgents extends EventEmitter {
   private agents = new Map<string, AgentService>();
+  private moving = new Set<string>();
+  assertNoSessionMove(id?: string) {
+    if (id ? this.moving.has(id) : this.moving.size > 0) throw new Error('会话正在移动，请稍后重试');
+  }
+  lockSessionMove(id: string) {
+    if (this.active(id)) throw new Error('任务进行中，结束后才能移动');
+    this.moving.add(id);
+    return () => this.moving.delete(id);
+  }
   private empty = emptyRuntime();
   private closing = false;
   private workspaceOperations = new Map<symbol, { root: string; write: boolean; finished: Promise<void> }>();
@@ -44,6 +53,7 @@ export class SessionAgents extends EventEmitter {
   }
 
   get(id: string): AgentService {
+    if (this.moving.has(id)) throw new Error('会话正在移动，请稍后重试');
     if (this.closing) throw new Error('应用正在关闭，请等关闭完成后再打开。');
     this.store.session(id);
     this.touched.set(id, { at: Date.now(), version: (this.touched.get(id)?.version ?? 0) + 1 });
@@ -145,8 +155,17 @@ export class SessionAgents extends EventEmitter {
     return this.get(id).setThinking(id, level);
   }
 
+  moveStatus(id: string) {
+    const agent = this.agents.get(id);
+    return {
+      moving: this.moving.has(id),
+      active: agent?.hasPendingWork ?? false,
+      pending: Boolean(agent?.runtime.dialogs.length),
+      sideChat: agent?.sideChatRunning ?? false,
+    };
+  }
   active(id: string) {
-    return this.agents.get(id)?.hasPendingWork ?? false;
+    return this.moving.has(id) || (this.agents.get(id)?.hasPendingWork ?? false);
   }
 
   connected(id: string) {
@@ -154,7 +173,7 @@ export class SessionAgents extends EventEmitter {
     return Boolean(agent && (agent.runtime.connected || agent.hasPendingWork));
   }
   async inTerminal(id: string) {
-    return this.terminalHandoffs.has(id) || (await this.terminalOpen?.(id)) || false;
+    return this.moving.has(id) || this.terminalHandoffs.has(id) || (await this.terminalOpen?.(id)) || false;
   }
   async handoffToTerminal<T>(id: string, action: () => Promise<T>) {
     if (await this.inTerminal(id)) throw new Error('此会话已交给 Pi 终端，或正在交接，请关闭相关终端后重试');

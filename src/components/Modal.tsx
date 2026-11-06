@@ -2,6 +2,7 @@ import { useRef, type ReactNode } from 'react';
 import { X } from 'lucide-react';
 import { IconButton } from './IconButton';
 import { useFocusScope } from '../hooks/useFocusScope';
+import { useModalDrag } from '../hooks/useModalDrag';
 
 export function Modal({
   title,
@@ -18,6 +19,7 @@ export function Modal({
 }) {
   const ref = useRef<HTMLDivElement>(null);
   useFocusScope(ref, true, close);
+  useModalDrag(ref);
   return (
     <div
       className="modal-backdrop"

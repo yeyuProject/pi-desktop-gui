@@ -3,6 +3,10 @@
   overflow-wrap: anywhere;
   font-size: calc(11px * var(--font-scale));
 }
+.modal-backdrop,
+.modal {
+  -webkit-app-region: no-drag;
+}
 .modal-backdrop {
   position: fixed;
   inset: 0;
@@ -24,6 +28,29 @@
   box-shadow: var(--shadow);
   display: flex;
   flex-direction: column;
+}
+.modal {
+  translate: var(--modal-x, 0) var(--modal-y, 0);
+}
+.modal > header {
+  touch-action: none;
+  cursor: default;
+}
+.modal.modal-dragging {
+  box-shadow:
+    var(--shadow),
+    0 12px 32px #0003;
+}
+.modal-dragging > header {
+  cursor: grabbing;
+}
+.modal-resetting {
+  transition: translate var(--motion-base);
+}
+@media (prefers-reduced-motion: reduce) {
+  .modal-resetting {
+    transition: none;
+  }
 }
 .modal.wide {
   width: 850px;

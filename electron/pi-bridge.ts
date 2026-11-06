@@ -214,6 +214,20 @@ export default function desktopBridge(pi: ExtensionAPI) {
             };
             break;
           }
+          case 'move_copy': {
+            const file = ctx.sessionManager.getSessionFile();
+            if (!file) throw new Error('会话文件已不存在，无法移动');
+            if (typeof SessionManager.forkFrom !== 'function')
+              throw new Error('当前 Pi 版本不支持移动会话，请更新 Pi');
+            if (typeof p.targetCwd !== 'string' || !p.targetCwd) throw new Error('请选择目标项目后重试');
+            const manager = SessionManager.open(file, ctx.sessionManager.getSessionDir());
+            const sessionDir = manager.usesDefaultSessionDir()
+              ? undefined
+              : ctx.sessionManager.getSessionDir();
+            const copied = SessionManager.forkFrom(file, p.targetCwd, sessionDir);
+            data = { file: copied.getSessionFile() };
+            break;
+          }
           case 'fork_copy': {
             // Use a separate native manager. Replacing the live manager would abort its task.
             const file = ctx.sessionManager.getSessionFile();

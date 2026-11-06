@@ -173,6 +173,7 @@ export default function App() {
           'openSettings',
         ])}
         state={state}
+        storage={model.storage}
         updateBadge={updateBadge}
       />
       {model.sidebar && !compact && (

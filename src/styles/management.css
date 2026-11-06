@@ -1,3 +1,71 @@
+.session-drag-source {
+  opacity: 0.4;
+}
+.session-drag-ghost {
+  position: fixed;
+  left: 0;
+  top: 0;
+  z-index: 2000;
+  pointer-events: none;
+  padding: 8px 12px;
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-control);
+  box-shadow: var(--shadow-soft);
+  font-size: 12px;
+}
+.session-drag-ghost > div {
+  max-width: 220px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.session-drag-ghost small {
+  display: block;
+  color: var(--muted);
+  margin-top: 6px;
+}
+.session-drop-target {
+  background: var(--accent-soft);
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--accent) 45%, var(--line));
+  border-radius: var(--radius-control);
+}
+.session-drop-label {
+  display: none;
+  color: var(--accent);
+  font-size: 11px;
+  white-space: nowrap;
+}
+.session-drop-target > .section-heading > .session-drop-label,
+.session-drop-target > .project-header .session-drop-label {
+  display: inline;
+}
+.session-drop-target > .project-header :is(.project-waiting, .project-running, .unread) {
+  display: none;
+}
+.move-target-label {
+  min-width: 0;
+}
+.move-target-label small {
+  display: block;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--muted);
+}
+.move-effects {
+  white-space: pre-wrap;
+  font-size: 12px;
+  margin-top: 16px;
+}
+.session-moved {
+  animation: turn-jump-flash 1.2s;
+}
+@media (prefers-reduced-motion: reduce) {
+  .session-moved {
+    animation: none;
+  }
+}
 .sidebar .project-row > .project-chevron {
   display: block;
   flex: 0 0 auto;

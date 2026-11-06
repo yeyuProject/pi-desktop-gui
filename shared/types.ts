@@ -495,6 +495,9 @@ export interface ApiMap {
   importSession: { args: [projectId?: string]; result: Session | null };
   selectSession: { args: [string]; result: void };
   renameSession: { args: [string, string]; result: void };
+  sessionMoveStatus: { args: [string]; result: { reason: string } };
+  previewSessionMove: { args: [string, string | null]; result: { detail: string; token: string } };
+  moveSession: { args: [string, string | null, string?]; result: false | { warning?: string } };
   deleteSession: { args: [string]; result: false | { trashed: boolean } };
   pinSession: { args: [string, boolean]; result: void };
   searchSessions: { args: [string]; result: SessionMatch[] };

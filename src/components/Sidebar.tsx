@@ -20,6 +20,8 @@ import '../styles/management.css';
 import { platform, shortcut } from '../lib/platform';
 import { IconButton } from './IconButton';
 import { useLayer } from '../hooks/useLayer';
+import { useSessionDrag } from '../hooks/useSessionDrag';
+import { MoveSessionDialog } from './MoveSessionDialog';
 const api = window.desktop;
 import type { Workbench } from '../hooks/useWorkbench';
 import type { ReactNode } from 'react';
@@ -29,6 +31,7 @@ export function Sidebar(
   props: Pick<
     Workbench,
     | 'state'
+    | 'storage'
     | 'activities'
     | 'environment'
     | 'setNotice'
@@ -76,6 +79,69 @@ export function Sidebar(
       /* An unavailable browser preference does not prevent navigation. */
     }
     return new Set(project ? [project.id] : []);
+  });
+  const [moving, setMoving] = useState<Set<string>>(new Set());
+  const [moveId, setMoveId] = useState<string>();
+  const [moveStatuses, setMoveStatuses] = useState<Record<string, string>>({});
+  const preflight = async (id: string) => {
+    try {
+      const status = await api.invoke('sessionMoveStatus', id);
+      setMoveStatuses((current) =>
+        current[id] === status.reason ? current : { ...current, [id]: status.reason },
+      );
+      return status.reason;
+    } catch {
+      return '无法检查会话状态，请稍后重试';
+    }
+  };
+  useEffect(() => {
+    if (!menuId || !state.sessions.some((session) => session.id === menuId)) return;
+    void preflight(menuId);
+    const timer = setInterval(() => void preflight(menuId), 1000);
+    return () => clearInterval(timer);
+  }, [menuId, state.sessions, activities]);
+  const moveSession = async (id: string, target: string | null, token?: string) => {
+    setMoving((current) => new Set([...current, id]));
+    try {
+      const result = await api.invoke('moveSession', id, target, token);
+      if (!result) return;
+      if (target) setExpandedProjects((current) => new Set([...current, target]));
+      setOlderOpen((current) => new Set([...current, target ?? 'standalone']));
+      setNotice(
+        result.warning ??
+          (target ? '已移到 ' + state.projects.find((p) => p.id === target)?.name : '已移到对话'),
+      );
+      requestAnimationFrame(() =>
+        requestAnimationFrame(() => {
+          const row = document.querySelector<HTMLElement>(`[data-session-id="${CSS.escape(id)}"]`);
+          row?.scrollIntoView({ block: 'nearest' });
+          row?.classList.add('session-moved');
+          setTimeout(() => row?.classList.remove('session-moved'), 1200);
+        }),
+      );
+    } finally {
+      setMoving((current) => {
+        const next = new Set(current);
+        next.delete(id);
+        return next;
+      });
+    }
+  };
+  const moveReason = (id: string) => {
+    const session = state.sessions.find((s) => s.id === id);
+    if (moving.has(id)) return '会话正在移动，请稍候';
+    if (!props.storage.writable) return '本地数据只读，暂时不能移动';
+    if (activities[id]?.pending) return '有待处理的确认，处理后才能移动';
+    if (session && busy(activities[id]?.status ?? session.lastStatus)) return '任务进行中，结束后才能移动';
+    return moveStatuses[id] ?? '';
+  };
+  const drag = useSessionDrag({
+    preflight,
+    reason: moveReason,
+    exists: (id) => state.sessions.some((s) => s.id === id),
+    expand: (id) => setExpandedProjects((current) => (current.has(id) ? current : new Set([...current, id]))),
+    move: (id, target) => void attempt(() => moveSession(id, target)),
+    closeMenu: () => setMenuId(''),
   });
   const [olderOpen, setOlderOpen] = useState<Set<string>>(new Set());
   const menuRef = useRef<HTMLDivElement>(null);
@@ -182,14 +248,19 @@ export function Sidebar(
       data-session-id={s.id}
       onContextMenu={(e) => {
         e.preventDefault();
+        if (moving.has(s.id)) return;
         setMenuId(s.id);
       }}
     >
       <button
         title={s.title}
         aria-current={s.id === selected?.id ? 'page' : undefined}
-        onClick={() => void selectSession(s)}
+        onPointerDown={(event) => drag.start(event, s.id, s.projectId ?? null, s.title, s.pinned)}
+        onClick={() => {
+          if (!drag.suppressClick()) void selectSession(s);
+        }}
       >
+        {moving.has(s.id) && <LoaderCircle size={12} className="spin" aria-label="正在移动" />}
         {s.pinned && <Pin size={14} className="pin-icon" />}
         <span>{s.title}</span>
         {s.unread && (
@@ -214,6 +285,7 @@ export function Sidebar(
         )}
       </button>
       <IconButton
+        disabled={moving.has(s.id)}
         title={`${s.title} 会话操作`}
         expanded={menuId === s.id}
         onClick={() => setMenuId(menuId === s.id ? '' : s.id)}
@@ -241,6 +313,18 @@ export function Sidebar(
           >
             <Pencil size={14} />
             重命名
+          </button>
+          <button
+            role="menuitem"
+            disabled={!!moveReason(s.id)}
+            title={moveReason(s.id) || undefined}
+            onClick={() => {
+              setMenuId('');
+              setMoveId(s.id);
+            }}
+          >
+            <FolderOpen size={14} />
+            移动到…
           </button>
           {s.file && (
             <button
@@ -335,12 +419,16 @@ export function Sidebar(
         新建会话<kbd>{shortcut('N')}</kbd>
       </button>
       <div className="project-list">
-        <div className="section-heading">对话</div>
-        <div className="session-list standalone-sessions" aria-label="独立对话">
-          {renderSessionList()}
-          {!state.sessions.some((s) => !s.projectId) && (
-            <p className="sidebar-empty">随时开始，无需打开项目。</p>
-          )}
+        <div data-drop-target="standalone" className="standalone-group">
+          <div className="section-heading">
+            对话<span className="session-drop-label">移到这里</span>
+          </div>
+          <div className="session-list standalone-sessions" aria-label="独立对话">
+            {renderSessionList()}
+            {!state.sessions.some((s) => !s.projectId) && (
+              <p className="sidebar-empty">随时开始，无需打开项目。</p>
+            )}
+          </div>
         </div>
         <div className="section-heading">
           项目
@@ -349,7 +437,11 @@ export function Sidebar(
           </IconButton>
         </div>
         {state.projects.map((p) => (
-          <div className={'project-group ' + (p.id === project?.id ? 'selected' : '')} key={p.id}>
+          <div
+            data-drop-target={p.id}
+            className={'project-group ' + (p.id === project?.id ? 'selected' : '')}
+            key={p.id}
+          >
             <div className="project-header">
               <button
                 className="project-row"
@@ -358,6 +450,7 @@ export function Sidebar(
               >
                 <FolderOpen size={16} />
                 <span title={p.path}>{p.name}</span>
+                <span className="session-drop-label">移到这里</span>
                 {!expandedProjects.has(p.id) && projectStatus(p.id)}
                 <ChevronDown size={13} className="project-chevron" />
               </button>
@@ -421,6 +514,14 @@ export function Sidebar(
         ))}
         {!state.projects.length && <p className="sidebar-empty">需要处理本地文件时，打开项目。</p>}
       </div>
+      {moveId && state.sessions.find((s) => s.id === moveId) && (
+        <MoveSessionDialog
+          session={state.sessions.find((s) => s.id === moveId)!}
+          projects={state.projects}
+          close={() => setMoveId(undefined)}
+          move={(target, token) => moveSession(moveId, target, token)}
+        />
+      )}
       <div className="sidebar-footer">
         {state.sessions.some((session) => busy(session.lastStatus)) && (
           <button onClick={() => void attempt(() => api.invoke('stopAll'))}>停止所有会话</button>
