@@ -1,5 +1,5 @@
 import { useState, useSyncExternalStore } from 'react';
-import { RefreshCw } from 'lucide-react';
+import { CircleCheck, Download, RefreshCw, Sparkles } from 'lucide-react';
 import type { UpdateStore } from '../lib/update-store';
 import { releaseUrl } from '../../shared/app-update';
 import { readableError } from '../lib/format';
@@ -30,6 +30,17 @@ export function UpdateDialog({ updates, busy, install, close }: UpdateSubscripti
     void window.desktop
       .invoke('openLink', releaseUrl(update.version))
       .catch((cause) => setError(readableError(cause)));
+  const status = ready
+    ? { icon: <CircleCheck size={18} />, title: '新版本已下载', detail: '重启后生效，草稿会先保存。' }
+    : update.state === 'downloading'
+      ? {
+          icon: <Download size={18} />,
+          title: '正在下载新版本',
+          detail: '下载在后台进行，不会中断当前任务。',
+        }
+      : update.state === 'available' && update.version
+        ? { icon: <Sparkles size={18} />, title: '发现新版本' }
+        : undefined;
   return (
     <Modal
       title={update.version ? `更新到 v${update.version}` : 'Pi Desktop 更新'}
@@ -37,11 +48,24 @@ export function UpdateDialog({ updates, busy, install, close }: UpdateSubscripti
       close={close}
     >
       <div className="modal-body update-dialog">
-        {ready && <p className="update-lead">新版本已下载，重启后生效。</p>}
-        {update.notes ? (
-          <div className="update-notes">
-            <RichText text={update.notes} />
+        {status && (
+          <div className={`update-status ${update.state}`}>
+            <span className="update-status-icon" aria-hidden="true">
+              {status.icon}
+            </span>
+            <div>
+              <p className="update-status-title">{status.title}</p>
+              {status.detail && <p className="update-status-detail">{status.detail}</p>}
+            </div>
           </div>
+        )}
+        {update.notes ? (
+          <section className="update-notes" aria-label="更新内容">
+            <h3>更新内容</h3>
+            <div className="update-notes-body">
+              <RichText text={update.notes} />
+            </div>
+          </section>
         ) : (
           update.version && (
             <p className="update-notes-missing">
