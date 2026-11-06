@@ -2,7 +2,13 @@ import { spawn, type ChildProcessWithoutNullStreams } from 'node:child_process';
 import { EventEmitter } from 'node:events';
 import { randomUUID } from 'node:crypto';
 import { isWindows, terminateProcessTree, WindowsProcessNotFoundError } from './platform';
-import { incompatible, validateRpcResult, validateBridgeResult, type RpcResult } from './pi/protocol';
+import {
+  incompatible,
+  validateRpcResult,
+  validateRpcEvent,
+  validateBridgeResult,
+  type RpcResult,
+} from './pi/protocol';
 import { DESKTOP_BRIDGE_COMMAND } from '../shared/pi-bridge';
 
 export interface CommandSpec {
@@ -90,7 +96,7 @@ export class PiRpc extends EventEmitter {
           record.message.startsWith('__PI_DESKTOP__')
         ) {
           try {
-            this.emit('event', JSON.parse(record.message.slice('__PI_DESKTOP__'.length)));
+            this.forwardEvent(JSON.parse(record.message.slice('__PI_DESKTOP__'.length)));
           } catch {
             this.emit(
               'protocolError',
@@ -115,7 +121,7 @@ export class PiRpc extends EventEmitter {
               item.reject(error as Error);
             }
           }
-        } else this.emit('event', record);
+        } else this.forwardEvent(record);
       },
       (error) => {
         this.emit('protocolError', error);
@@ -135,6 +141,15 @@ export class PiRpc extends EventEmitter {
       this.emit('exit', code, signal);
     });
     this.child.stdin.on('error', (e) => this.rejectAll(e));
+  }
+  private forwardEvent(record: unknown) {
+    try {
+      validateRpcEvent(record);
+    } catch (error) {
+      this.emit('protocolError', error);
+      return;
+    }
+    this.emit('event', record);
   }
   private rejectAll(error: Error) {
     for (const p of this.pending.values()) {

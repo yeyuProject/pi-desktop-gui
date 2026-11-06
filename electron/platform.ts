@@ -336,7 +336,6 @@ async function readLoginShellPath() {
 }
 
 export const fileManagerName = isWindows ? '资源管理器' : isMac ? '访达' : '文件管理器';
-export const trashName = isWindows ? '回收站' : '废纸篓';
 
 async function killPosixTree(pid: number) {
   const signal = (target: number, value: NodeJS.Signals) => {

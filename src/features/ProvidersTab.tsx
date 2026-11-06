@@ -12,7 +12,6 @@ const authSourceLabels: Record<NonNullable<ProviderInfo['authSource']>, string> 
 export function ProvidersTab({
   session,
   setNotice,
-  filter,
   imageModel,
   setImageModel,
   reasoningModel,
@@ -33,7 +32,6 @@ export function ProvidersTab({
   setApiKey,
   modelIds,
   setModelIds,
-  disabled,
   idleDisabled,
   idleReason,
   configEditingDisabled,
@@ -46,7 +44,6 @@ export function ProvidersTab({
   FeatureModel,
   | 'session'
   | 'setNotice'
-  | 'filter'
   | 'imageModel'
   | 'setImageModel'
   | 'reasoningModel'
@@ -67,7 +64,6 @@ export function ProvidersTab({
   | 'setApiKey'
   | 'modelIds'
   | 'setModelIds'
-  | 'disabled'
   | 'idleDisabled'
   | 'idleReason'
   | 'configEditingDisabled'

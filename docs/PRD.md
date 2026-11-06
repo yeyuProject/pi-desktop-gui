@@ -2616,7 +2616,7 @@ W1、W2、W3 已实现：审批使用结构化临时授权；会话搜索覆盖�
 2. 在外部修改项目文件或执行 `git checkout -b`，500 毫秒内顶栏分支名与右侧变更计数自动更新。
 3. 右侧正在预览 `src/a.ts` 并滚动到中部时，外部修改 `src/a.ts`，预览顶部出现“文件已在外部更新 · 刷新”，未点击前原文和滚动位置不变；点击刷新后更新内容并保留滚动位置。
 
-**测试。** `tests/snapshot.test.ts` 或 `tests/workspace.test.ts` 验证监听防抖、忽略目录过滤与退化策略；`scripts/test-coding-ui.mjs` 验证外部改文件后的预览更新提示与滚动位置保留。
+**测试。** `tests/workspace-watch.test.ts` 验证监听防抖、忽略目录过滤与退化策略；`scripts/test-coding-ui.mjs` 验证外部改文件后的预览更新提示与滚动位置保留。
 
 ## v0.13.0：桌面界面与交互体验打磨（随 v0.14.0 交付）
 
@@ -2807,7 +2807,7 @@ UI1–UI5 已实现，沿用浅色墨绿 `#1F6B52` / 深色 `#74C7A3`、运行�
 1. 导入未含 `AGENTS.md` 的 Node.js 项目，右侧“文件”页顶部显示未配置提示；点击“生成模板草稿”后自动提取 `package.json` 的 `scripts` 生成 `AGENTS.md` 并在预览区打开。
 2. 对话流中 `bash` 工具执行完毕后，点击卡片上的“本地重跑（不发给模型）”，立即以 `!!` 方式重跑该命令并在“输出”页展示最新结果；点击“重跑并发给 Pi”则将结果送入下一轮模型上下文。
 
-**测试。** `tests/workspace.test.ts` 覆盖 `AGENTS.md` 检测与模板生成；`scripts/test-experience-ui.mjs` 增加 `AGENTS.md` 卡片与命令一键重跑交互测试。
+**测试。** `tests/workspace-v014.test.ts` 覆盖 `AGENTS.md` 检测与模板生成；`scripts/test-experience-ui.mjs` 增加 `AGENTS.md` 卡片与命令一键重跑交互测试。
 
 ---
 
@@ -3133,7 +3133,7 @@ Windows 11 x64 优先，中文界面，连接用户已经安装的 Pi。应用�
 
 ### F01 环境检查
 
-按运行环境、模型连接、选择项目三步完成。支持自动查找 Pi 和手动选择可执行入口；显示路径、实际版本与验证情况。以 Pi 1.1.0 为回归基线，其他可识别版本也允许运行，仅提示尚未验证，实际交互保留协议校验。[S1](https://github.com/earendil-works/pi/releases/tag/v1.1.0)
+按运行环境、模型连接、选择项目三步完成。支持自动查找 Pi 和手动选择可执行入口；显示路径、实际版本与验证情况。当前回归基线由 `shared/pi-version.ts` 的 `VERIFIED` 指定（现为 Pi 1.4.0），其他可识别版本也允许运行；验证分类保留在诊断中，界面显示实际版本，实际交互保留协议校验。[当前基线发布记录](https://github.com/earendil-works/pi/releases/tag/v1.4.0)
 
 原生 Windows 需检查 Git Bash，展示当前实际使用的命令环境。Pi 支持 Windows 原生运行和可选 PowerShell 工具；桌面端适配 Git Bash，不支持 WSL。[S7](https://github.com/earendil-works/pi/blob/v1.1.0/packages/coding-agent/docs/windows.md)
 
@@ -3324,7 +3324,7 @@ Electron 启用 contextIsolation、关闭 renderer 的 Node 集成，并限制 I
 
 核对日期为 2026 年 10 月 11 日。官方仓库现为 earendil-works/pi，包名为 @earendil-works/pi-coding-agent；本方案选取 v1.1.0 作为首版适配基线。版本升级必须重新运行协议和生命周期验收。
 
-接口细节引用 v1.1.0 文档。权限说明与 Electron 文档为核对时在线版本。文件差异、项目导航、窗口布局、数据保留和性能目标属于本产品设计，不是 Pi 已提供的完整桌面功能。
+以下链接保留首版核对时的 v1.1.0 文档，不代表当前回归基线；当前基线以 `shared/pi-version.ts` 的 `VERIFIED` 与 `package.json` 的 Pi 开发依赖为准（现为 1.4.0）。历史验收记录保留实际验证时的版本。权限说明与 Electron 文档为核对时在线版本。文件差异、项目导航、窗口布局、数据保留和性能目标属于本产品设计，不是 Pi 已提供的完整桌面功能。
 
 - [S1 Pi v1.1.0 发布记录](https://github.com/earendil-works/pi/releases/tag/v1.1.0)
 - [S2 Pi RPC 接入与生命周期](https://github.com/earendil-works/pi/blob/v1.1.0/packages/coding-agent/docs/rpc.md)

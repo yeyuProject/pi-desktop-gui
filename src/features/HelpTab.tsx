@@ -1,7 +1,7 @@
 import { shortcut } from '../lib/platform';
 import { builtinCommands } from '../lib/commands';
 import type { FeatureModel } from './usePiFeatures';
-export function HelpTab({ runtime, source }: Pick<FeatureModel, 'runtime' | 'source'>) {
+export function HelpTab({ runtime }: Pick<FeatureModel, 'runtime'>) {
   return (
     <>
       <h3>当前支持情况</h3>

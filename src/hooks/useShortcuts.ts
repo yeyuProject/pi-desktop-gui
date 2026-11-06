@@ -47,7 +47,7 @@ export function useShortcuts(options: ShortcutsOptions) {
   latest.current = options;
   const [stopArmed, setStopArmed] = useState(false);
   const runAction = (action: WorkbenchAction) => {
-    if (!allowsWorkbenchAction(action)) return;
+    if (!allowsWorkbenchAction()) return;
     const o = latest.current;
     const actions: Record<WorkbenchAction, () => void> = {
       new: () => {
@@ -92,7 +92,7 @@ export function useShortcuts(options: ShortcutsOptions) {
       if (!binding) return;
       if (
         (binding.action === 'previousTurn' || binding.action === 'nextTurn') &&
-        (hasInputText(event.target) || !allowsWorkbenchAction(binding.action))
+        (hasInputText(event.target) || !allowsWorkbenchAction())
       )
         return;
       event.preventDefault();

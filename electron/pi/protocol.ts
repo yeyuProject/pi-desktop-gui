@@ -81,6 +81,89 @@ export function validateRpcResult(command: string, value: unknown) {
   }
 }
 
+const content = (value: unknown) =>
+  typeof value === 'string' ||
+  (Array.isArray(value) && value.every((block) => object(block) && typeof block.type === 'string'));
+const strings = (value: unknown) => Array.isArray(value) && value.every((item) => typeof item === 'string');
+
+/** Guard fields consumed by the desktop, not the entire Pi schema. Unknown events/fields pass through. */
+export function validateRpcEvent(value: unknown) {
+  if (!object(value) || typeof value.type !== 'string') incompatible('事件', '缺少事件类型');
+  const check = (valid: boolean, field: string) => {
+    if (!valid) incompatible(value.type, `${field} 无效`);
+  };
+  switch (value.type) {
+    case 'message_start':
+    case 'message_end': {
+      const message = value.message;
+      check(object(message) && typeof message.role === 'string', 'message');
+      // Bash, summaries and extension-defined roles need not have a content field.
+      if (['user', 'assistant', 'toolResult', 'custom'].includes(message.role))
+        check(content(message.content), 'message.content');
+      break;
+    }
+    case 'message_update': {
+      const event = value.assistantMessageEvent;
+      check(object(event) && typeof event.type === 'string', 'assistantMessageEvent');
+      if (
+        [
+          'text_start',
+          'text_delta',
+          'text_end',
+          'thinking_start',
+          'thinking_delta',
+          'thinking_end',
+          'toolcall_start',
+          'toolcall_delta',
+          'toolcall_end',
+        ].includes(event.type)
+      )
+        check(Number.isSafeInteger(event.contentIndex) && event.contentIndex >= 0, 'contentIndex');
+      if (['text_delta', 'thinking_delta', 'toolcall_delta'].includes(event.type))
+        check(typeof event.delta === 'string', 'delta');
+      if (['text_end', 'thinking_end'].includes(event.type))
+        check(typeof event.content === 'string', 'content');
+      if (event.type === 'toolcall_end')
+        check(
+          object(event.toolCall) &&
+            event.toolCall.type === 'toolCall' &&
+            typeof event.toolCall.id === 'string' &&
+            typeof event.toolCall.name === 'string',
+          'toolCall',
+        );
+      // Do not validate tool arguments: Pi must report invalid model arguments as tool errors.
+      // Keep toolcall_start ids optional; the final toolCall is authoritative.
+      break;
+    }
+    case 'tool_execution_start':
+    case 'tool_execution_update':
+    case 'tool_execution_end': {
+      check(typeof value.toolCallId === 'string', 'toolCallId');
+      if (value.type !== 'tool_execution_update') check(typeof value.toolName === 'string', 'toolName');
+      const result = value.type === 'tool_execution_end' ? value.result : value.partialResult;
+      // Untyped extensions may omit results/content; retain the existing empty-output fallback.
+      if (result != null) {
+        check(object(result), 'result');
+        if (result.content != null) check(content(result.content), 'result.content');
+      }
+      if (value.type === 'tool_execution_end' && value.isError !== undefined)
+        check(typeof value.isError === 'boolean', 'isError');
+      break;
+    }
+    case 'queue_update':
+      if (value.steering != null) check(strings(value.steering), 'steering');
+      if (value.followUp != null) check(strings(value.followUp), 'followUp');
+      break;
+    case 'entry_appended':
+      check(object(value.entry) && typeof value.entry.type === 'string', 'entry');
+      if (value.entry.type === 'custom_message') check(content(value.entry.content), 'entry.content');
+      break;
+    case 'agent_settled':
+      if (value.aborted !== undefined) check(typeof value.aborted === 'boolean', 'aborted');
+      break;
+  }
+}
+
 export function validateBridgeResult(method: string, value: unknown) {
   if (
     method === 'side_chat' &&

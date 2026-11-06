@@ -69,18 +69,6 @@ export async function fetchLatestRelease(fetcher: FetchRelease = fetch): Promise
   if (!version) throw new Error('Invalid stable release version');
   return { version, notes: typeof release.body === 'string' ? release.body.slice(0, 200000) : '' };
 }
-export async function fetchReleaseNotes(version: string, fetcher: FetchRelease = fetch) {
-  const valid = stableVersion(version);
-  if (!valid) throw new Error('Invalid release version');
-  const response = await fetcher(LATEST_RELEASE_API.replace(/latest$/, `tags/v${valid}`), {
-    headers: { Accept: 'application/vnd.github+json', 'User-Agent': 'Pi-Desktop' },
-    cache: 'no-store',
-    signal: AbortSignal.timeout(15000),
-  });
-  if (!response.ok) throw new Error(`Release notes: HTTP ${response.status}`);
-  const release = (await response.json()) as { body?: unknown };
-  return typeof release.body === 'string' ? release.body.slice(0, 200000) : '';
-}
 
 export interface UpdateOptions {
   currentVersion: string;

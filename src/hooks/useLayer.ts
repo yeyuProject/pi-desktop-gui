@@ -5,7 +5,7 @@ const layers: Layer[] = [];
 const focusable =
   'button:not(:disabled),input:not(:disabled),select:not(:disabled),textarea:not(:disabled),a[href],summary';
 export const topLayer = () => layers.at(-1);
-export const allowsWorkbenchAction = (action: string) => {
+export const allowsWorkbenchAction = () => {
   const layer = topLayer();
   return !layer || layer.kind === 'panel';
 };
