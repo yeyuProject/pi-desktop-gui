@@ -140,6 +140,18 @@ export async function verifyPlanUI({ output = path.resolve('test-results') } = {
     await idle();
     const dot = page.getByRole('button', { name: '查看已完成的任务计划', exact: true });
     await expect(dot).toBeVisible({ timeout: 10000 });
+    const input = page.getByRole('textbox', { name: '任务输入', exact: true });
+    await input.fill('/skill:test');
+    await input.press(process.platform === 'darwin' ? 'Meta+a' : 'Control+a');
+    await input.press('Backspace');
+    await expect(input).toHaveValue('');
+    await expect(page.locator('.command-picker')).toHaveCount(0);
+    const minimizedSize = await dot.evaluate((button) => {
+      const rect = button.getBoundingClientRect();
+      const marker = button.querySelector('.goal-completed-dot').getBoundingClientRect();
+      return { width: rect.width, height: rect.height, dotWidth: marker.width, dotHeight: marker.height };
+    });
+    assert.deepEqual(minimizedSize, { width: 24, height: 24, dotWidth: 6, dotHeight: 6 });
     await dot.click();
     await expect(card.locator('li')).toHaveCount(4);
     await expect(card.locator('.spin')).toHaveCount(0);
