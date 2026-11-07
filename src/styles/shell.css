@@ -143,6 +143,11 @@
   text-overflow: ellipsis;
   overflow: hidden;
 }
+/* The title gives way first; the pending badge keeps its full text. */
+.session-row > button:first-child > .project-waiting {
+  flex-shrink: 0;
+  overflow: visible;
+}
 .session-row > .icon-button {
   align-self: center;
   opacity: 0;

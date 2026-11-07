@@ -11,6 +11,8 @@ import { describeModelError, describeOperationError } from '../shared/errors';
 import {
   roleApprovalCeiling,
   stricterApprovalMode,
+  teamRoleLabel,
+  teamToolAction,
   truncateTeamReport,
   validateDispatchRequest,
   type TeamResult,
@@ -217,7 +219,7 @@ export class TeamService {
       const role = chosen[index];
       const session = this.store.createSession(lead.projectId);
       const mode = stricterApprovalMode(lead.approvalMode ?? 'auto', roleApprovalCeiling(role));
-      session.title = `${task.name.trim()} · ${role.name}`;
+      session.title = `${task.name.trim()} · ${teamRoleLabel(role.name)}`;
       session.cwd = cwd;
       session.approvalMode = mode;
       session.team = {
@@ -421,12 +423,16 @@ export class TeamService {
     }));
     const plan = runtime.plan?.steps.find((step) => step.status === 'in_progress');
     const tool = runtime.tools.at(-1);
+    const approval = runtime.dialogs.find((dialog) => dialog.approval)?.approval;
+    const last = runtime.messages.at(-1);
     member.action = (
-      runtime.dialogs[0]?.approval?.summary ??
+      (approval && teamToolAction(approval.toolName, approval.summary)) ??
       plan?.text ??
       (tool?.status === 'running'
-        ? `${tool.name} ${String(tool.args.path ?? tool.args.command ?? tool.args.pattern ?? '')}`
-        : '正在撰写汇报')
+        ? teamToolAction(tool.name, String(tool.args.path ?? tool.args.command ?? tool.args.pattern ?? ''))
+        : last?.role === 'assistant' && messageText(last).trim()
+          ? '正在撰写汇报'
+          : '思考中')
     ).slice(0, 120);
     if (busy(runtime.status))
       member.status =

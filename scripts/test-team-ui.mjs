@@ -90,7 +90,12 @@ try {
   await expect(card).toContainText('等待空位');
   await expect(page.locator('.team-strip')).toContainText('团队 2/3 运行中 · 1 排队中');
   assert.equal(await card.evaluate((node) => getComputedStyle(node).borderTopWidth), '1px');
-  await expect(page.locator('.run-meta')).toContainText('等待成员 0/3');
+  await expect(page.locator('.run-meta')).toContainText('等待成员 · 0/3 完成');
+  // Built-in roles show their Chinese names; the title is not a toggle while running.
+  await expect(card).toContainText('实现者');
+  await expect(card).toContainText('调研员');
+  await expect(card.locator('header button.team-card-title')).toHaveCount(0);
+  await expect(card.locator('.team-member.queued')).toContainText('—');
   await card.locator('.team-member-row').first().click();
   await expect(card).toContainText('任务：');
   await card.locator('.team-member-row').first().focus();
@@ -115,7 +120,16 @@ try {
   await invoke('selectSession', id);
   const approval = page.locator('.approval-card');
   await expect(approval).toContainText('成员 · 实现接口');
-  await expect(page.locator('.team-strip')).toContainText('实现接口 · 等待确认');
+  await expect(approval.locator('header')).toContainText('想写入文件');
+  await expect(approval.locator('header')).not.toContainText('Pi 想');
+  await expect(page.locator('.team-strip')).toContainText('实现接口 · 等待确认：写入 team-ui.txt');
+  await expect(page.locator('.run-meta')).toContainText('等待确认 · 实现接口');
+  await expect(card.locator('.team-status-announcement')).toContainText('实现接口 等待确认');
+  await expect(card.locator('.team-status-announcement')).not.toContainText('审查代码');
+  // The strip's action goes to the member's approval, not the progress card.
+  await page.locator('.team-strip').getByRole('button', { name: '去确认', exact: true }).click();
+  await expect(approval).toBeInViewport({ ratio: 1 });
+  await expect(approval.locator('button[data-allow]')).toBeFocused();
   await expect(card.locator('.team-member.waiting')).toContainText('team-ui.txt');
   await expect(approval.getByRole('button', { name: '此成员总是允许', exact: true })).toBeVisible();
   await screenshots('approval');
@@ -127,6 +141,13 @@ try {
   await page.getByRole('button', { name: '返回负责人', exact: true }).click();
   await approval.getByRole('button', { name: '此成员总是允许', exact: true }).click();
   await expect(approval).toHaveCount(0);
+  const undo = page.locator('.toast').filter({ hasText: '已放行' }).getByRole('button', { name: '撤销' });
+  await expect(undo).toBeVisible();
+  const [undoColor, toastBackground] = await undo.evaluate((node) => [
+    getComputedStyle(node).color,
+    getComputedStyle(node.parentElement).backgroundColor,
+  ]);
+  assert.notEqual(undoColor, toastBackground, 'toast action text stays readable');
   assert.equal((await invoke('bootstrap')).runtime.approvalGrants?.length ?? 0, 0);
   await invoke('selectSession', writer.id);
   await expect(approval).toHaveCount(0);
@@ -138,7 +159,7 @@ try {
   );
   provider.reply(
     writerReport,
-    '实现汇报：验证成功。\n' + Array.from({ length: 45 }, (_, i) => `检查项 ${i}`).join('\n'),
+    '## 结论\n\n实现汇报：验证成功。\n\n' + Array.from({ length: 45 }, (_, i) => `- 检查项 ${i}`).join('\n'),
   );
   await expect.poll(() => provider.requests.length, { timeout: 30000 }).toBeGreaterThan(writerReport + 1);
   await ready(2);
@@ -151,18 +172,42 @@ try {
     .toBe('completed');
   await expect(page.locator('.team-strip')).toHaveCount(0);
   await screenshots('done');
-  if (notificationsSupported)
-    assert.equal(
-      (await app.evaluate(() => globalThis.teamNotifications)).length,
-      1,
-      'members do not notify on completion',
+  if (notificationsSupported) {
+    // The lead's own completion notice is expected whenever the test window is
+    // not focused; only member sessions must stay silent when they finish.
+    const sent = await app.evaluate(() => globalThis.teamNotifications);
+    const fromMembers = sent.filter(
+      (n) =>
+        !n.title.startsWith('成员需要确认 · ') &&
+        ['实现接口', '调研测试', '审查代码'].some((name) => n.title.includes(name)),
     );
+    assert.deepEqual(fromMembers, [], `members do not notify on completion: ${JSON.stringify(sent)}`);
+    assert.equal(sent.filter((n) => n.title.startsWith('成员需要确认 · ')).length, 1);
+  }
   await expect(card.locator('.team-member')).toHaveCount(0);
   await card.locator('header button').first().click();
   if ((await card.locator('.team-member-row').first().getAttribute('aria-expanded')) !== 'true')
     await card.locator('.team-member-row').first().click();
+  await expect(card.locator('.team-member.completed').first()).toContainText('实现汇报：验证成功。');
+  await expect(card.locator('.team-member.completed').first()).not.toContainText('## 结论');
   await card.getByRole('button', { name: '查看汇报', exact: true }).first().click();
-  await expect(card).toContainText('展开全文');
+  const report = card.locator('.team-report').first();
+  await expect(report.getByRole('button', { name: '展开全文', exact: true })).toBeVisible();
+  // The whole Markdown renders once; only the box is clamped, so no list is split.
+  await expect(report.locator('li')).toHaveCount(45);
+  await expect(report.locator('.team-report-body')).toHaveClass(/clamped/);
+  assert.ok(
+    await report.locator('.team-report-body').evaluate((node) => node.scrollHeight > node.clientHeight + 1),
+    'long reports are clamped to the 40-line box',
+  );
+  await report.getByRole('button', { name: '展开全文', exact: true }).click();
+  await expect(report.locator('.team-report-body')).not.toHaveClass(/clamped/);
+  await report.getByRole('button', { name: '收起全文', exact: true }).click();
+  await expect(card.getByRole('button', { name: '收起汇报', exact: true }).first()).toBeVisible();
+  const memberToggle = page.locator('.team-sidebar-toggle');
+  await expect(memberToggle).toHaveText('3 个成员');
+  if ((await memberToggle.getAttribute('aria-expanded')) !== 'true') await memberToggle.click();
+  await expect(page.locator('.team-sidebar-members .session-row').first()).toContainText('实现接口');
   await page.keyboard.press(process.platform === 'darwin' ? 'Meta+f' : 'Control+f');
   await page.getByRole('textbox', { name: '查找当前会话', exact: true }).fill('TEAM_REPORT_MATCH');
   await expect(card).toContainText('TEAM_REPORT_MATCH');
@@ -304,6 +349,11 @@ try {
     .toBe('completed');
   await expect(failureCard).toContainText('1 失败');
   await expect(failureCard).toContainText('1 已停止');
+  // A saved failure must not pin the sidebar group open after the dispatch.
+  const failedGroup = page.locator('.team-sidebar-toggle');
+  if ((await failedGroup.getAttribute('aria-expanded')) !== 'true') await failedGroup.click();
+  await failedGroup.click();
+  await expect(failedGroup).toHaveAttribute('aria-expanded', 'false');
   const restartedState = (await invoke('bootstrap')).state;
   await invoke('selectSession', writer.id);
   const deleting = invoke('deleteSession', writer.id);

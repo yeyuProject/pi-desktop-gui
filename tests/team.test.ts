@@ -9,6 +9,9 @@ import {
   isTeamSettings,
   roleApprovalCeiling,
   stricterApprovalMode,
+  teamReportHeadline,
+  teamRoleLabel,
+  teamToolAction,
   truncateTeamReport,
   validateDispatchRequest,
   validateTeamResult,
@@ -131,4 +134,27 @@ test('team index recovery interrupts members without losing unrelated sessions',
   assert.deepEqual(parsed.state.settings.team, DEFAULT_TEAM_SETTINGS);
   assert.ok(isTeamSettings({ ...DEFAULT_TEAM_SETTINGS, memberTokenBudget: null }));
   assert.equal(isTeamSettings({ ...DEFAULT_TEAM_SETTINGS, memberTokenBudget: 0 }), false);
+});
+
+test('report headline skips Markdown structure and keeps the first readable sentence', () => {
+  assert.equal(
+    teamReportHeadline('## 结论\n\n修复了会话过期判断。\n\n## 修改的文件'),
+    '修复了会话过期判断。',
+  );
+  assert.equal(teamReportHeadline('# 汇报\n- **结论**：已通过 `npm test`'), '结论：已通过 npm test');
+  assert.equal(teamReportHeadline('> 见 [说明](https://example.com)'), '见 说明');
+  assert.equal(teamReportHeadline('1. [x] 完成 snake_case_name 的修改'), '完成 snake_case_name 的修改');
+  assert.equal(teamReportHeadline('```ts\nconst a = 1;\n```\n---\n| a | b |\n实际结论'), '实际结论');
+  assert.equal(teamReportHeadline('## 只有标题 ##'), '只有标题');
+  assert.equal(teamReportHeadline(''), undefined);
+  assert.equal(teamReportHeadline('x'.repeat(300))?.length, 200);
+});
+
+test('team labels use Chinese names for built-in roles and common tools', () => {
+  assert.equal(teamRoleLabel('scout'), '调研员');
+  assert.equal(teamRoleLabel('reviewer'), '审查员');
+  assert.equal(teamRoleLabel('ui-role'), 'ui-role');
+  assert.equal(teamToolAction('read', 'src/a.ts'), '读取 src/a.ts');
+  assert.equal(teamToolAction('bash', 'npm test'), '运行 npm test');
+  assert.equal(teamToolAction('mcp__x', ''), 'mcp__x');
 });

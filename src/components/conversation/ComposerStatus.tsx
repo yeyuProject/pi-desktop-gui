@@ -176,6 +176,8 @@ export function ComposerFooter(props: ComposerProps) {
   const connecting = ownRunning && !runtime.connected;
   const now = useNow(ownRunning);
   const elapsed = runtime.startedAt ? Math.max(0, Math.floor((now - runtime.startedAt) / 1000)) : 0;
+  const teamMembers = runtime.team?.flatMap((s) => s.members) ?? [];
+  const teamWaiting = teamMembers.filter((m) => m.status === 'waiting');
   return (
     <>
       {ownRuntime &&
@@ -193,17 +195,19 @@ export function ComposerFooter(props: ComposerProps) {
               <Badge
                 status={runtime.status}
                 label={
-                  runtime.team?.some((s) => s.members.some((m) => teamMemberActive(m.status)))
-                    ? `等待成员 ${runtime.team.flatMap((s) => s.members).filter((m) => !teamMemberActive(m.status)).length}/${runtime.team.flatMap((s) => s.members).length}`
-                    : runtime.status === 'waiting'
-                      ? runtime.dialogs.some((dialog) => dialog.approval)
-                        ? '等待批准'
-                        : runtime.dialogs.some((dialog) => dialog.ask)
-                          ? '等待你回答'
-                          : undefined
-                      : connecting && runtime.status === 'starting'
-                        ? '正在连接 Pi'
-                        : undefined
+                  teamWaiting.length
+                    ? `等待确认 · ${teamWaiting[0].name}${teamWaiting.length > 1 ? ` 等 ${teamWaiting.length} 个成员` : ''}`
+                    : runtime.status === 'waiting' && runtime.dialogs.some((dialog) => dialog.approval)
+                      ? '等待批准'
+                      : teamMembers.some((m) => teamMemberActive(m.status))
+                        ? `等待成员 · ${teamMembers.filter((m) => !teamMemberActive(m.status)).length}/${teamMembers.length} 完成`
+                        : runtime.status === 'waiting'
+                          ? runtime.dialogs.some((dialog) => dialog.ask)
+                            ? '等待你回答'
+                            : undefined
+                          : connecting && runtime.status === 'starting'
+                            ? '正在连接 Pi'
+                            : undefined
                 }
               />
               {ownRunning && !connecting && Boolean(runtime.startedAt) && (

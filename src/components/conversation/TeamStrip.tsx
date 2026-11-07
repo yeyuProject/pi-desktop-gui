@@ -19,22 +19,32 @@ export function TeamStrip({
         priority(a.member.status) - priority(b.member.status) ||
         (a.member.startedAt ?? Infinity) - (b.member.startedAt ?? Infinity),
     )[0];
+  const waiting = attention.member.status === 'waiting';
   return (
-    <div className="team-strip">
+    <div className={'team-strip' + (waiting ? ' waiting' : '')}>
       <strong>
         团队 {running}/{members.length} 运行中{queued ? ` · ${queued} 排队中` : ''}
       </strong>
       <span>
         {attention.member.name} ·{' '}
-        {attention.member.status === 'waiting'
-          ? '等待确认'
+        {waiting
+          ? `等待确认${attention.member.action ? `：${attention.member.action}` : ''}`
           : (attention.member.queueReason ??
             attention.member.error?.message ??
             attention.member.action ??
             teamStatusLabels[attention.member.status])}
       </span>
       <button
+        className={waiting ? 'primary' : undefined}
         onClick={() => {
+          // A pending approval is the next thing to act on, so go to its card
+          // instead of the progress card higher up in the conversation.
+          if (waiting) {
+            window.dispatchEvent(
+              new CustomEvent('pi:focus-approval', { detail: attention.member.sessionId }),
+            );
+            return;
+          }
           toggle(`team:${attention.snapshot.toolCallId}`, true);
           toggle(`team:${attention.snapshot.toolCallId}:${attention.member.name}`, true);
           window.dispatchEvent(new CustomEvent('pi:team-card', { detail: attention.snapshot.toolCallId }));
@@ -43,7 +53,7 @@ export function TeamStrip({
             ?.scrollIntoView({ block: 'center' });
         }}
       >
-        查看
+        {waiting ? '去确认' : '查看'}
       </button>
     </div>
   );

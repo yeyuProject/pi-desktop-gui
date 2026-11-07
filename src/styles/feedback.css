@@ -9,6 +9,17 @@
 .toast > button {
   flex-shrink: 0;
 }
+/* Success toasts are dark; the global button surface made the action text invisible. */
+.toast > button:not(.icon-button) {
+  min-height: 0;
+  padding: 2px 10px;
+  color: inherit;
+  background: transparent;
+  border-color: color-mix(in srgb, currentColor 45%, transparent);
+}
+.toast > button:not(.icon-button):hover:not(:disabled) {
+  background: color-mix(in srgb, currentColor 14%, transparent);
+}
 .toast > span {
   flex: 1;
   min-width: 0;

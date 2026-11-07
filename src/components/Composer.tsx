@@ -18,6 +18,7 @@ import {
   Paperclip,
   ImagePlus,
   Target,
+  Users,
 } from 'lucide-react';
 import { mod } from '../lib/platform';
 import { commandSourceNames } from '../lib/commands';
@@ -885,7 +886,11 @@ export function Composer(props: ComposerProps) {
                 className="team-button"
                 aria-pressed={!!selected?.teamEnabled}
                 disabled={!sessionEnabled || pending}
-                title="开启后 Pi 可以把子任务交给成员并行处理，用量随成员数量增加。"
+                title={
+                  selected?.teamEnabled
+                    ? '团队已开启：Pi 可以把子任务交给成员并行处理。点击关闭'
+                    : '开启后 Pi 可以把子任务交给成员并行处理，用量随成员数量增加。'
+                }
                 onClick={() =>
                   selected &&
                   void attempt(async () => {
@@ -894,6 +899,7 @@ export function Composer(props: ComposerProps) {
                   })
                 }
               >
+                <Users size={14} />
                 团队
               </button>
             )}

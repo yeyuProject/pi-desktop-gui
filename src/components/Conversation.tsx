@@ -141,16 +141,21 @@ export function Conversation(
   }, [selected?.id]);
   const [projectApproval, setProjectApproval] = useState<'auto' | 'confirm'>('auto');
   const [approvalVisible, setApprovalVisible] = useState(false);
-  const focusApproval = () => {
+  const focusApproval = (source?: string) => {
     showLatest();
     requestAnimationFrame(() => {
-      const card = thread.current?.querySelector<HTMLElement>('.approval-card');
+      const card =
+        (source &&
+          thread.current?.querySelector<HTMLElement>(
+            `.approval-card[data-source="${CSS.escape(source)}"]`,
+          )) ||
+        thread.current?.querySelector<HTMLElement>('.approval-card');
       card?.scrollIntoView({ block: 'center' });
       card?.querySelector<HTMLButtonElement>('button[data-allow]')?.focus({ preventScroll: true });
     });
   };
   useEffect(() => {
-    const focus = () => focusApproval();
+    const focus = (event: Event) => focusApproval((event as CustomEvent<string | undefined>).detail);
     window.addEventListener('pi:focus-approval', focus);
     const card = thread.current?.querySelector('.approval-card button[data-allow]');
     const observer = new IntersectionObserver(
@@ -944,6 +949,7 @@ export function Conversation(
               <ApprovalCard
                 key={`${d.sourceSessionId}:${d.id}`}
                 dialog={d}
+                sourceId={d.sourceSessionId}
                 sourceName={d.sourceName}
                 openMember={() => {
                   const member = state.sessions.find((s) => s.id === d.sourceSessionId);
@@ -1005,7 +1011,7 @@ export function Conversation(
         <button
           className={'new-content' + (approvals.length && !approvalVisible ? ' approval-attention' : '')}
           title="滚到底部并继续跟随输出"
-          onClick={approvals.length && !approvalVisible ? focusApproval : showLatest}
+          onClick={approvals.length && !approvalVisible ? () => focusApproval() : showLatest}
         >
           <ArrowDown size={14} />
           {approvals.length && !approvalVisible ? `有 ${approvals.length} 项待审批` : '回到最新'}

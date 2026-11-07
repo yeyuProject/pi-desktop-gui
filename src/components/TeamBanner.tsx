@@ -1,6 +1,6 @@
 import type { Session, Message } from '../../shared/types';
 import { messageText } from '../../shared/types';
-import { teamMemberActive } from '../../shared/team';
+import { teamMemberActive, teamRoleLabel } from '../../shared/team';
 import { truncateQuote } from '../../shared/message-content';
 export function TeamBanner({
   session,
@@ -22,7 +22,7 @@ export function TeamBanner({
   return (
     <div className="team-banner">
       <span>
-        由 {lead?.title ?? '已删除的负责人'} 分派 · 角色 {session.team.role}
+        由 {lead?.title ?? '已删除的负责人'} 分派 · 角色 {teamRoleLabel(session.team.role)}
         {!active && <small> · 之后的对话不会自动同步给负责人</small>}
       </span>
       <button disabled={!lead} onClick={() => lead && void select(lead)}>

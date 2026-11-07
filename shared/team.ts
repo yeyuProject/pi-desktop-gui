@@ -114,6 +114,62 @@ export const teamStatusLabels: Record<TeamMemberStatus, string> = {
   budget_limited: '达到上限',
   interrupted: '已中断',
 };
+const teamRoleLabels: Record<string, string> = {
+  scout: '调研员',
+  planner: '规划者',
+  worker: '实现者',
+  reviewer: '审查员',
+};
+/** Built-in roles keep their file names; the interface shows their Chinese names. */
+export const teamRoleLabel = (role: string) => teamRoleLabels[role] ?? role;
+const teamToolVerbs: Record<string, string> = {
+  read: '读取',
+  write: '写入',
+  edit: '修改',
+  bash: '运行',
+  powershell: '运行',
+  grep: '搜索',
+  find: '查找',
+  ls: '列出',
+};
+/** One-line description of a tool call, e.g. "读取 src/app.ts". */
+export function teamToolAction(tool: string, target: string) {
+  const verb = teamToolVerbs[tool];
+  return [verb ?? tool, target].filter(Boolean).join(' ');
+}
+const inlineMarkdown = (line: string) =>
+  line
+    .replace(/!?\[([^\]]*)\]\([^)]*\)/g, '$1')
+    .replace(/`([^`]*)`/g, '$1')
+    .replace(/(\*\*|__)(.+?)\1/g, '$2')
+    .replace(/~~(.+?)~~/g, '$1')
+    .replace(/(^|[^\w*])\*(?!\s)([^*]+?)\*(?!\w)/g, '$1$2')
+    .trim();
+/**
+ * The first readable sentence of a Markdown report. Headings, rules, fences and
+ * table rows are skipped so a report starting with "## 结论" shows its content.
+ */
+export function teamReportHeadline(report?: string) {
+  if (!report) return undefined;
+  let fence = false;
+  let heading: string | undefined;
+  for (const raw of report.split('\n')) {
+    const line = raw.trim();
+    if (/^(```|~~~)/.test(line)) {
+      fence = !fence;
+      continue;
+    }
+    if (fence || !line || /^([-*_])(\s*\1){2,}$/.test(line) || line.startsWith('|')) continue;
+    const title = /^#{1,6}\s+(.*)$/.exec(line);
+    if (title) {
+      heading ??= inlineMarkdown(title[1].replace(/\s+#+$/, ''));
+      continue;
+    }
+    const text = inlineMarkdown(line.replace(/^>\s*/, '').replace(/^([-*+]|\d+[.)])\s+(\[[ xX]\]\s+)?/, ''));
+    if (text) return text.slice(0, 200);
+  }
+  return heading?.slice(0, 200) || undefined;
+}
 const object = (value: unknown): value is Record<string, unknown> =>
   !!value && typeof value === 'object' && !Array.isArray(value);
 const text = (value: unknown, max: number): value is string =>

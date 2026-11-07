@@ -15,6 +15,7 @@ import {
   CircleHelp,
   Link2,
   Trash2,
+  Users,
 } from 'lucide-react';
 import { platform } from '../lib/platform';
 import { readableError } from '../lib/format';
@@ -173,7 +174,7 @@ export function SettingsModal(
                 ['environment', '运行环境', Terminal],
                 ['models', '模型连接', Link2],
                 ['appearance', '外观与编辑器', Monitor],
-                ['team', '团队', Monitor],
+                ['team', '团队', Users],
                 ['diagnostic', '诊断与数据', CircleHelp],
                 ['updates', '关于与更新', Download],
               ].map(([key, label, Icon]) => (

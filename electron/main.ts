@@ -65,6 +65,7 @@ import { updateFeed, updateProxy } from './update-network';
 import { updateInstallation, UpdateService } from './updater';
 import { Workspace } from './workspace';
 import { WorkspaceWatcher } from './workspace-watch';
+import { teamToolAction } from '../shared/team';
 
 let window: BrowserWindow | undefined, store: Store, service: SessionAgents, workspace: Workspace;
 let sideChats: SideChats;
@@ -307,11 +308,9 @@ function notifyAttention(runtime: Runtime) {
     if (sourceSession?.team) {
       title = '成员需要确认 · ' + (leadSession?.title ?? session.title);
       const approval = dialog?.approval;
-      const operation = approval?.kind === 'shell' ? '运行 ' : approval?.kind === 'write' ? '写入 ' : '';
-      body = `${sourceSession.team.name} · ${operation}${approval?.summary ?? dialog?.title ?? ''}`.slice(
-        0,
-        160,
-      );
+      body = `${sourceSession.team.name} · ${
+        approval ? teamToolAction(approval.toolName, approval.summary) : (dialog?.title ?? '')
+      }`.slice(0, 160);
     }
   } else if (sourceSession?.team) return;
   else if (finished && goalOutcome) {

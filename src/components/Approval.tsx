@@ -111,9 +111,11 @@ export function ApprovalCard({
   dialog,
   first,
   respond,
+  sourceId,
   sourceName,
   openMember,
 }: {
+  sourceId?: string;
   sourceName?: string;
   openMember?: () => void;
   dialog: ExtensionDialog;
@@ -164,20 +166,28 @@ export function ApprovalCard({
           : '')
       }
       aria-label={`等待批准：${a.toolName}`}
+      data-source={sourceId}
     >
       <header>
-        {sourceName && <span>成员 · {sourceName}</span>}
         {a.kind === 'shell' ? <Terminal size={15} /> : <FileText size={15} />}
+        {/* A member request names the member; the lead's own requests keep "Pi". */}
+        {sourceName && <span className="approval-source">成员 · {sourceName}</span>}
         <strong>
+          {sourceName ? '' : 'Pi '}
           {a.kind === 'shell'
-            ? 'Pi 想执行命令'
+            ? '想执行命令'
             : a.kind === 'write'
-              ? `Pi 想${a.toolName === 'edit' ? '修改' : '写入'}文件`
+              ? `想${a.toolName === 'edit' ? '修改' : '写入'}文件`
               : a.kind === 'read'
-                ? 'Pi 想读取或搜索文件'
-                : `Pi 想调用 ${a.toolName}`}
+                ? '想读取或搜索文件'
+                : `想调用 ${a.toolName}`}
         </strong>
         {a.path && <code>{a.path}</code>}
+        {sourceName && (
+          <button className="approval-source-link" onClick={openMember}>
+            在成员中查看
+          </button>
+        )}
       </header>
       {a.writeTarget && a.writeTarget !== 'project' && (
         <p className="approval-path-warning">
@@ -211,7 +221,6 @@ export function ApprovalCard({
       ) : (
         <pre className="approval-command">{a.summary}</pre>
       )}
-      {sourceName && <button onClick={openMember}>在成员中查看</button>}
       {reason === null ? (
         <div className="approval-actions">
           <button

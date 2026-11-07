@@ -16,6 +16,7 @@ import {
 import { busy, type Session } from '../../shared/types';
 import { useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { isOlderSession } from '../../shared/usage';
+import { teamMemberActive } from '../../shared/team';
 import '../styles/management.css';
 import { platform, shortcut } from '../lib/platform';
 import { IconButton } from './IconButton';
@@ -80,7 +81,8 @@ export function Sidebar(
     }
     return new Set(project ? [project.id] : []);
   });
-  const [teamOpen, setTeamOpen] = useState<Set<string>>(new Set());
+  // Explicit choices win; without one a group opens while it needs attention.
+  const [teamOpen, setTeamOpen] = useState<Map<string, boolean>>(new Map());
   const [moving, setMoving] = useState<Set<string>>(new Set());
   const [moveId, setMoveId] = useState<string>();
   const [moveStatuses, setMoveStatuses] = useState<Record<string, string>>({});
@@ -384,14 +386,18 @@ export function Sidebar(
       )
       .sort(bySidebarOrder);
     const renderGroup = (session: Session) => {
-      const members = state.sessions.filter((s) => s.team?.leadId === session.id);
+      // New sessions are inserted first; reverse to list members in dispatch order.
+      const members = state.sessions.filter((s) => s.team?.leadId === session.id).reverse();
       const active = members.filter((s) => busy(activities[s.id]?.status ?? s.lastStatus)).length;
+      // Saved failures stay in the index after the dispatch, so they only open
+      // the group while one of its members is still running.
+      const dispatching = members.some((s) => teamMemberActive(s.team!.status));
       const open =
-        teamOpen.has(session.id) ||
+        teamOpen.get(session.id) ??
         members.some(
           (s) =>
             activities[s.id]?.pending ||
-            ['failed', 'waiting'].includes(s.team!.status) ||
+            (dispatching && ['failed', 'waiting'].includes(s.team!.status)) ||
             s.id === selected?.id,
         );
       return (
@@ -402,16 +408,10 @@ export function Sidebar(
               <button
                 className="team-sidebar-toggle"
                 aria-expanded={open}
-                onClick={() =>
-                  setTeamOpen((before) => {
-                    const next = new Set(before);
-                    if (next.has(session.id)) next.delete(session.id);
-                    else next.add(session.id);
-                    return next;
-                  })
-                }
+                onClick={() => setTeamOpen((before) => new Map(before).set(session.id, !open))}
               >
-                {open ? '▾' : '▸'} 成员 · {active}/{members.length} 运行中
+                <ChevronDown size={12} />
+                {active ? `成员 · ${active}/${members.length} 运行中` : `${members.length} 个成员`}
               </button>
               {open && <div className="team-sidebar-members">{members.map(renderSession)}</div>}
             </>
