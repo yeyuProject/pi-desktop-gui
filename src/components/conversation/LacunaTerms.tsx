@@ -14,10 +14,12 @@ import {
   currentLacunaSession,
   lacunaTerm,
   openLacunaNode,
+  setLacunaMapView,
   useLacunaPanel,
   useLacunaRevision,
 } from '../../lib/lacuna-store';
 import { useLayer } from '../../hooks/useLayer';
+import { LacunaMap } from './LacunaMap';
 import { RichText } from './Markdown';
 
 const api = window.desktop;
@@ -144,7 +146,42 @@ export function LacunaPanel() {
     aside.current?.querySelector('.lacuna-card')?.scrollTo({ top: 0 });
   }, [id]);
 
-  if (!panel || !id) return null;
+  if (!panel) return null;
+  if (!id)
+    return (
+      <aside
+        className={'lacuna-panel' + (panel.view === 'graph' ? ' wide' : '')}
+        ref={aside}
+        aria-label="知溯知识图"
+      >
+        <header>
+          <strong className="lacuna-panel-title">知溯</strong>
+          <div className="lacuna-tabs" role="tablist" aria-label="知识图的显示方式">
+            {(
+              [
+                ['outline', '大纲'],
+                ['graph', '关系图'],
+              ] as const
+            ).map(([view, label]) => (
+              <button
+                key={view}
+                role="tab"
+                aria-selected={panel.view === view}
+                onClick={() => setLacunaMapView(view)}
+              >
+                {label}
+              </button>
+            ))}
+          </div>
+          <button aria-label="关闭知溯" onClick={closeLacunaPanel}>
+            <X size={15} />
+          </button>
+        </header>
+        <div className="lacuna-card lacuna-map-body">
+          <LacunaMap view={panel.view} />
+        </div>
+      </aside>
+    );
   const node = nodes[id];
   const title = (nodeId: string) => nodes[nodeId]?.title ?? lacunaTerm(nodeId)?.title ?? nodeId;
 
@@ -164,9 +201,10 @@ export function LacunaPanel() {
     <aside className="lacuna-panel" ref={aside} aria-label="知溯解释">
       <header>
         <nav aria-label="解释路径">
+          <button onClick={() => backToLacunaNode(-1)}>知识图</button>
           {panel.stack.map((item, index) => (
             <span key={item + index}>
-              {index > 0 && <span className="lacuna-path-separator">›</span>}
+              <span className="lacuna-path-separator">›</span>
               {index === panel.stack.length - 1 ? (
                 <strong aria-current="page">{title(item)}</strong>
               ) : (

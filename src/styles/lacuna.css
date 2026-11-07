@@ -162,3 +162,176 @@
     box-shadow: var(--shadow);
   }
 }
+/* 知识图（src/components/conversation/LacunaMap.tsx） */
+.lacuna-panel.wide {
+  width: 480px;
+}
+.lacuna-panel-title {
+  align-self: center;
+  font-size: 13px;
+}
+.lacuna-tabs {
+  display: flex;
+  flex: 1;
+  justify-content: center;
+  gap: 2px;
+}
+.lacuna-tabs button {
+  min-height: 24px;
+  padding: 2px 10px;
+  border: 1px solid transparent;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--muted);
+  font-size: 12px;
+}
+.lacuna-tabs button[aria-selected='true'] {
+  border-color: var(--line);
+  background: var(--bg);
+  color: var(--ink);
+}
+.lacuna-map-body {
+  display: flex;
+  flex-direction: column;
+  padding: 10px 12px;
+}
+.lacuna-map {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.lacuna-search {
+  width: 100%;
+  min-height: 28px;
+  padding: 4px 8px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: var(--bg);
+  color: var(--ink);
+  font-size: 12px;
+}
+.lacuna-outline,
+.lacuna-outline ul {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.lacuna-outline ul {
+  margin-left: 10px;
+  padding-left: 8px;
+  border-left: 1px solid var(--line);
+}
+.lacuna-outline-row {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  min-height: 26px;
+}
+.lacuna-outline-toggle,
+.lacuna-outline-spacer {
+  flex-shrink: 0;
+  width: 20px;
+}
+.lacuna-outline-toggle {
+  min-height: 20px;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: var(--muted);
+}
+.lacuna-outline-title {
+  min-height: 24px;
+  padding: 2px 6px;
+  overflow: hidden;
+  border: 0;
+  border-radius: 5px;
+  background: transparent;
+  color: var(--ink);
+  font-size: 13px;
+  text-align: left;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.lacuna-outline-title:hover {
+  background: var(--hover);
+}
+.lacuna-outline-row.topic .lacuna-outline-title {
+  font-weight: 600;
+}
+.lacuna-outline-heading {
+  margin: 10px 0 2px;
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 500;
+}
+.lacuna-graph-wrap {
+  position: relative;
+  display: flex;
+  flex: 1;
+  min-height: 320px;
+}
+.lacuna-graph-tools {
+  position: absolute;
+  top: 0;
+  right: 0;
+  display: flex;
+  gap: 4px;
+}
+.lacuna-graph-tools button {
+  min-height: 24px;
+  padding: 2px 8px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: var(--surface);
+  font-size: 12px;
+}
+.lacuna-graph {
+  flex: 1;
+  width: 100%;
+  min-height: 320px;
+  cursor: grab;
+  touch-action: none;
+  user-select: none;
+}
+.lacuna-graph:active {
+  cursor: grabbing;
+}
+.lacuna-graph-edge {
+  stroke: var(--line-strong);
+  stroke-width: 1.2;
+}
+.lacuna-graph-arrow {
+  fill: var(--line-strong);
+}
+.lacuna-graph-node {
+  cursor: pointer;
+}
+.lacuna-graph-node rect {
+  fill: var(--surface);
+  stroke: var(--line-strong);
+}
+.lacuna-graph-node.topic rect {
+  fill: var(--accent-soft);
+  stroke: var(--accent);
+}
+.lacuna-graph-node:hover rect,
+.lacuna-graph-node:focus-visible rect {
+  stroke: var(--accent);
+  stroke-width: 2;
+}
+.lacuna-graph-node:focus {
+  outline: none;
+}
+.lacuna-graph-node text {
+  fill: var(--ink);
+  font-size: 12px;
+  dominant-baseline: central;
+  text-anchor: middle;
+}
+.lacuna-graph-node.topic text {
+  font-weight: 600;
+}
+.lacuna-graph-node.dim,
+.lacuna-graph-edge.dim {
+  opacity: 0.25;
+}

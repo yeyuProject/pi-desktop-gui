@@ -23,8 +23,11 @@ const terms = new Map<string, LacunaTerm>();
 const queued = new Map<string, { session: string; text: string }>();
 let flushing: ReturnType<typeof setTimeout> | undefined;
 
-/** 解释卡片：stack 是顶部的路径，最后一个是正在看的词。 */
-let panel: { session: string; stack: string[] } | undefined;
+export type LacunaMapView = 'outline' | 'graph';
+/** 右侧面板：stack 为空时显示知识图（大纲或关系图），否则显示解释卡片，stack 是顶部的路径。 */
+let panel: { session: string; stack: string[]; view: LacunaMapView } | undefined;
+/** 上一次看的是大纲还是关系图，关掉面板后再打开时沿用。 */
+let lastView: LacunaMapView = 'outline';
 
 const emit = () => {
   for (const listener of listeners) listener();
@@ -129,17 +132,33 @@ export function openLacunaNode(id: string, nested = false) {
   if (!sessionId) return;
   if (nested && panel?.session === sessionId) {
     const at = panel.stack.indexOf(id);
-    panel = { session: sessionId, stack: at === -1 ? [...panel.stack, id] : panel.stack.slice(0, at + 1) };
+    panel = { ...panel, stack: at === -1 ? [...panel.stack, id] : panel.stack.slice(0, at + 1) };
   } else {
-    panel = { session: sessionId, stack: [id] };
+    panel = { session: sessionId, stack: [id], view: lastView };
   }
   emit();
 }
 
-/** 点顶部路径里的某一层，回到那一层。 */
+/** 点顶部路径里的某一层，回到那一层；index 为 -1 时回到知识图。 */
 export function backToLacunaNode(index: number) {
   if (!panel) return;
   panel = { ...panel, stack: panel.stack.slice(0, index + 1) };
+  emit();
+}
+
+/** 顶栏的“知溯”按钮：打开知识图；已经在看知识图时关掉面板。 */
+export function toggleLacunaMap() {
+  if (!sessionId) return;
+  panel =
+    panel?.session === sessionId && panel.stack.length === 0
+      ? undefined
+      : { session: sessionId, stack: [], view: lastView };
+  emit();
+}
+
+export function setLacunaMapView(view: LacunaMapView) {
+  lastView = view;
+  if (panel) panel = { ...panel, view };
   emit();
 }
 

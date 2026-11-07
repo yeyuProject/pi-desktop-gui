@@ -5,7 +5,7 @@ import type { HandlerContext, HandlerMap } from './handler-context';
 interface LacunaHandlerContext extends Pick<HandlerContext, 'store' | 'text'> {
   lacuna: LacunaService;
 }
-export type LacunaHandlerName = 'lacunaStatus' | 'lacunaAnnotate' | 'lacunaNode';
+export type LacunaHandlerName = 'lacunaStatus' | 'lacunaAnnotate' | 'lacunaNode' | 'lacunaGraph';
 
 /** 知溯术语解释：按会话的工作目录找到知识库，认词、读取解释（见 electron/lacuna.ts）。 */
 export function createLacunaHandlers(context: LacunaHandlerContext) {
@@ -27,6 +27,10 @@ export function createLacunaHandlers(context: LacunaHandlerContext) {
       text(sessionId, 100);
       text(id, 300);
       return lacuna.node(await store.sessionDirectory(sessionId), id);
+    },
+    lacunaGraph: async (sessionId) => {
+      text(sessionId, 100);
+      return lacuna.graph(await store.sessionDirectory(sessionId));
     },
   };
   return { handlers };

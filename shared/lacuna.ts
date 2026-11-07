@@ -44,6 +44,24 @@ export interface LacunaNode extends LacunaTerm {
   dependedBy: LacunaRef[];
 }
 
+/** 大纲里的一项：一个词，以及在它的解释里问到的词。repeated 表示同一棵树上面已经出现过。 */
+export interface LacunaOutlineItem {
+  id: string;
+  title: string;
+  type: LacunaNode['type'];
+  children: LacunaOutlineItem[];
+  repeated?: true;
+}
+
+/** 知识图面板的数据：按选题组织的大纲，以及关系图要用的节点和边（from 依赖 to）。 */
+export interface LacunaGraph {
+  outline: { topics: LacunaOutlineItem[]; loose: LacunaOutlineItem[] };
+  nodes: Array<{ id: string; title: string; type: LacunaNode['type'] }>;
+  edges: Array<{ from: string; to: string }>;
+}
+
+export type LacunaGraphResult = { graph: LacunaGraph } | { reason: string };
+
 export type LacunaStatus =
   | { available: true; scope: 'project' | 'personal'; root: string; nodeCount: number; revision: number }
   | { available: false; reason: string };

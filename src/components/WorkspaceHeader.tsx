@@ -8,6 +8,7 @@ import {
 } from 'lucide-react';
 import { shortcut } from '../lib/platform';
 import { IconButton } from './IconButton';
+import { toggleLacunaMap, useLacunaEnabled, useLacunaPanel } from '../lib/lacuna-store';
 import type { Workbench } from '../hooks/useWorkbench';
 
 export function WorkspaceHeader(
@@ -64,6 +65,7 @@ export function WorkspaceHeader(
         <button disabled={!selected} onClick={() => window.dispatchEvent(new Event('pi:side'))}>
           侧边对话
         </button>
+        <LacunaButton />
         {waiting.length > 0 && (
           <details className="attention-menu">
             <summary
@@ -109,5 +111,17 @@ export function WorkspaceHeader(
         )}
       </div>
     </header>
+  );
+}
+
+/** 打开知溯知识图。设置里关掉了术语解释时不显示。 */
+function LacunaButton() {
+  const enabled = useLacunaEnabled();
+  const panel = useLacunaPanel();
+  if (!enabled) return null;
+  return (
+    <button aria-pressed={panel?.stack.length === 0} onClick={toggleLacunaMap}>
+      知溯
+    </button>
   );
 }

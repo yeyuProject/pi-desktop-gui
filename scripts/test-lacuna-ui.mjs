@@ -1,6 +1,7 @@
 // 知溯术语解释：真实 Electron 渲染进程，模拟的知溯知识库。
 // 检查：助手回复里问过的词带下划线（代码和链接里的不标）、悬停显示简短解释、点击打开解释卡片、
-// 卡片里的词能接着点开并显示路径、在卡片和对话里选中文字问“这是什么意思”会把问题填进输入框、关掉设置后不再标。
+// 卡片里的词能接着点开并显示路径、在卡片和对话里选中文字问“这是什么意思”会把问题填进输入框、
+// 顶栏打开知识图（大纲、关系图）并从中打开卡片、关掉设置后不再标。
 import assert from 'node:assert/strict';
 import fs from 'node:fs/promises';
 import os from 'node:os';
@@ -55,14 +56,59 @@ const nodes = {
     summary: '没有直接观测到、由模型自己学出来的变量。',
     body: '没有直接观测到、由模型自己学出来的变量。',
     dependsOn: [],
-    dependedBy: [{ id: 'vae', title: '变分自编码器' }],
+    dependedBy: [
+      { id: 'vae', title: '变分自编码器' },
+      { id: 'zero', title: '零样本' },
+    ],
   },
+  zero: {
+    id: 'zero',
+    title: '零样本',
+    aliases: ['zero-shot'],
+    type: 'concept',
+    summary: '不针对目标专门训练，只凭一段参考样例就完成任务。',
+    body: '不针对目标专门训练，只凭一段参考样例就完成任务。',
+    dependsOn: [{ id: 'latent', title: '隐变量' }],
+    dependedBy: [{ id: 'topic', title: '如何优化 GPT-SoVITS 的效果？' }],
+  },
+  topic: {
+    id: 'topic',
+    title: '如何优化 GPT-SoVITS 的效果？',
+    aliases: [],
+    type: 'topic',
+    summary: '选题。',
+    body: '选题。',
+    dependsOn: [
+      { id: 'vae', title: '变分自编码器' },
+      { id: 'zero', title: '零样本' },
+    ],
+    dependedBy: [],
+  },
+};
+// 知识图面板的数据：选题 → 变分自编码器 → 隐变量，选题 → 零样本 → 隐变量。
+const item = (id, children = []) => ({ id, title: nodes[id].title, type: nodes[id].type, children });
+const graph = {
+  outline: {
+    topics: [
+      item('topic', [item('vae', [item('latent')]), item('zero', [{ ...item('latent'), repeated: true }])]),
+    ],
+    loose: [],
+  },
+  nodes: Object.values(nodes).map(({ id, title, type }) => ({ id, title, type })),
+  edges: [
+    { from: 'topic', to: 'vae' },
+    { from: 'vae', to: 'latent' },
+    { from: 'topic', to: 'zero' },
+    { from: 'zero', to: 'latent' },
+  ],
 };
 
 // 模拟主进程的认词：最长的叫法优先，跳过反引号里的代码（真实规则在 lacuna 里，这里只要给出确定的结果）。
-const install = ({ messages, nodes }) => {
+const install = ({ messages, nodes, graph }) => {
   const original = window.desktop.invoke;
+  // 和真实的 lacuna 一样，选题不参与认词。
   const names = Object.values(nodes)
+    .filter((node) => node.type !== 'topic')
     .flatMap((node) => [node.title, ...node.aliases].map((name) => [name, node.id]))
     .sort((a, b) => b[0].length - a[0].length);
   const annotate = (text) => {
@@ -91,6 +137,7 @@ const install = ({ messages, nodes }) => {
       return args[1].map(annotate);
     }
     if (method === 'lacunaNode') return nodes[args[1]] ?? null;
+    if (method === 'lacunaGraph') return { graph };
     if (method === 'bootstrap') {
       const value = await original(method, ...args);
       const query = new URLSearchParams(location.search);
@@ -129,7 +176,7 @@ async function select(locator, text) {
 try {
   ({ app, page } = await launchApp({ args: [entry], errors }));
   await page.addInitScript({
-    content: `(${workbenchFixture.toString()})({}); (${install.toString()})(${JSON.stringify({ messages, nodes })});`,
+    content: `(${workbenchFixture.toString()})({}); (${install.toString()})(${JSON.stringify({ messages, nodes, graph })});`,
   });
   for (const [style, theme] of [
     ['classic', 'light'],
@@ -160,7 +207,7 @@ try {
     // 卡片里的词也能点开，路径变成两层；点路径回到上一层。
     await panel.locator('.lacuna-body .lacuna-term', { hasText: '隐变量' }).first().click();
     await expect(panel.locator('h3')).toHaveText('隐变量');
-    await expect(panel.locator('nav button')).toHaveText(['变分自编码器']);
+    await expect(panel.locator('nav button')).toHaveText(['知识图', '变分自编码器']);
     await page.mouse.move(1, 1);
     await page.screenshot({ path: path.join(output, `lacuna-panel-${style}-${theme}.png`) });
     await panel.locator('nav button', { hasText: '变分自编码器' }).click();
@@ -181,6 +228,45 @@ try {
 
     await panel.getByRole('button', { name: '关闭知溯解释' }).click();
     await expect(panel).toHaveCount(0);
+
+    // 知识图：顶栏的“知溯”打开，大纲和关系图里点任何一个词都进入解释卡片。
+    const toggle = page.getByRole('button', { name: '知溯', exact: true });
+    await toggle.click();
+    const titles = panel.locator('.lacuna-outline-title');
+    await expect(titles).toHaveText([
+      '如何优化 GPT-SoVITS 的效果？',
+      '变分自编码器',
+      '隐变量',
+      '零样本',
+      '隐变量',
+    ]);
+    await panel.getByLabel('搜索问过的词').fill('零样');
+    await expect(titles).toHaveText(['如何优化 GPT-SoVITS 的效果？', '零样本']);
+    await panel.getByLabel('搜索问过的词').fill('');
+    await panel.getByRole('button', { name: '收起「变分自编码器」' }).click();
+    await expect(titles).toHaveText(['如何优化 GPT-SoVITS 的效果？', '变分自编码器', '零样本', '隐变量']);
+    await page.mouse.move(1, 1);
+    await page.screenshot({ path: path.join(output, `lacuna-outline-${style}-${theme}.png`) });
+
+    await titles.filter({ hasText: '零样本' }).click();
+    await expect(panel.locator('h3')).toHaveText('零样本');
+    await expect(panel.locator('nav button')).toHaveText(['知识图']);
+    await panel.locator('nav button', { hasText: '知识图' }).click();
+
+    await panel.getByRole('tab', { name: '关系图' }).click();
+    await expect(panel).toHaveClass(/wide/);
+    const graphNodes = panel.locator('.lacuna-graph-node');
+    await expect(graphNodes).toHaveCount(4);
+    await expect(panel.locator('.lacuna-graph-edge')).toHaveCount(4);
+    await graphNodes.filter({ hasText: '隐变量' }).hover();
+    await expect(panel.locator('.lacuna-graph-node.dim')).toHaveCount(1);
+    await page.screenshot({ path: path.join(output, `lacuna-graph-${style}-${theme}.png`) });
+    await graphNodes.filter({ hasText: '变分自编码器' }).click();
+    await expect(panel.locator('h3')).toHaveText('变分自编码器');
+    await panel.locator('nav button', { hasText: '知识图' }).click();
+    await expect(panel.getByRole('tab', { name: '关系图' })).toHaveAttribute('aria-selected', 'true');
+    await toggle.click();
+    await expect(panel).toHaveCount(0);
   }
 
   // 关掉设置后不认词，选区菜单里也没有“这是什么意思”。
@@ -197,7 +283,7 @@ try {
 
   assert.deepEqual(errors, []);
   console.log(
-    'PASS lacuna terms: underline, hover, nested cards, ask from card and conversation, setting off',
+    'PASS lacuna terms: underline, hover, nested cards, ask from card and conversation, knowledge map, setting off',
   );
 } finally {
   await closeApp(app);

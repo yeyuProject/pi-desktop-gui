@@ -643,6 +643,7 @@ export interface ApiMap {
     result: import('./lacuna').LacunaAnnotation[];
   };
   lacunaNode: { args: [sessionId: string, id: string]; result: import('./lacuna').LacunaNode | null };
+  lacunaGraph: { args: [sessionId: string]; result: import('./lacuna').LacunaGraphResult };
 }
 export interface DesktopApi {
   platform: 'win32' | 'darwin' | 'linux' | string;

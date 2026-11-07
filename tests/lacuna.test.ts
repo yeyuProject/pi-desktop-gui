@@ -201,3 +201,39 @@ test('知识库还没有 nodes/ 目录时，等它出现再开始监听', async 
   const status = await lacuna.status(directory);
   assert.equal(status.available && status.nodeCount, 1);
 });
+
+test('知识图：较早的 lacuna 没有大纲函数时说明原因；有时返回大纲，知识库变化后重新计算', async (t) => {
+  const old = service(t);
+  const directory = await project(t, { vae: '变分自编码器|简短解释' });
+  assert.deepEqual(await old.lacuna.graph(directory), {
+    reason: '本机的 lacuna 版本太旧，还不能显示知识图。更新 lacuna 后重新打开 Pi Desktop',
+  });
+
+  let calls = 0;
+  const current = service(t, {
+    load: async () => ({
+      ...fakeLacuna(),
+      outlineOf: (nodes: Array<{ id: string; title: string }>) => {
+        calls++;
+        return {
+          topics: [],
+          loose: nodes.map((node) => ({ id: node.id, title: node.title, type: 'concept', children: [] })),
+        };
+      },
+      graphOf: (nodes: Array<{ id: string; title: string }>) => ({
+        nodes: nodes.map((node) => ({ id: node.id, title: node.title, type: 'concept' })),
+        edges: [],
+      }),
+    }),
+  });
+  const first = await current.lacuna.graph(directory);
+  assert.deepEqual('graph' in first && first.graph.outline.loose.map((item) => item.title), ['变分自编码器']);
+  await current.lacuna.graph(directory);
+  assert.equal(calls, 1, '知识库没变时用缓存');
+
+  await fs.writeFile(path.join(directory, '.lacuna', 'nodes', 'latent.md'), '潜变量|没有直接观测到的变量。');
+  await until(() => current.events.length > 0);
+  const second = await current.lacuna.graph(directory);
+  assert.deepEqual('graph' in second && second.graph.nodes.map((node) => node.id).sort(), ['latent', 'vae']);
+  assert.equal(calls, 2);
+});

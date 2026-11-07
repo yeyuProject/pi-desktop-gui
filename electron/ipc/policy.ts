@@ -112,6 +112,7 @@ export const IPC_POLICIES: Record<keyof ApiMap, IpcPolicy> = {
   lacunaStatus: read,
   lacunaAnnotate: read,
   lacunaNode: read,
+  lacunaGraph: read,
   configSave: configuration,
   revealSessionDirectory: write,
   openPiTerminal: { ...engineWrite, workspace: 'session' },

@@ -11,6 +11,8 @@ import path from 'node:path';
 import { pathToFileURL } from 'node:url';
 import type {
   LacunaAnnotation,
+  LacunaGraph,
+  LacunaGraphResult,
   LacunaMatch,
   LacunaNode,
   LacunaRef,
@@ -42,6 +44,9 @@ export interface LacunaModule {
   termIndexOf(nodes: NodeInfo[]): unknown;
   annotateMarkdown(markdown: string, index: unknown): LacunaMatch[];
   nodeView(node: NodeInfo, all: NodeInfo[]): NodeView;
+  /** 知识图面板用到；较早的 lacuna 没有这两个函数，只影响知识图，不影响术语解释。 */
+  outlineOf?(nodes: NodeInfo[]): LacunaGraph['outline'];
+  graphOf?(nodes: NodeInfo[]): Pick<LacunaGraph, 'nodes' | 'edges'>;
 }
 const REQUIRED: Array<keyof LacunaModule> = [
   'resolveStore',
@@ -80,6 +85,8 @@ interface LoadedStore {
   nodes: NodeInfo[];
   index: unknown;
   views: Map<string, NodeView>;
+  /** 知识图数据，第一次用到时才算，知识库变化后清掉。 */
+  graph?: LacunaGraph;
   watcher?: FSWatcher;
   poll?: NodeJS.Timeout;
   timer?: NodeJS.Timeout;
@@ -147,6 +154,22 @@ export class LacunaService {
     } catch {
       return null;
     }
+  }
+
+  /** 知识图面板的数据。 */
+  async graph(directory: string): Promise<LacunaGraphResult> {
+    let lacuna: LacunaModule;
+    let store: LoadedStore;
+    try {
+      lacuna = await this.#lacuna();
+      store = await this.#store(directory);
+    } catch (error) {
+      return { reason: reasonOf(error) };
+    }
+    if (typeof lacuna.outlineOf !== 'function' || typeof lacuna.graphOf !== 'function')
+      return { reason: '本机的 lacuna 版本太旧，还不能显示知识图。更新 lacuna 后重新打开 Pi Desktop' };
+    store.graph ??= { outline: lacuna.outlineOf(store.nodes), ...lacuna.graphOf(store.nodes) };
+    return { graph: store.graph };
   }
 
   dispose() {
@@ -257,9 +280,10 @@ export async function locateLacunaLibrary(): Promise<string> {
   return entry;
 }
 
-function read(lacuna: LacunaModule, root: string): Pick<LoadedStore, 'nodes' | 'index' | 'views'> {
+function read(lacuna: LacunaModule, root: string): Pick<LoadedStore, 'nodes' | 'index' | 'views' | 'graph'> {
   const { nodes } = lacuna.readStore(root);
   return {
+    graph: undefined,
     nodes,
     index: lacuna.termIndexOf(nodes),
     views: new Map(nodes.map((node) => [node.id, lacuna.nodeView(node, nodes)])),
