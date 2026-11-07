@@ -38,7 +38,7 @@
 | 21 | 历史汇报 UI 查找与离线任务/成员名索引单测；成员失败结果不标负责人轮次失败，成员增删行数不加负责人轮次计数。 |
 | 22 | 3/6 个成员持续流式输出，负责人消息节点数不变；摘要最多 1 Hz。三种风格、窄窗口与 150% 缩放无卡片横向溢出；主题边框使用现有 `--line` 变量并有 1px 断言。 |
 
-其他边界：成员创建保存失败不启动；结束保存失败返回可恢复结果而不是挂起负责人；残留命令未确认结束时仍占写槽位；旧 toolCallId 的取消不作用于新分派；用量只接受单调非负整数；排队成员不能提前连接，收尾中的成员不能抢先开始下一任务；角色编辑/删除的外部 revision 冲突与链接目录保护；成员不启用 Goal；角色 CRUD 和默认设置真实 UI 通过。
+其他边界：成员创建保存失败不启动；结束保存失败返回可恢复结果而不是挂起负责人；残留命令未确认结束时仍占写槽位；旧 toolCallId 的取消不作用于新分派；用量只接受单调非负整数；排队成员不能提前连接（包括初次保存尚未完成、尚未进入调度器的窗口），收尾中的成员不能抢先开始下一任务；角色编辑/删除的外部 revision 冲突与链接目录保护；成员不启用 Goal；角色 CRUD 和默认设置真实 UI 通过。
 
 ## 执行记录
 
@@ -62,7 +62,7 @@ node --import tsx scripts/test-update-ui.mjs
 npm run package:dir
 ```
 
-- 完整单测：865 项，863 通过，2 项按平台跳过，无失败。
+- 完整单测：866 项，864 通过，2 项按平台跳过，无失败。
 - `test:integration` 已接入团队真实 Pi 脚本；`test:chat-ui` 已接入团队 UI 脚本。可分别使用 `test:team` / `test:team-ui`；性能入口 `test:team-performance` 单独执行。
 - Mac 目录包位于 `release/mac-builds.noindex/mac-arm64/Pi Desktop.app`，构建签名完整性检查通过。指定 `PI_DESKTOP_EXE` 对目录包运行同一团队 UI 套件，使用 fixture 的 `PI_DESKTOP_DATA_DIR`，退出后调用 `unregisterMacTestApp`。未运行或替换 `/Applications/Pi Desktop.app`。
 - 本地未执行 Windows/Linux 团队 UI。发布 CI 在 Windows/macOS 目录包上运行 `npm run test:team-ui -- --packaged`，Linux 在既有 `test:chat-ui` 中运行同一套件；三平台均运行真实 Pi 团队集成。不能将本地 Mac 通过表述为三平台已验收，须核对该版本 CI 结果。

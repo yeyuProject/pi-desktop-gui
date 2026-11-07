@@ -114,7 +114,7 @@ test('global slots cover multiple leaders and remain reserved through checkpoint
   other.teamEnabled = true;
   other.cwd = lead.cwd;
   const first = dispatch(['甲', '乙']);
-  await until(() => store.state.sessions.filter((s) => s.team).length === 2);
+  await until(() => store.state.sessions.filter((s) => s.team && get(s.id).calls.sends === 1).length === 2);
   const second = dispatch(['丙'], other.id);
   await until(() => store.state.sessions.filter((s) => s.team).length === 3);
   const member = store.state.sessions.find((s) => s.team?.name === '甲')!;
@@ -134,6 +134,30 @@ test('global slots cover multiple leaders and remain reserved through checkpoint
   validateTeamResult(await first);
   validateTeamResult(await second);
   assert.equal(team.active, false);
+});
+
+test('pending initial persistence cannot bypass the queued connection and send guards', async (t) => {
+  const { team, store, lead, get, dispatch } = await fixture(t);
+  const saving = gate();
+  const save = store.save.bind(store);
+  t.mock.method(store, 'save', async () => {
+    await saving.promise;
+    await save();
+  });
+  const result = dispatch(['尚未保存']);
+  try {
+    await until(() => store.state.sessions.some((s) => s.team));
+    const member = store.state.sessions.find((s) => s.team)!;
+    assert.equal(team.owns(member.id), false);
+    assert.equal(get(member.id).calls.sends, 0);
+    assert.throws(() => team.assertMayConnect(member.id), /排队/);
+    assert.throws(() => team.assertMaySend(member.id), /排队/);
+  } finally {
+    saving.resolve();
+  }
+  await until(() => store.state.sessions.some((s) => s.team && get(s.id).calls.sends === 1));
+  await team.stopLead(lead.id);
+  validateTeamResult(await result);
 });
 
 test('failed persistence after a member settles returns a recoverable result, not a hung dispatch', async (t) => {

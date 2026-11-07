@@ -69,12 +69,18 @@ export class TeamService {
   }
   assertMayConnect(id: string) {
     const run = this.runs.get(id);
-    if (run && !run.launched) throw new Error('成员仍在排队，请等待调度启动。');
+    // Member records are visible while the initial save is still pending, before
+    // they enter the scheduler. Do not allow a manual connection in that gap.
+    if (
+      (run && !run.launched) ||
+      (!run && this.store.state.sessions.some((s) => s.id === id && s.team?.status === 'queued'))
+    )
+      throw new Error('成员仍在排队，请等待调度启动。');
   }
   assertMaySend(id: string) {
+    this.assertMayConnect(id);
     const run = this.runs.get(id);
     if (!run) return;
-    if (!run.launched) throw new Error('成员仍在排队，请等待调度启动。');
     if (run.finalizing || run.settled)
       throw new Error('本次分派尚未收尾，请等负责人收到汇报后再开始新任务。');
   }
