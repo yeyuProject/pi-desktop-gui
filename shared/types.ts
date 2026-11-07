@@ -95,6 +95,8 @@ export interface Settings {
   updateMirror?: string;
   notifyOnApproval?: boolean;
   notifyOnError?: boolean;
+  /** 在对话里标出知溯知识库中问过的词，悬停显示解释。 */
+  lacunaTerms: boolean;
 }
 export interface AppState {
   version: 1;
@@ -428,7 +430,8 @@ export type AppEvent =
   | { type: 'runtime'; runtime: Runtime }
   | { type: 'environment'; environment: Environment }
   | { type: 'runtimeRemoved'; sessionId: string }
-  | { type: 'runtimePatch'; patch: RuntimePatch };
+  | { type: 'runtimePatch'; patch: RuntimePatch }
+  | { type: 'lacunaChanged'; root: string; revision: number };
 /** Apply a patch; arrays before the change point keep their identity so the UI can skip them. */
 // A hint must not retain an entire chain of earlier streaming snapshots.
 export const messageArrayChanges = new WeakMap<Message[], { previous: WeakRef<Message[]>; from: number }>();
@@ -634,6 +637,12 @@ export interface ApiMap {
   exportDiagnostics: { args: []; result: string | null };
   revealData: { args: []; result: void };
   quit: { args: []; result: void };
+  lacunaStatus: { args: [sessionId: string]; result: import('./lacuna').LacunaStatus };
+  lacunaAnnotate: {
+    args: [sessionId: string, texts: string[]];
+    result: import('./lacuna').LacunaAnnotation[];
+  };
+  lacunaNode: { args: [sessionId: string, id: string]; result: import('./lacuna').LacunaNode | null };
 }
 export interface DesktopApi {
   platform: 'win32' | 'darwin' | 'linux' | string;

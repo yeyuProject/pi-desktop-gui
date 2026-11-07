@@ -48,6 +48,7 @@ import { agentDirectory, detectEnvironment } from './environment';
 import { validateImages } from './images';
 import { createAgentHandlers, type AgentHandlerName } from './ipc/agent-handlers';
 import { createDraftHandlers, type DraftHandlerName } from './ipc/draft-handlers';
+import { createLacunaHandlers, type LacunaHandlerName } from './ipc/lacuna-handlers';
 import { invocationPolicy } from './ipc/policy';
 import { createSessionHandlers, type SessionHandlerName } from './ipc/session-handlers';
 import { createSettingsHandlers, type SettingsHandlerName } from './ipc/settings-handlers';
@@ -64,6 +65,7 @@ import { createNativeUpdateDriver, release as updateRelease } from './update-dri
 import { acknowledgeUpdateHealth } from './update-health';
 import { updateFeed, updateProxy } from './update-network';
 import { updateInstallation, UpdateService } from './updater';
+import { LacunaService } from './lacuna';
 import { Workspace } from './workspace';
 import { WorkspaceWatcher } from './workspace-watch';
 import { teamToolAction } from '../shared/team';
@@ -164,6 +166,8 @@ let appDialogsReady = false;
 let workbenchReady = false;
 let rendererResponsive = true;
 const appDialogs = new AppDialogRequests((value) => send({ type: 'appDialog', dialog: value }));
+// 知溯术语解释：知识库变化时通知界面重新认词。
+const lacuna = new LacunaService((event) => send(event));
 function cancelAppDialogs() {
   appDialogs.cancelAll();
   send({ type: 'appDialogsCancelled' });
@@ -598,7 +602,12 @@ async function saveText(title: string, contents: string, defaultName: string) {
 const handlers: Record<
   Exclude<
     keyof ApiMap,
-    WorkspaceHandlerName | SessionHandlerName | DraftHandlerName | AgentHandlerName | SettingsHandlerName
+    | WorkspaceHandlerName
+    | SessionHandlerName
+    | DraftHandlerName
+    | AgentHandlerName
+    | SettingsHandlerName
+    | LacunaHandlerName
   >,
   (...args: any[]) => any
 > = {
@@ -1226,6 +1235,7 @@ else {
           protectSessionOperation,
         }),
         ...createAgentHandlers({ ...handlerContext, inSessionWorkspace, terminalLock }),
+        ...createLacunaHandlers({ ...handlerContext, lacuna }).handlers,
         ...createSettingsHandlers({
           ...handlerContext,
           get window() {

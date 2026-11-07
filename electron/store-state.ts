@@ -29,6 +29,7 @@ export const defaultSettings: Settings = {
   updateMirror: '',
   notifyOnApproval: true,
   notifyOnError: true,
+  lacunaTerms: true,
 };
 export const emptyState = (): AppState => ({
   version: 1,

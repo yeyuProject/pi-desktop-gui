@@ -266,7 +266,7 @@ export const ChatMessage = memo(
                 quoteSources={ctx.quoteSources}
               />
             ) : (
-              <RichText text={content} streaming={ctx.running && last} />
+              <RichText text={content} streaming={ctx.running && last} terms />
             )
           ) : m.role === 'assistant' && ctx.running ? (
             <span className="stream-cursor" />

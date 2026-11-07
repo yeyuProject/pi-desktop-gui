@@ -68,6 +68,7 @@ export function createSettingsHandlers(context: SettingsHandlerContext) {
       if (typeof value.notifyOnFinish === 'boolean') next.notifyOnFinish = value.notifyOnFinish;
       if (typeof value.notifyOnApproval === 'boolean') next.notifyOnApproval = value.notifyOnApproval;
       if (typeof value.notifyOnError === 'boolean') next.notifyOnError = value.notifyOnError;
+      if (typeof value.lacunaTerms === 'boolean') next.lacunaTerms = value.lacunaTerms;
       updateFeed(next.updateMirror);
       updateProxy(next.updateProxy, {});
       if (value.autoDownloadUpdates !== undefined) {

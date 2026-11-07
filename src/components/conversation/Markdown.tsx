@@ -10,7 +10,11 @@ import {
   type ReactNode,
 } from 'react';
 import { FileText, WrapText, BookOpen, ChevronDown, ChevronRight } from 'lucide-react';
-import Markdown, { defaultUrlTransform, type UrlTransform } from 'react-markdown';
+import Markdown, {
+  defaultUrlTransform,
+  type Options as MarkdownOptions,
+  type UrlTransform,
+} from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import { type Message } from '../../../shared/types';
 import { Lightbox } from '../../lib/lazy-dialogs';
@@ -19,6 +23,8 @@ import { parseUserMessage, quoteLabel, type DraftQuote } from '../../lib/message
 import { SearchHighlight } from './SearchHighlight';
 import type { SessionMatch } from '../../lib/session-search';
 import { streamingMarkdown, type MarkdownParts } from '../../lib/streaming-markdown';
+import { remarkLacuna } from '../../lib/lacuna-remark';
+import { useLacunaAnnotation } from '../../lib/lacuna-store';
 import { CopyButton } from '../CopyButton';
 import { notice } from '../../lib/notice-store';
 import { readableError } from '../../lib/format';
@@ -122,27 +128,51 @@ const MarkdownBlock = memo(function MarkdownBlock({ text }: { text: string }) {
     </Markdown>
   );
 });
+/** 认词的版本：知溯知识库里问过的词带下划线。认词结果到了以后才重新渲染一次。 */
+const TermMarkdownBlock = memo(function TermMarkdownBlock({ text }: { text: string }) {
+  const annotation = useLacunaAnnotation(text);
+  const plugins = useMemo<NonNullable<MarkdownOptions['remarkPlugins']>>(
+    () =>
+      annotation && annotation.matches.length > 0
+        ? [...remarkPlugins, [remarkLacuna, { annotation, source: text }]]
+        : remarkPlugins,
+    [annotation, text],
+  );
+  // 和 MarkdownBlock 一样允许本地文件链接，否则开了认词的回复里文件链接会失效。
+  return (
+    <Markdown remarkPlugins={plugins} skipHtml urlTransform={urlTransform} components={markdownComponents}>
+      {text}
+    </Markdown>
+  );
+});
 export const RichText = memo(function RichText({
   text,
   streaming = false,
+  terms = false,
 }: {
   text: string;
   streaming?: boolean;
+  /** 标出知溯知识库里问过的词。 */
+  terms?: boolean;
 }) {
   const previous = useRef<MarkdownParts | undefined>(undefined);
-  if (!streaming && !previous.current) return <MarkdownBlock text={text} />;
+  const Block = terms ? TermMarkdownBlock : MarkdownBlock;
+  if (!streaming && !previous.current) return <Block text={text} />;
   const parts =
     previous.current?.source === text ? previous.current : streamingMarkdown(text, previous.current);
   previous.current = parts;
   return (
     <>
       {parts.blocks.map((block, index) => (
-        <MarkdownBlock key={index} text={block} />
+        <Block key={index} text={block} />
       ))}
       {streaming && parts.plain ? (
         <div className="streaming-markdown-text">{parts.tail}</div>
-      ) : (
+      ) : streaming ? (
+        // 还在输出的部分每来一个字都会变，不认词，免得反复请求。
         <MarkdownBlock text={parts.tail} />
+      ) : (
+        <Block text={parts.tail} />
       )}
     </>
   );

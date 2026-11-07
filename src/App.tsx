@@ -7,9 +7,11 @@ import { Inspector as InspectorView } from './components/Inspector';
 import { WorkbenchDialogs as WorkbenchDialogsView } from './components/WorkbenchDialogs';
 import { Composer as ComposerView } from './components/Composer';
 import { StorageBanner } from './components/StorageBanner';
-import { Suspense, memo, useEffect, useMemo, useState } from 'react';
+import { Suspense, memo, useEffect, useMemo, useRef, useState } from 'react';
 import { UpdateBadge } from './components/Updates';
 import { ResizeHandle } from './components/ResizeHandle';
+import { LacunaHover, LacunaPanel } from './components/conversation/LacunaTerms';
+import { setLacunaContext } from './lib/lacuna-store';
 import {
   AboutUpdates,
   preloadDialogs,
@@ -47,6 +49,21 @@ export default function App() {
   const model = useWorkbench();
   const [updateOpen, setUpdateOpen] = useState(false);
   const { state, compact, columns, error } = model;
+  // 知溯术语解释跟着当前会话走：不同会话可能对应不同的知识库。
+  useEffect(() => {
+    setLacunaContext(model.selected?.id, state?.settings.lacunaTerms !== false);
+  }, [model.selected?.id, state?.settings.lacunaTerms]);
+  // “这是什么意思”：把问题追加到输入框并聚焦，和“询问这处变更”一样由用户确认后发送。
+  const askHunk = useRef(model.messageContext.askHunk);
+  askHunk.current = model.messageContext.askHunk;
+  useEffect(() => {
+    const ask = (event: Event) => {
+      const question = (event as CustomEvent<unknown>).detail;
+      if (typeof question === 'string' && question) askHunk.current?.(undefined, question);
+    };
+    window.addEventListener('pi:lacuna-ask', ask);
+    return () => window.removeEventListener('pi:lacuna-ask', ask);
+  }, []);
   useEffect(() => {
     if (!state) return;
     const frame = requestAnimationFrame(() => {
@@ -189,6 +206,7 @@ export default function App() {
         />
       )}
       <main className="workspace">
+        <LacunaHover />
         <StorageBanner
           storage={model.storage}
           openDirectory={() => void model.attempt(() => window.desktop.invoke('revealData'))}
@@ -354,6 +372,7 @@ export default function App() {
               </Suspense>
             </>
           )}
+          <LacunaPanel />
           {model.inspector && !compact && (
             <ResizeHandle
               label="文件面板宽度"

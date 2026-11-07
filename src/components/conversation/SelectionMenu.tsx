@@ -3,6 +3,9 @@ import type { Message } from '../../../shared/types';
 import type { DraftQuote } from '../../../shared/message-content';
 import { turnThinking, type TurnItem } from '../../lib/conversation-layout';
 import { CopyButton } from '../CopyButton';
+import { lacunaQuestion } from '../../../shared/lacuna';
+import { useLacunaEnabled } from '../../lib/lacuna-store';
+import { askLacuna } from './LacunaTerms';
 
 export function SelectionMenu({
   thread,
@@ -18,6 +21,7 @@ export function SelectionMenu({
   notice: (text: string) => void;
 }) {
   const menu = useRef<HTMLDivElement>(null);
+  const lacuna = useLacunaEnabled();
   const [selection, setSelection] = useState<{
     quote: DraftQuote;
     range: Range;
@@ -201,6 +205,16 @@ export function SelectionMenu({
       >
         侧边提问
       </button>
+      {lacuna && (
+        <button
+          onClick={() => {
+            askLacuna(lacunaQuestion(selection.quote.text));
+            setSelection(undefined);
+          }}
+        >
+          这是什么意思
+        </button>
+      )}
       <CopyButton title="复制" copy={() => window.desktop.invoke('copy', selection.quote.text)} />
     </div>
   );

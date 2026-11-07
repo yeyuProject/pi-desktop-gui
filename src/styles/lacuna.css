@@ -1,0 +1,164 @@
+/* 知溯术语解释（src/components/conversation/LacunaTerms.tsx） */
+.lacuna-term {
+  text-decoration: underline dotted;
+  text-decoration-color: var(--accent);
+  text-decoration-thickness: 1.5px;
+  text-underline-offset: 3px;
+  cursor: help;
+}
+.lacuna-term:hover {
+  border-radius: 3px;
+  background: var(--accent-soft);
+}
+.lacuna-preview {
+  position: fixed;
+  z-index: 45;
+  width: 320px;
+  max-width: calc(100vw - 16px);
+  padding: 10px 12px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--surface);
+  box-shadow: var(--shadow);
+  color: var(--ink);
+  font-size: 13px;
+  line-height: 1.55;
+  pointer-events: none;
+}
+.lacuna-preview-term + .lacuna-preview-term {
+  margin-top: 8px;
+  padding-top: 8px;
+  border-top: 1px solid var(--line);
+}
+.lacuna-preview strong {
+  display: block;
+}
+.lacuna-preview p {
+  margin: 4px 0 0;
+}
+.lacuna-preview small {
+  display: block;
+  margin-top: 8px;
+  color: var(--muted);
+  font-size: 11px;
+}
+.lacuna-aliases {
+  color: var(--muted);
+  font-size: 12px;
+}
+.lacuna-panel {
+  position: relative;
+  z-index: 22;
+  display: flex;
+  flex-direction: column;
+  flex-shrink: 0;
+  width: 340px;
+  min-width: 280px;
+  min-height: 0;
+  border-left: 1px solid var(--line);
+  background: var(--surface);
+}
+.lacuna-panel > header {
+  display: flex;
+  align-items: flex-start;
+  gap: 6px;
+  padding: 10px 12px;
+  border-bottom: 1px solid var(--line);
+}
+.lacuna-panel > header nav {
+  display: flex;
+  flex: 1;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 2px;
+  min-width: 0;
+  font-size: 12px;
+}
+.lacuna-panel > header nav button {
+  min-height: 22px;
+  padding: 1px 4px;
+  border: 0;
+  background: transparent;
+  color: var(--muted);
+}
+.lacuna-panel > header nav button:hover {
+  background: var(--hover);
+  color: var(--ink);
+}
+.lacuna-panel > header nav strong {
+  padding: 1px 4px;
+}
+.lacuna-path-separator {
+  padding: 0 2px;
+  color: var(--muted);
+}
+.lacuna-panel > header > button {
+  min-height: 26px;
+  padding: 4px;
+  border: 0;
+  background: transparent;
+}
+.lacuna-card {
+  flex: 1;
+  overflow-y: auto;
+  padding: 12px 14px 16px;
+}
+.lacuna-card h3 {
+  margin: 0 0 2px;
+  font-size: 16px;
+}
+.lacuna-card .lacuna-aliases {
+  margin: 0 0 8px;
+}
+.lacuna-body {
+  font-size: 13.5px;
+}
+.lacuna-muted {
+  color: var(--muted);
+}
+.lacuna-refs {
+  margin-top: 14px;
+}
+.lacuna-refs h4 {
+  margin: 0 0 6px;
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 500;
+}
+.lacuna-refs div {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+.lacuna-refs button {
+  min-height: 24px;
+  padding: 2px 8px;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  background: var(--bg);
+  font-size: 12px;
+}
+.lacuna-refs button:hover {
+  border-color: var(--line-strong);
+}
+.lacuna-ask {
+  position: absolute;
+  z-index: 5;
+  min-height: 26px;
+  padding: 4px 10px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--surface);
+  box-shadow: var(--shadow);
+  font-size: 12px;
+  transform: translateY(-100%);
+}
+@media (max-width: 900px) {
+  .lacuna-panel {
+    position: absolute;
+    top: 0;
+    right: 0;
+    bottom: 0;
+    box-shadow: var(--shadow);
+  }
+}

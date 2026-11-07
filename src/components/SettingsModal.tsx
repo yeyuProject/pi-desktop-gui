@@ -41,6 +41,7 @@ const draftKeys = [
   'theme',
   'uiStyle',
   'expandThinking',
+  'lacunaTerms',
   'fontScale',
   'sidebarWidth',
   'inspectorWidth',
@@ -165,6 +166,7 @@ export function SettingsModal(
     'inspectorWidth',
     'inspectorSplit',
     'expandThinking',
+    'lacunaTerms',
   ] as const;
   const appearance = (value: NonNullable<typeof prefs>) => {
     setPrefs(value);
@@ -639,6 +641,20 @@ export function SettingsModal(
                     <span>
                       默认展开思考过程
                       <small>开启后，运行中和已完成的思考过程默认展开，仍可手动收起</small>
+                    </span>
+                  </label>
+                  <label className="check-row">
+                    <input
+                      type="checkbox"
+                      checked={prefs.lacunaTerms !== false}
+                      onChange={(e) => appearance({ ...prefs, lacunaTerms: e.target.checked })}
+                    />
+                    <span>
+                      标出知溯里问过的词
+                      <small>
+                        助手回复里出现知溯知识库中记下的词时加上下划线，鼠标停留显示解释，点击查看完整解释。需要本机安装
+                        lacuna
+                      </small>
                     </span>
                   </label>
                   <label className="field-label">
