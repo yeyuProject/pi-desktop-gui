@@ -146,6 +146,17 @@ export function SettingsModal(
       : prefs[key] !== props.state.settings[key]) ? (
       <small>未保存</small>
     ) : null;
+  const teamUnsaved = (key: keyof NonNullable<typeof prefs>['team']) =>
+    prefs &&
+    props.state &&
+    JSON.stringify(prefs.team[key] ?? null) !== JSON.stringify(props.state.settings.team[key] ?? null) ? (
+      <small>未保存</small>
+    ) : null;
+  const memberModel = prefs?.team.memberModel;
+  const memberModelKey = memberModel ? `${memberModel.provider}/${memberModel.id}` : '';
+  const memberModelMissing = Boolean(
+    memberModel && !runtime.models.some((m) => `${m.provider}/${m.id}` === memberModelKey),
+  );
   const appearanceKeys = [
     'theme',
     'uiStyle',
@@ -428,74 +439,86 @@ export function SettingsModal(
                 </>
               )}
               {settingsTab === 'team' && (
-                <section>
+                <>
                   <h3>团队</h3>
-                  <p>成员拥有独立上下文和用量；所有团队共用并行上限。</p>
-                  <label>
-                    并行上限
-                    <select
-                      value={prefs.team.concurrency}
-                      onChange={(e) =>
-                        setPrefs({ ...prefs, team: { ...prefs.team, concurrency: Number(e.target.value) } })
-                      }
-                    >
-                      {[1, 2, 3, 4, 5, 6].map((n) => (
-                        <option key={n} value={n}>
-                          {n}
-                        </option>
-                      ))}
-                    </select>
+                  <p className="settings-copy">成员拥有独立的上下文和用量，由负责人分派子任务。</p>
+                  <label className="field-label" htmlFor="team-concurrency">
+                    并行上限 {teamUnsaved('concurrency')}
+                    <small>所有团队合计，超出的成员排队等待</small>
                   </label>
-                  <label>
-                    单个成员用量上限
-                    <select
-                      value={prefs.team.memberTokenBudget ?? ''}
-                      onChange={(e) =>
-                        setPrefs({
-                          ...prefs,
-                          team: {
-                            ...prefs.team,
-                            memberTokenBudget: e.target.value ? Number(e.target.value) : null,
-                          },
-                        })
-                      }
-                    >
-                      <option value="">不限</option>
-                      <option value={500000}>500k</option>
-                      <option value={1000000}>1m</option>
-                      <option value={2000000}>2m</option>
-                    </select>
+                  <select
+                    className="input"
+                    id="team-concurrency"
+                    aria-label="并行上限"
+                    value={prefs.team.concurrency}
+                    onChange={(e) =>
+                      setPrefs({ ...prefs, team: { ...prefs.team, concurrency: Number(e.target.value) } })
+                    }
+                  >
+                    {[1, 2, 3, 4, 5, 6].map((n) => (
+                      <option key={n} value={n}>
+                        {n} 个成员
+                      </option>
+                    ))}
+                  </select>
+                  <label className="field-label" htmlFor="team-member-budget">
+                    单个成员用量上限 {teamUnsaved('memberTokenBudget')}
+                    <small>按输入 + 输出 + 缓存写入计算，不含缓存命中</small>
                   </label>
-                  <p>用量按输入 + 输出 + 缓存写入计算，不含缓存命中。</p>
-                  <label>
-                    成员默认模型
-                    <select
-                      value={
-                        prefs.team.memberModel
-                          ? `${prefs.team.memberModel.provider}/${prefs.team.memberModel.id}`
-                          : ''
-                      }
-                      onChange={(e) => {
-                        const model = runtime.models.find((m) => `${m.provider}/${m.id}` === e.target.value);
-                        setPrefs({
-                          ...prefs,
-                          team: {
-                            ...prefs.team,
-                            memberModel: model ? { provider: model.provider, id: model.id } : null,
-                          },
-                        });
-                      }}
-                    >
-                      <option value="">跟随负责人</option>
-                      {runtime.models.map((m) => (
-                        <option key={`${m.provider}/${m.id}`} value={`${m.provider}/${m.id}`}>
-                          {m.provider} / {m.name}
-                        </option>
-                      ))}
-                    </select>
+                  <select
+                    className="input"
+                    id="team-member-budget"
+                    aria-label="单个成员用量上限"
+                    value={prefs.team.memberTokenBudget ?? ''}
+                    onChange={(e) =>
+                      setPrefs({
+                        ...prefs,
+                        team: {
+                          ...prefs.team,
+                          memberTokenBudget: e.target.value ? Number(e.target.value) : null,
+                        },
+                      })
+                    }
+                  >
+                    <option value="">不限</option>
+                    <option value={500000}>500k tokens</option>
+                    <option value={1000000}>1m tokens</option>
+                    <option value={2000000}>2m tokens</option>
+                  </select>
+                  <label className="field-label" htmlFor="team-member-model">
+                    成员默认模型 {teamUnsaved('memberModel')}
+                    <small>角色文件指定的模型优先；不可用时回退到负责人的模型</small>
                   </label>
-                  <p>角色文件指定的模型优先。不可用时回退到负责人的模型。</p>
-                </section>
+                  <select
+                    className="input"
+                    id="team-member-model"
+                    aria-label="成员默认模型"
+                    value={memberModelKey}
+                    onChange={(e) => {
+                      const model = runtime.models.find((m) => `${m.provider}/${m.id}` === e.target.value);
+                      setPrefs({
+                        ...prefs,
+                        team: {
+                          ...prefs.team,
+                          memberModel: model ? { provider: model.provider, id: model.id } : null,
+                        },
+                      });
+                    }}
+                  >
+                    <option value="">跟随负责人</option>
+                    {memberModelMissing && (
+                      <option value={memberModelKey}>
+                        {memberModel!.provider} / {memberModel!.id}（当前不可用）
+                      </option>
+                    )}
+                    {runtime.models.map((m) => (
+                      <option key={`${m.provider}/${m.id}`} value={`${m.provider}/${m.id}`}>
+                        {m.provider} / {m.name || m.id}
+                      </option>
+                    ))}
+                  </select>
+                  {!runtime.models.length && <p className="settings-copy">连接 Pi 后可选择其他模型。</p>}
+                </>
               )}
               {settingsTab === 'appearance' && (
                 <>
