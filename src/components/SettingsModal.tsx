@@ -152,7 +152,7 @@ export function SettingsModal(
     JSON.stringify(prefs.team[key] ?? null) !== JSON.stringify(props.state.settings.team[key] ?? null) ? (
       <small>未保存</small>
     ) : null;
-  const memberModel = prefs?.team.memberModel;
+  const memberModel = prefs?.team?.memberModel;
   const memberModelKey = memberModel ? `${memberModel.provider}/${memberModel.id}` : '';
   const memberModelMissing = Boolean(
     memberModel && !runtime.models.some((m) => `${m.provider}/${m.id}` === memberModelKey),
