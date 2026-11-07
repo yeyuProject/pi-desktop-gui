@@ -665,7 +665,7 @@ export function Conversation(
         />
       )}
       <SelectionMenu
-        key={selected?.id}
+        key={`selection:${selected?.id}`}
         thread={thread}
         messages={messages}
         turns={turns}
@@ -991,7 +991,7 @@ export function Conversation(
       </div>
       {turns.length >= 3 && (
         <TurnOutline
-          key={selected?.id}
+          key={`outline:${selected?.id}`}
           turns={turns}
           active={activeTurn}
           running={ownRuntime && running}

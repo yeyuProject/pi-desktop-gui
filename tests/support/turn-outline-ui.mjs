@@ -850,6 +850,7 @@ export async function verifyMessageContentUI({ app, page, output }) {
     .poll(() => page.evaluate(() => [...(CSS.highlights.get('conversation-quote') ?? [])][0]?.startOffset))
     .toBeGreaterThan(0);
   await choose(thinking.locator('pre'));
+  await expect(selectionMenu).toHaveCount(1);
   await selectionMenu.getByRole('button', { name: '引用', exact: true }).click();
   await expect.poll(async () => (await quotes()).at(-1).text).toBe('不应复制的思考');
   assert.equal((await quotes()).at(-1).messageTimestamp, 1800000000104);
