@@ -1,6 +1,6 @@
 # T1 团队协作实现与验收
 
-范围：`docs/PRD.md` 的 T1，基线 v0.14.71（`c12a2b4`）。不包含 T2、worktree、成员间通信、递归分派、无人值守调度或自动合并。保留原 PRD 草案，新增实现状态与本记录；没有发布版本或更改版本号。
+范围：`docs/PRD.md` 的 T1，基线 v0.14.71（`c12a2b4`）。不包含 T2、worktree、成员间通信、递归分派、无人值守调度或自动合并。保留原 PRD 草案，新增实现状态与本记录。实现纳入 v0.14.72；下列结果为本地验收，跨平台结果以 [发布工作流](https://github.com/yeyuProject/pi-desktop-gui/actions/workflows/ci.yml) 为准，发布状态见 [Release](https://github.com/yeyuProject/pi-desktop-gui/releases/tag/v0.14.72)。
 
 ## 实现入口
 
@@ -65,7 +65,7 @@ npm run package:dir
 - 完整单测：865 项，863 通过，2 项按平台跳过，无失败。
 - `test:integration` 已接入团队真实 Pi 脚本；`test:chat-ui` 已接入团队 UI 脚本。可分别使用 `test:team` / `test:team-ui`；性能入口 `test:team-performance` 单独执行。
 - Mac 目录包位于 `release/mac-builds.noindex/mac-arm64/Pi Desktop.app`，构建签名完整性检查通过。指定 `PI_DESKTOP_EXE` 对目录包运行同一团队 UI 套件，使用 fixture 的 `PI_DESKTOP_DATA_DIR`，退出后调用 `unregisterMacTestApp`。未运行或替换 `/Applications/Pi Desktop.app`。
-- 本轮没有执行 Windows/Linux 的团队 UI；新增入口会在既有 CI 套件运行。不能将本地 Mac 通过表述为三平台已验收。
+- 本地未执行 Windows/Linux 团队 UI。发布 CI 在 Windows/macOS 目录包上运行 `npm run test:team-ui -- --packaged`，Linux 在既有 `test:chat-ui` 中运行同一套件；三平台均运行真实 Pi 团队集成。不能将本地 Mac 通过表述为三平台已验收，须核对该版本 CI 结果。
 - 截图：`test-results/team-{running,expanded,done,strip,approval,narrow}-{classic,codex,claude}.png`。原始性能数据：`test-results/team-performance.json`。这些是本地忽略的测试产物，不作为发布资产。
 
 ## 性能采样

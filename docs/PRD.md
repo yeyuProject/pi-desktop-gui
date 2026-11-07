@@ -8,7 +8,7 @@
 
 ### T1 负责人把子任务分派给成员会话，并行完成后在同一回合汇总
 
-实现与逐项验收见 [T1 验收记录](testing/team-collaboration.md)，使用说明见 [团队操作与边界](team.md)。以下保留原需求草案与基线行号；实现位于功能分支，尚未发布。已完成本地 Mac、真实 Pi 和隔离目录包验证；Windows/Linux 团队 UI 尚待 CI 验证。
+实现与逐项验收见 [T1 验收记录](testing/team-collaboration.md)，使用说明见 [团队操作与边界](team.md)。以下保留原需求草案与基线行号；T1 纳入 v0.14.72，发布状态见 [Release](https://github.com/yeyuProject/pi-desktop-gui/releases/tag/v0.14.72)。已完成本地 Mac、真实 Pi 和隔离目录包验证；三平台集成和团队 UI 纳入发布 CI，结果以该版本工作流为准。
 
 基线为 v0.14.71（`c12a2b4`），行号以基线为准。参照 Pi 1.4.0 自带的 `examples/extensions/subagent`（角色文件格式、并行上限、结果截断）和 Claude Code 的子代理：主会话的模型把相互独立的子任务交给拥有独立上下文的成员，成员结束后把汇报交回主会话，主会话在同一回合继续。
 
