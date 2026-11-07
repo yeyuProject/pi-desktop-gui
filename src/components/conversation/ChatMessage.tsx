@@ -1,3 +1,6 @@
+import { TeamCard, teamSnapshot } from './TeamCard';
+import type { TeamSnapshot } from '../../../shared/team';
+import type { Session } from '../../../shared/types';
 import { memo, useEffect, useRef, useState } from 'react';
 import {
   GitBranch,
@@ -74,6 +77,11 @@ function UserMessageMenu({ text, copy }: { text: string; copy: (text: string) =>
 }
 
 export interface MessageContext {
+  team?: TeamSnapshot[];
+  teamSessions?: Session[];
+  openTeamMember?: (id: string) => void;
+  stopTeam?: (id?: string) => void;
+  quoteTeam?: (text: string, toolCallId: string) => void;
   sessionId?: string;
   quoteSources?: Set<string>;
   running: boolean;
@@ -115,6 +123,11 @@ export const ChatMessage = memo(
     if (m.role === 'toolResult') {
       const observed = ctx.toolFor(m);
       const tool = match ? { ...observed, output: messageText(m) } : observed;
+      const team =
+        tool.name === 'desktop_team_dispatch'
+          ? teamSnapshot(tool.id, m.details, ctx.team, ctx.teamSessions ?? [])
+          : undefined;
+      if (team) return <TeamCard snapshot={team} ctx={ctx} query={match?.query} />;
       const ask = tool.name === DESKTOP_ASK_TOOL ? readAskDetails(m.details) : undefined;
       if (ask)
         return (
@@ -330,6 +343,8 @@ export const ChatMessage = memo(
     a.goalStart === b.goalStart &&
     a.last === b.last &&
     a.match === b.match &&
+    (a.m.toolName !== 'desktop_team_dispatch' ||
+      (a.ctx.team === b.ctx.team && a.ctx.teamSessions === b.ctx.teamSessions)) &&
     a.ctx.running === b.ctx.running &&
     a.ctx.locked === b.ctx.locked &&
     a.ctx.canRerun === b.ctx.canRerun &&

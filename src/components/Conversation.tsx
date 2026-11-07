@@ -1,3 +1,5 @@
+import { TeamBanner } from './TeamBanner';
+import { TeamCard, teamSnapshot } from './conversation/TeamCard';
 import { ArrowDown, ArrowUp, CircleHelp, LoaderCircle, Search, X } from 'lucide-react';
 import { ThinkingBlock } from './conversation/ThinkingBlock';
 import { ToolCard } from './conversation/ToolCard';
@@ -290,6 +292,19 @@ export function Conversation(
     return () => window.removeEventListener('pi:goal-result', locateResult);
   }, [messages, selected?.id]);
   useEffect(() => {
+    const locateTeam = (event: Event) => {
+      const id = (event as CustomEvent<string>).detail;
+      const index = messages.findIndex(
+        (message) => message.role === 'toolResult' && message.toolCallId === id,
+      );
+      if (index < 0) return;
+      setFindOpen(false);
+      jump(index);
+    };
+    window.addEventListener('pi:team-card', locateTeam);
+    return () => window.removeEventListener('pi:team-card', locateTeam);
+  }, [messages, selected?.id]);
+  useEffect(() => {
     if (!quoteTarget) return;
     let timer: ReturnType<typeof setTimeout> | undefined;
     const frame = requestAnimationFrame(() => {
@@ -580,17 +595,26 @@ export function Conversation(
       }
       className={activeMatch?.toolId === tool.id ? 'search-active' : undefined}
     >
-      <ToolCard
-        sessionId={selected?.id}
-        tool={tool}
-        expanded={expanded.includes(tool.id)}
-        onToggle={(v) => toggleTool(tool.id, v)}
-        openFile={(p) => void inspectFile(p, 'files')}
-        match={activeMatch?.toolId === tool.id ? activeMatch : undefined}
-        askHunk={messageContext.askHunk}
-        rerun={messageContext.rerun}
-        canRerun={messageContext.canRerun}
-      />
+      {tool.name === 'desktop_team_dispatch' &&
+      teamSnapshot(tool.id, undefined, runtime.team, state.sessions) ? (
+        <TeamCard
+          snapshot={teamSnapshot(tool.id, undefined, runtime.team, state.sessions)!}
+          ctx={messageContext}
+          query={activeMatch?.toolId === tool.id ? activeMatch.query : undefined}
+        />
+      ) : (
+        <ToolCard
+          sessionId={selected?.id}
+          tool={tool}
+          expanded={expanded.includes(tool.id)}
+          onToggle={(v) => toggleTool(tool.id, v)}
+          openFile={(p) => void inspectFile(p, 'files')}
+          match={activeMatch?.toolId === tool.id ? activeMatch : undefined}
+          askHunk={messageContext.askHunk}
+          rerun={messageContext.rerun}
+          canRerun={messageContext.canRerun}
+        />
+      )}
     </div>
   );
   const renderMessage = (index: number) => {
@@ -631,6 +655,15 @@ export function Conversation(
 
   return (
     <>
+      {selected?.team && (
+        <TeamBanner
+          session={selected}
+          sessions={state.sessions}
+          messages={messages}
+          select={props.selectSession}
+          attempt={attempt}
+        />
+      )}
       <SelectionMenu
         key={selected?.id}
         thread={thread}
@@ -909,22 +942,27 @@ export function Conversation(
           {ownRuntime &&
             approvals.map((d, i) => (
               <ApprovalCard
-                key={d.id}
+                key={`${d.sourceSessionId}:${d.id}`}
                 dialog={d}
+                sourceName={d.sourceName}
+                openMember={() => {
+                  const member = state.sessions.find((s) => s.id === d.sourceSessionId);
+                  if (member) void props.selectSession(member);
+                }}
                 first={i === 0}
                 respond={(value) =>
                   selected &&
                   void attempt(async () => {
-                    await api.invoke('respond', selected.id, d.id, { value });
+                    await api.invoke('respond', d.sourceSessionId, d.id, { value });
                     const grant = d.approval?.grant;
                     if (value === APPROVAL_ALWAYS && grant) {
-                      const text = `已放行 ${grantLabel(grant)}`;
+                      const text = `已放行 ${grantLabel(grant)}${d.sourceName ? ` · 成员 ${d.sourceName}` : ''}`;
                       props.setNotice(text, {
                         action: {
                           label: '撤销',
                           run: async () =>
                             (await attempt(async () => {
-                              await api.invoke('revokeApproval', selected.id, grant.id);
+                              await api.invoke('revokeApproval', d.sourceSessionId, grant.id);
                               props.setNotice('已撤销这条放行规则');
                               return true;
                             })) === true,

@@ -1,3 +1,4 @@
+import { isTeamSnapshot } from '../../shared/team';
 import { messageText, type ContentBlock, type Message, type ToolActivity } from '../../shared/types';
 import { stripAnsi } from './ansi';
 import { parseUserMessage } from './message-content';
@@ -34,6 +35,14 @@ const part = (text: string, target: Target): SearchPart => ({
   offsets: [],
 });
 
+function partsForUnfinished(args: unknown, toolId: string): SearchPart[] {
+  const members = args && typeof args === 'object' && 'members' in args ? args.members : undefined;
+  if (!Array.isArray(members)) return [];
+  return members
+    .filter((m) => m && typeof m.name === 'string' && typeof m.task === 'string')
+    .map((m) => part(`${m.name}\n${m.task}`, { toolId, section: 'tool' }));
+}
+
 /** Renderer messages and tools are immutable snapshots. Reuse unchanged search
  * text/offsets across stream patches; retain one query per part and no global text cache.
  */
@@ -52,6 +61,17 @@ export class SessionSearch {
       const ask = [tool?.name, message.toolName, call?.name].includes(DESKTOP_ASK_TOOL)
         ? readAskDetails(message.details)
         : undefined;
+      if (message.toolName === 'desktop_team_dispatch' && isTeamSnapshot(message.details)) {
+        for (const member of message.details.members)
+          parts.push(
+            part(`${member.name}\n${member.task}\n${member.report ?? ''}`, {
+              toolId: message.toolCallId,
+              section: 'tool',
+            }),
+          );
+        this.messages.set(message, { tool, call, parts });
+        return parts;
+      }
       parts.push(
         part(
           ask
@@ -128,6 +148,15 @@ export class SessionSearch {
         if (id !== undefined) {
           seen.add(id);
           if ([message.toolName, byId.get(id)?.name, calls.get(id)?.name].includes('desktop_plan')) continue;
+        }
+        if (
+          message.toolName === 'desktop_team_dispatch' &&
+          !isTeamSnapshot(message.details) &&
+          !byId.has(id ?? '')
+        ) {
+          const call = calls.get(id ?? '');
+          partsForUnfinished(call?.arguments, id ?? '').forEach((entry) => add(entry, index));
+          continue;
         }
         for (const part of this.parts(
           message,

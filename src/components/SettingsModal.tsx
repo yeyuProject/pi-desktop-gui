@@ -32,6 +32,7 @@ import type { ReactNode } from 'react';
 import { useUnsavedChanges } from '../hooks/useUnsavedChanges';
 import { UI_STYLES, STYLE_META, styleTheme } from '../../shared/window-theme';
 const draftKeys = [
+  'team',
   'piPath',
   'nodePath',
   'agentDir',
@@ -129,11 +130,21 @@ export function SettingsModal(
     settingsOpen &&
     prefs &&
     props.state &&
-    draftKeys.some((key) => prefs[key] !== props.state!.settings[key]),
+    draftKeys.some((key) =>
+      key === 'team'
+        ? JSON.stringify(prefs.team) !== JSON.stringify(props.state!.settings.team)
+        : prefs[key] !== props.state!.settings[key],
+    ),
   );
   const guard = useUnsavedChanges(dirty);
   const unsaved = (key: (typeof draftKeys)[number]) =>
-    prefs && props.state && prefs[key] !== props.state.settings[key] ? <small>未保存</small> : null;
+    prefs &&
+    props.state &&
+    (key === 'team'
+      ? JSON.stringify(prefs.team) !== JSON.stringify(props.state.settings.team)
+      : prefs[key] !== props.state.settings[key]) ? (
+      <small>未保存</small>
+    ) : null;
   const appearanceKeys = [
     'theme',
     'uiStyle',
@@ -162,6 +173,7 @@ export function SettingsModal(
                 ['environment', '运行环境', Terminal],
                 ['models', '模型连接', Link2],
                 ['appearance', '外观与编辑器', Monitor],
+                ['team', '团队', Monitor],
                 ['diagnostic', '诊断与数据', CircleHelp],
                 ['updates', '关于与更新', Download],
               ].map(([key, label, Icon]) => (
@@ -413,6 +425,76 @@ export function SettingsModal(
                     </button>
                   </details>
                 </>
+              )}
+              {settingsTab === 'team' && (
+                <section>
+                  <h3>团队</h3>
+                  <p>成员拥有独立上下文和用量；所有团队共用并行上限。</p>
+                  <label>
+                    并行上限
+                    <select
+                      value={prefs.team.concurrency}
+                      onChange={(e) =>
+                        setPrefs({ ...prefs, team: { ...prefs.team, concurrency: Number(e.target.value) } })
+                      }
+                    >
+                      {[1, 2, 3, 4, 5, 6].map((n) => (
+                        <option key={n} value={n}>
+                          {n}
+                        </option>
+                      ))}
+                    </select>
+                  </label>
+                  <label>
+                    单个成员用量上限
+                    <select
+                      value={prefs.team.memberTokenBudget ?? ''}
+                      onChange={(e) =>
+                        setPrefs({
+                          ...prefs,
+                          team: {
+                            ...prefs.team,
+                            memberTokenBudget: e.target.value ? Number(e.target.value) : null,
+                          },
+                        })
+                      }
+                    >
+                      <option value="">不限</option>
+                      <option value={500000}>500k</option>
+                      <option value={1000000}>1m</option>
+                      <option value={2000000}>2m</option>
+                    </select>
+                  </label>
+                  <p>用量按输入 + 输出 + 缓存写入计算，不含缓存命中。</p>
+                  <label>
+                    成员默认模型
+                    <select
+                      value={
+                        prefs.team.memberModel
+                          ? `${prefs.team.memberModel.provider}/${prefs.team.memberModel.id}`
+                          : ''
+                      }
+                      onChange={(e) => {
+                        const model = runtime.models.find((m) => `${m.provider}/${m.id}` === e.target.value);
+                        setPrefs({
+                          ...prefs,
+                          team: {
+                            ...prefs.team,
+                            memberModel: model ? { provider: model.provider, id: model.id } : null,
+                          },
+                        });
+                      }}
+                    >
+                      <option value="">跟随负责人</option>
+                      {runtime.models.map((m) => (
+                        <option key={`${m.provider}/${m.id}`} value={`${m.provider}/${m.id}`}>
+                          {m.provider} / {m.name}
+                        </option>
+                      ))}
+                    </select>
+                  </label>
+                  <p>角色文件指定的模型优先。不可用时回退到负责人的模型。</p>
+                </section>
               )}
               {settingsTab === 'appearance' && (
                 <>

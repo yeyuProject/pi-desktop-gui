@@ -1,3 +1,5 @@
+import { TeamStrip } from './conversation/TeamStrip';
+import { teamMemberActive } from '../../shared/team';
 import { PlanCard } from './conversation/PlanCard';
 import { AskPanel } from './conversation/AskPanel';
 import { goalCommandPreview } from '../../shared/goal-input';
@@ -126,6 +128,8 @@ const sendModes = [
   { mode: 'followUp', label: '完成后执行', hint: '排在这一轮结束之后', Icon: ListEnd },
 ] as const;
 export function Composer(props: ComposerProps) {
+  const [teamHint, setTeamHint] = useState(false);
+  useEffect(() => setTeamHint(false), [props.selected?.id]);
   const {
     state,
     storage,
@@ -482,17 +486,24 @@ export function Composer(props: ComposerProps) {
           respond={(values) => api.invoke('respond', selected.id, ask.id, values)}
         />
       )}
-      {!ask && !goalView.visible && ownRuntime && runtime.plan && (
-        <PlanCard
-          key={`${selected?.id}:${runtime.plan.turnId}`}
-          plan={runtime.plan}
-          running={ownRunning}
-          updateRequest={runtime.planUpdateRequest}
-          expanded={props.expanded}
-          toggle={props.toggleTool}
-          composing={goalMode}
-        />
+      {ownRuntime && runtime.team?.some((s) => s.members.some((m) => teamMemberActive(m.status))) && (
+        <TeamStrip snapshots={runtime.team} toggle={props.toggleTool} />
       )}
+      {!runtime.team?.some((s) => s.members.some((m) => teamMemberActive(m.status))) &&
+        !ask &&
+        !goalView.visible &&
+        ownRuntime &&
+        runtime.plan && (
+          <PlanCard
+            key={`${selected?.id}:${runtime.plan.turnId}`}
+            plan={runtime.plan}
+            running={ownRunning}
+            updateRequest={runtime.planUpdateRequest}
+            expanded={props.expanded}
+            toggle={props.toggleTool}
+            composing={goalMode}
+          />
+        )}
       <div
         className={'composer ' + (!selected ? 'disabled' : '') + (dragging ? ' dragging' : '')}
         onDragOver={(e) => {
@@ -856,12 +867,42 @@ export function Composer(props: ComposerProps) {
               aria-pressed={goalMode}
               aria-label="Goal 目标管理"
               title="设置目标，或查看、暂停和恢复当前目标"
-              disabled={!selected || !sessionEnabled || !storage.writable || selectionChanging || pending}
+              disabled={
+                !selected ||
+                !!selected.team ||
+                !sessionEnabled ||
+                !storage.writable ||
+                selectionChanging ||
+                pending
+              }
               onClick={() => void openGoal()}
             >
               <Target size={14} />
               Goal
             </button>
+            {!selected?.team && (
+              <button
+                className="team-button"
+                aria-pressed={!!selected?.teamEnabled}
+                disabled={!sessionEnabled || pending}
+                title="开启后 Pi 可以把子任务交给成员并行处理，用量随成员数量增加。"
+                onClick={() =>
+                  selected &&
+                  void attempt(async () => {
+                    await api.invoke('setTeamEnabled', selected.id, !selected.teamEnabled);
+                    if (!selected.teamEnabled && !selected.teamHintSeen) setTeamHint(true);
+                  })
+                }
+              >
+                团队
+              </button>
+            )}
+            {teamHint && (
+              <span className="team-first-hint" role="status">
+                开启后 Pi 可以把子任务交给成员并行处理，用量随成员数量增加。
+                <button onClick={() => setTeamHint(false)}>知道了</button>
+              </span>
+            )}
             {goal?.status === 'completed' && (
               <button
                 className="goal-previous-result"

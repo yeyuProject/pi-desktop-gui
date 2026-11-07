@@ -458,6 +458,9 @@ export class Workspace {
   ) {
     this.checkpoints = new Checkpoints(dataDir);
   }
+  linkTeamMember(memberId: string, leadId?: string) {
+    this.checkpoints.linkTeamMember(memberId, leadId);
+  }
   watchProject(id?: string) {
     this.checkpoints.watchProject(id);
   }

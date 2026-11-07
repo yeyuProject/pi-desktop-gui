@@ -1,3 +1,4 @@
+import { registerDesktopTeam } from './pi-team';
 import { registerDesktopPlan } from './pi-plan';
 import { registerDesktopAsk } from './pi-ask';
 // Loaded by Pi's extension loader, never by Electron. Responses use RPC UI notifications.
@@ -77,6 +78,7 @@ export default function desktopBridge(pi: ExtensionAPI) {
     publishGrants(ctx);
   });
   async function approve(toolName: string, input: unknown, ctx: ExtensionContext) {
+    approvalMode = team.memberMode(approvalMode);
     if (approvalMode === 'auto') return;
     const request = describe(toolName, input);
     if (request.kind === 'read') request.readTarget = await classifyReadTarget(ctx.cwd, request.path ?? '');
@@ -113,7 +115,7 @@ export default function desktopBridge(pi: ExtensionAPI) {
   pi.on('tool_call', async (event, ctx) => {
     const blocked = await approve(event.toolName, event.input, ctx);
     if (blocked) return blocked;
-    if (!['edit', 'write', 'bash', 'powershell'].includes(event.toolName)) return;
+    if (!['edit', 'write', 'bash', 'powershell', 'desktop_team_dispatch'].includes(event.toolName)) return;
     try {
       await workspaceRequest(ctx, {
         phase: 'tool-start',
@@ -129,7 +131,7 @@ export default function desktopBridge(pi: ExtensionAPI) {
     }
   });
   pi.on('tool_result', async (event, ctx) => {
-    if (!['edit', 'write', 'bash', 'powershell'].includes(event.toolName)) return;
+    if (!['edit', 'write', 'bash', 'powershell', 'desktop_team_dispatch'].includes(event.toolName)) return;
     try {
       await workspaceRequest(ctx, { phase: 'tool-end', toolId: event.toolCallId });
     } catch (error) {
@@ -169,9 +171,21 @@ export default function desktopBridge(pi: ExtensionAPI) {
     }
     return m;
   }
-  const goal = registerDesktopGoal(pi);
+  const isMember = !!process.env.PI_DESKTOP_TEAM_MEMBER;
+  const goal = isMember
+    ? {
+        isActive: () => false,
+        remaining: () => undefined,
+        runKey: () => '',
+        account: () => {},
+        action: async (_value: unknown, _ctx: ExtensionContext) => {
+          throw new Error('成员不启用 Goal。');
+        },
+      }
+    : registerDesktopGoal(pi);
   registerDesktopPlan(pi, goal.isActive);
-  registerDesktopAsk(pi, goal.isActive);
+  if (!isMember) registerDesktopAsk(pi, goal.isActive);
+  const team = registerDesktopTeam(pi, goal);
   pi.registerCommand(DESKTOP_BRIDGE_COMMAND, {
     description: 'Pi Desktop internal bridge',
     handler: async (encoded, ctx) => {
@@ -184,6 +198,14 @@ export default function desktopBridge(pi: ExtensionAPI) {
         const p = request.params ?? {};
         let data: unknown;
         switch (request.method) {
+          case 'team_enabled':
+            team.enabled(p.enabled === true);
+            data = {};
+            break;
+          case 'team_wind_down':
+            team.windDown(ctx);
+            data = {};
+            break;
           case 'goal_action':
             data = await goal.action(p, ctx);
             break;
@@ -272,12 +294,13 @@ export default function desktopBridge(pi: ExtensionAPI) {
               ...pi.getActiveTools().filter((name) => !builtins.has(name)),
               ...configured.filter((name) => builtins.has(name)),
             ]);
+            team.applyTools();
             data = { activeTools: pi.getActiveTools() };
             break;
           }
           case 'approval_mode':
             if (!['auto', 'confirm', 'readonly'].includes(p.mode)) throw new Error('审批模式无效');
-            approvalMode = p.mode;
+            approvalMode = team.memberMode(p.mode);
             if (p.mode !== 'confirm') approvalGrants = [];
             publishGrants(ctx);
             data = { approvalMode, approvalGrants };

@@ -146,7 +146,7 @@ io.on('line', (line) => {
                   thinkingLevels: thinkingLevels(request.params.modelId),
                 }
               : {
-                  protocolVersion: 4,
+                  protocolVersion: 5,
                   autoRetry,
                   approvalMode,
                   approvalGrants: [],

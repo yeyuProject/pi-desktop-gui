@@ -7,7 +7,7 @@ const validId = (id: string) => {
 /** Only application-owned scratch files; imported histories and project directories are excluded. */
 export async function removeSessionScratch(directory: string, id: string) {
   validId(id);
-  for (const name of [`draft-${id}.txt`, `desktop-bridge-${id}.mjs`])
+  for (const name of [`draft-${id}.txt`, `desktop-bridge-${id}.mjs`, `team-member-${id}.json`])
     await fs.rm(path.join(directory, name), { force: true });
   await fs.rm(path.join(directory, 'side-chats', id + '.json'), { force: true });
 }
@@ -16,7 +16,7 @@ export async function clearDesktopRecords(directory: string) {
   for (const name of entries) {
     if (
       /^state(?:\.[\w.-]+)?\.json(?:\.tmp)?$/.test(name) ||
-      /^(?:draft-|desktop-bridge-|export-)[\w.-]+$/.test(name) ||
+      /^(?:draft-|desktop-bridge-|team-member-|export-)[\w.-]+$/.test(name) ||
       [
         'draft-images',
         'baselines',

@@ -1,3 +1,4 @@
+import { useTeamApprovals } from './useTeamApprovals';
 import { parseGoalCommand, type GoalStartInput } from '../../shared/goal-input';
 import { validateGoalObjective } from '../../shared/goal';
 import { answerAskWithText } from '../../shared/ask';
@@ -49,6 +50,7 @@ export function useWorkbench() {
     [settingsTab, setSettingsTab] = useState('environment'),
     [prefs, setPrefs] = useState<Settings>();
   const {
+    runtimes,
     state,
     stateRevision = 0,
     receivedState,
@@ -212,7 +214,7 @@ export function useWorkbench() {
     setCheckpointRevision((value) => value + 1);
   }, [checkpoints]);
   const { history, messages } = useHistory(selected, runtime, thread, autoScroll, setNewContent, setError);
-  const approvals = useMemo(() => runtime.dialogs.filter((d) => d.approval), [runtime.dialogs]);
+  const approvals = useTeamApprovals(runtimes, runtime);
   const asks = useMemo(() => runtime.dialogs.filter((d) => d.ask), [runtime.dialogs]);
   const prompts = useMemo(() => runtime.dialogs.filter((d) => !d.approval && !d.ask), [runtime.dialogs]);
   const lastAssistant = messages.findLast((m) => m.role === 'assistant');
@@ -518,7 +520,21 @@ export function useWorkbench() {
     if (!match || !selected || !builtinCommands.some((c) => c.name === match[1])) return false;
     if (images.length || attachments.length) throw new Error('桌面命令不能附带附件，请先移除附件');
     const [_, cmd, arg = ''] = match;
-    if (['tree', 'fork'].includes(cmd)) setFeatureTab('tree');
+    if (cmd === 'team') {
+      if (selected.team) throw new Error('成员不能开启团队。');
+      if (arg === 'on' || arg === 'off') await api.invoke('setTeamEnabled', selected.id, arg === 'on');
+      else if (!arg) {
+        const roles = await api.invoke('listTeamRoles', selected.id);
+        setNotice(
+          `团队${selected.teamEnabled ? '已开启' : '已关闭'} · 并行上限 ${state?.settings.team.concurrency ?? 3}\n角色：${roles.map((r) => r.name).join('、')}\n成员：${
+            state?.sessions
+              .filter((s) => s.team?.leadId === selected.id)
+              .map((s) => s.team!.name)
+              .join('、') || '暂无'
+          }`,
+        );
+      } else throw new Error('请使用 /team on、/team off 或 /team。');
+    } else if (['tree', 'fork'].includes(cmd)) setFeatureTab('tree');
     else if (cmd === 'find') runAction('find');
     else if (cmd === 'new') await createSession(selected.projectId);
     else if (cmd === 'resume') setSearchOpen(true);
@@ -809,6 +825,25 @@ export function useWorkbench() {
   const messageContext: MessageContext = useMemo(
     () => ({
       running: ownRunning,
+      team: runtime.team,
+      teamSessions: state?.sessions,
+      openTeamMember: (id) => {
+        const member = state?.sessions.find((s) => s.id === id);
+        if (member) void selectSession(member);
+      },
+      stopTeam: (id) => {
+        if (selected) void attempt(() => api.invoke('stopTeamMember', selected.id, id));
+      },
+      quoteTeam: (text, toolCallId) =>
+        draftState.addQuote({
+          id: crypto.randomUUID(),
+          text,
+          role: 'toolResult',
+          turn: 0,
+          messageTimestamp: Date.now(),
+          section: 'tool',
+          toolCallId,
+        }),
       sessionId: selected?.id,
       locked: actionsLocked,
       expanded,
@@ -821,6 +856,9 @@ export function useWorkbench() {
     }),
     [
       ownRunning,
+      runtime.team,
+      state?.sessions,
+      selected?.id,
       actionsLocked,
       expanded,
       liveToolIds,

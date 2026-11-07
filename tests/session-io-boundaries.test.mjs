@@ -40,7 +40,7 @@ test('deleting a side-only session aborts and saves its answer before asking for
     text() {},
     assertTerminalClosed: async () => {},
     getSideFlight: () => flight,
-    store: { session: () => ({ id: 'chat', title: '侧边测试' }) },
+    store: { state: { sessions: [] }, session: () => ({ id: 'chat', title: '侧边测试' }) },
     service: {
       active: () => false,
       get: () => ({

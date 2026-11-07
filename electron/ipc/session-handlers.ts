@@ -196,18 +196,45 @@ export function createSessionHandlers(context: SessionHandlerContext) {
         await service.get(id).stopSideChat();
         await flight.done;
       }
+      const members = store.state.sessions.filter((member) => member.team?.leadId === id);
       const result = await showAppDialog({
         type: 'warning',
         message: `删除会话“${s.title}”？`,
         detail:
           (s.file ? 'Pi 会话文件会移到回收站，可从回收站恢复。' : '会话将从列表移除。') +
-          '此会话的检查点、临时草稿和备份草稿将永久清理。',
-        buttons: ['取消', '删除'],
-        defaultId: 0,
+          '此会话的检查点、临时草稿和备份草稿将永久清理。' +
+          (members.length ? ` 另有 ${members.length} 个成员会话，是否一起删除？` : ''),
+        buttons: members.length ? ['取消', '一起删除成员', '只删除负责人'] : ['取消', '删除'],
+        defaultId: members.length ? 1 : 0,
         cancelId: 0,
       });
-      if (result.response !== 1) return false;
+      if (result.response === 0) return false;
       if (!store.state.sessions.includes(s)) return false;
+      const removingMembers = result.response === 1 ? members : [];
+      for (const member of removingMembers) {
+        if (service.active(member.id)) throw new Error('请先停止所有成员的任务。');
+        await assertTerminalClosed(member.id);
+      }
+      for (const member of removingMembers) {
+        await service.release(member.id);
+        if (member.file) {
+          const exists = await fs.access(member.file).then(
+            () => true,
+            (error: NodeJS.ErrnoException) => {
+              if (error.code === 'ENOENT') return false;
+              throw error;
+            },
+          );
+          if (exists) await shell.trashItem(member.file);
+        }
+        await workspace.removeSession(member.id);
+        await sideChats.remove(member.id);
+        await removeSessionScratch(store.dir, member.id);
+        store.removeSessions([member.id]);
+        if (store.state.selectedSessionId === member.id) store.selectSession(id);
+        await save();
+        await store.purgeDeletedSession(member.id);
+      }
       let removedFile = false;
       if (service.active(id)) throw new Error('请先停止这个会话的任务');
       await service.release(id);

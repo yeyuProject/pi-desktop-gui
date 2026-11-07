@@ -1,3 +1,4 @@
+import { isTeamSnapshot, type TeamResult } from '../shared/team';
 import { validatePlanSteps } from '../shared/plan';
 import type { ImageContent } from '@earendil-works/pi-ai';
 import { randomUUID } from 'node:crypto';
@@ -212,8 +213,15 @@ export function registerDesktopGoal(pi: ExtensionAPI) {
     if (event.toolName === 'desktop_ask_user') return;
     if (goal?.status !== 'active' || goalTools.includes(event.toolName)) return;
     activity.usedTools = true;
-    if (!event.isError) activity.successfulTool = true;
-    if (event.isError && event.toolName === 'bash') activity.failedCommand = true;
+    if (event.toolName === 'desktop_team_dispatch') {
+      const details = event.result.details;
+      if (!event.isError && isTeamSnapshot(details) && details.members.some((m) => m.status === 'completed'))
+        activity.successfulTool = true;
+      else activity.failedCommand = true;
+    } else {
+      if (!event.isError) activity.successfulTool = true;
+      if (event.isError && event.toolName === 'bash') activity.failedCommand = true;
+    }
   });
   pi.on('before_provider_request', (_event, ctx) => {
     if (goal?.id === accountingGoalId && goal?.status === 'budget_limited' && ++budgetRequests > 3)
@@ -567,6 +575,38 @@ export function registerDesktopGoal(pi: ExtensionAPI) {
     },
   });
   return {
+    remaining: () =>
+      goal && ['active', 'budget_limited'].includes(goal.status) && goal.tokenBudget !== undefined
+        ? Math.max(0, goal.tokenBudget - goal.tokensUsed)
+        : undefined,
+    runKey: () => (goal && goal.id === accountingGoalId ? `${goal.id}:${goal.continuations}` : ''),
+    account: (result: TeamResult, ctx: ExtensionContext) => {
+      if (!goal || goal.id !== accountingGoalId) return;
+      const tokens = result.members.reduce((sum, m) => sum + m.tokens, 0);
+      const billed = result.members.reduce((sum, m) => sum + m.billedTokens, 0);
+      const cost = result.members.reduce((sum, m) => sum + m.cost, 0);
+      save(
+        {
+          ...goal,
+          tokensUsed: goal.tokensUsed + tokens,
+          billedTokensUsed: goal.billedTokensUsed + billed,
+          costUsed: goal.costUsed + cost,
+        },
+        ctx,
+      );
+      if (
+        goal!.status === 'active' &&
+        goal!.tokenBudget !== undefined &&
+        goal!.tokensUsed >= goal!.tokenBudget
+      ) {
+        save({ ...goal!, status: 'budget_limited', reason: `已达到用量上限 ${goal!.tokenBudget}` }, ctx);
+        budgetRequests = 0;
+        pi.sendMessage(
+          { customType: 'desktop-goal-budget', content: GOAL_BUDGET_MESSAGE, display: false },
+          { deliverAs: 'steer' },
+        );
+      }
+    },
     isActive: () => goal?.status === 'active',
     action: async (value: unknown, ctx: ExtensionContext) => {
       validateGoalAction(value);

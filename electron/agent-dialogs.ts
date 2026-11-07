@@ -51,6 +51,7 @@ export class AgentDialogs {
         approval = JSON.parse(String(record.title).slice(APPROVAL_PREFIX.length));
       } catch {}
     }
+    record = { ...record, createdAt: Date.now() };
     r.dialogs.push(
       ask
         ? { id: record.id, method: 'input', title: 'Pi 需要你决定', ask, expiresAt }

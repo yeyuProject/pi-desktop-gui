@@ -1,3 +1,4 @@
+import { stricterApprovalMode } from '../shared/team';
 import { AgentOperations } from './agent-operations';
 import { RuntimePublisher } from './runtime-publisher';
 import { describeOperationError } from '../shared/errors';
@@ -52,7 +53,7 @@ import { piShellEnvironment, samePath } from './platform';
 import { sessionStats } from './pi/protocol';
 import { LiveUsage } from './live-usage';
 import { normalizePiToolPath } from './pi/tool-path';
-import { DESKTOP_BRIDGE_COMMAND, DESKTOP_WORKSPACE_PREFIX } from '../shared/pi-bridge';
+import { DESKTOP_BRIDGE_COMMAND, DESKTOP_WORKSPACE_PREFIX, DESKTOP_TEAM_PREFIX } from '../shared/pi-bridge';
 import { classifyModelError, redact, redactMessageError, type ModelErrorKind } from '../shared/errors';
 export { redact } from '../shared/errors';
 
@@ -244,6 +245,13 @@ export class AgentService extends EventEmitter {
     private developmentRoot?: string,
     private bridgeSource = path.resolve('dist-electron/pi-bridge.mjs'),
     private beforeConnect?: (operation: 'connect' | 'read' | 'write', target?: string) => Promise<void>,
+    private teamHost?: {
+      request: (id: string, value: unknown, valid: () => boolean) => Promise<unknown>;
+      stop: (id: string, interrupted?: boolean, force?: boolean) => Promise<void>;
+      usage: (id: string, value: any) => void;
+      beforeSend: (id: string) => void;
+      cancel: (id: string, toolCallId: unknown) => Promise<void>;
+    },
   ) {
     super();
     this.checkpointRecorder = new CheckpointRecorder(store, workspace);
@@ -306,7 +314,8 @@ export class AgentService extends EventEmitter {
     if (!this.runtime.sessionId) return;
     const session = this.store.session(this.runtime.sessionId);
     session.updatedAt = Date.now();
-    if (!busy(this.runtime.status)) session.unread = this.store.state.selectedSessionId !== session.id;
+    if (!busy(this.runtime.status))
+      session.unread = !session.team && this.store.state.selectedSessionId !== session.id;
     this.save(!busy(this.runtime.status));
   }
   private exclusive<T>(action: () => Promise<T>): Promise<T> {
@@ -436,6 +445,15 @@ export class AgentService extends EventEmitter {
   private onEvent(record: any) {
     const r = this.runtime;
     switch (record.type) {
+      case 'desktop_team_cancel':
+        if (r.sessionId)
+          void this.teamHost
+            ?.cancel(r.sessionId, record.toolCallId)
+            .catch((error) => this.diagnostic(errorText(error)));
+        return;
+      case 'desktop_team_usage':
+        if (r.sessionId) this.teamHost?.usage(r.sessionId, record);
+        return;
       case 'desktop_goal_compose': {
         if (!r.sessionId) return;
         const session = this.store.session(r.sessionId);
@@ -744,6 +762,40 @@ export class AgentService extends EventEmitter {
   }
   private extension(record: any) {
     const r = this.runtime;
+    if (record.method === 'input' && String(record.title).startsWith(DESKTOP_TEAM_PREFIX)) {
+      const rpc = this.rpc;
+      const epoch = this.stopEpoch;
+      const valid = () =>
+        this.rpc === rpc &&
+        this.runtime === r &&
+        epoch === this.stopEpoch &&
+        !this.stopRequested &&
+        !this.shutdown;
+      void (async () => {
+        try {
+          if (!r.sessionId || !valid() || !this.teamHost) throw new Error('团队请求已取消。');
+          const data = await this.teamHost.request(
+            r.sessionId,
+            JSON.parse(String(record.title).slice(DESKTOP_TEAM_PREFIX.length)),
+            valid,
+          );
+          if (this.rpc === rpc && this.runtime === r)
+            await rpc?.write({
+              type: 'extension_ui_response',
+              id: record.id,
+              value: JSON.stringify({ ok: true, data }),
+            });
+        } catch (error) {
+          this.diagnostic(errorText(error));
+          await rpc?.write({
+            type: 'extension_ui_response',
+            id: record.id,
+            value: JSON.stringify({ ok: false, error: describeOperationError(error) }),
+          });
+        }
+      })().catch((error) => this.diagnostic(errorText(error)));
+      return;
+    }
     if (record.method === 'input' && String(record.title).startsWith(DESKTOP_WORKSPACE_PREFIX)) {
       const rpc = this.rpc;
       const epoch = this.stopEpoch;
@@ -1178,8 +1230,18 @@ export class AgentService extends EventEmitter {
         PI_TELEMETRY: '0',
         PI_DESKTOP_APPROVAL: session.approvalMode ?? 'auto',
         PI_DESKTOP_CHECKPOINTS: '1',
+        PI_DESKTOP_TEAM_ENABLED: session.teamEnabled && !session.team ? '1' : '0',
         ...piShellEnvironment(environment.bash),
       };
+      if (session.team) {
+        const snapshot = path.join(this.store.dir, `team-member-${sessionId}.json`);
+        await fs.writeFile(
+          snapshot,
+          JSON.stringify({ link: session.team, budget: this.store.state.settings.team.memberTokenBudget }),
+          { mode: 0o600 },
+        );
+        shellEnv.PI_DESKTOP_TEAM_MEMBER = snapshot;
+      }
       this.processAgentDir = agentDirectory(this.store.state.settings);
       // Pi searches PATH after conventional Git locations. Prefer the Git Bash we detected,
       // including installations on another drive, over Windows' legacy WSL bash launcher.
@@ -1256,6 +1318,7 @@ export class AgentService extends EventEmitter {
     rpc.on('exit', (code: number | null, signal: string | null) => {
       if (this.rpc !== rpc || this.shutdown) return;
       const sessionId = this.runtime.sessionId!;
+      void this.teamHost?.stop(sessionId, true).catch((error) => this.diagnostic(errorText(error)));
       this.runtime.connected = false;
       this.clearDialogs();
       const last = this.runtime.tools.findLast((tool) => tool.status === 'running');
@@ -1409,6 +1472,7 @@ export class AgentService extends EventEmitter {
     images: ImageAttachment[] = [],
     goalStart?: GoalStartInput,
   ) {
+    if (goalStart && this.store.session(id).team) return Promise.reject(new Error('成员不启用 Goal。'));
     if (goalStart) validateGoalStartInput(goalStart);
     validateImages(images);
     if (!text.trim() && !images.length) return Promise.reject(new Error('请输入任务内容或添加图片'));
@@ -1419,6 +1483,7 @@ export class AgentService extends EventEmitter {
     );
   }
   async openGoal(id: string) {
+    if (this.store.session(id).team) throw new Error('成员不启用 Goal。');
     this.store.assertWritable();
     const session = this.store.session(id);
     const goal = this.runtime.sessionId === id ? this.runtime.goal : undefined;
@@ -1433,6 +1498,7 @@ export class AgentService extends EventEmitter {
     }
   }
   async goalAction(id: string, action: import('../shared/goal').GoalAction) {
+    if (this.store.session(id).team) throw new Error('成员不启用 Goal。');
     this.protectSession(id);
     if (action.action === 'start') {
       const epoch = this.stopEpoch;
@@ -1489,6 +1555,7 @@ export class AgentService extends EventEmitter {
     goalStart?: GoalStartInput,
   ) {
     this.store.assertWritable();
+    this.teamHost?.beforeSend(id);
     if (this.runtime.sessionId === id && this.runtime.dialogs.some((dialog) => dialog.ask))
       throw new Error('Pi 在等你回答。请在上方作答，或直接在输入框里输入回答。');
     if (epoch !== this.stopEpoch) throw new Error('任务已取消，内容保留在草稿中');
@@ -1505,6 +1572,7 @@ export class AgentService extends EventEmitter {
     const prompt = project ? await attachmentPrompt(project, text, attachments) : text;
     const previousRuntime = this.runtime;
     await this.ensureConnected(id);
+    this.teamHost?.beforeSend(id);
     if (this.runtime.dialogs.some((dialog) => dialog.ask))
       throw new Error('Pi 在等你回答。请在上方作答，或直接在输入框里输入回答。');
     // A tool continuation or a queued steer/follow-up is still the same user task.
@@ -1789,7 +1857,8 @@ export class AgentService extends EventEmitter {
   }
   async setApprovalMode(id: string, mode: ApprovalMode) {
     if (!['auto', 'confirm', 'readonly'].includes(mode)) throw new Error('审批模式无效');
-    this.store.promoteSession(id).approvalMode = mode;
+    const session = this.store.promoteSession(id);
+    session.approvalMode = session.team ? stricterApprovalMode(mode, session.team.approvalMode) : mode;
     this.save();
     if (this.runtime.sessionId === id) await this.preference(() => this.syncApprovalMode());
     this.publish(true);
@@ -2237,20 +2306,42 @@ export class AgentService extends EventEmitter {
     if (this.runtime.sessionId === id && this.runtime.connected)
       await this.rpc!.request('set_session_name', { name });
   }
+  async setTeamEnabled(id: string, enabled: boolean) {
+    if (this.rpc && !this.rpc.closed && this.runtime.sessionId === id)
+      await this.rpc.bridge('team_enabled', { enabled });
+  }
+  logTeamError(error: unknown) {
+    this.diagnostic(errorText(error));
+  }
+  async teamWindDown() {
+    await this.rpc?.bridge('team_wind_down');
+  }
+  async waitTeamIdle() {
+    // Let agent_settled enqueue checkpoint finalization before draining the operation queue.
+    await new Promise<void>((resolve) => setImmediate(resolve));
+    await this.operations.drain();
+    await this.crashCleanup;
+    this.assertCommandsStopped();
+  }
   async stop() {
-    if (!busy(this.runtime.status) && !this.modelReader) return;
+    if (!busy(this.runtime.status) && !this.modelReader && !this.operations.pending) return;
     const wasConnecting = this.connecting || Boolean(this.modelReader);
     this.stopEpoch++;
     this.stopRequested = true;
     this.runtime.stopStartedAt = Date.now();
     this.status('stopping');
+    const stoppingTeam = this.runtime.sessionId ? this.teamHost?.stop(this.runtime.sessionId) : undefined;
+    // Attach immediately; cleanup is awaited below, in parallel with Pi's abort signal.
+    void stoppingTeam?.catch((error) => this.diagnostic(errorText(error)));
     if (this.modelReader) {
+      await stoppingTeam;
       await this.modelReader.killTree();
       this.clearDialogs();
       this.status('stopped');
       return;
     }
     if (!this.rpc || this.rpc.closed) {
+      await stoppingTeam;
       this.status('stopped');
       if (!wasConnecting) this.activity();
       return;
@@ -2278,6 +2369,7 @@ export class AgentService extends EventEmitter {
         if (state.isStreaming || state.isCompacting || state.pendingMessageCount)
           throw new Error('Pi 尚未停止，请重试或强制结束');
       }
+      await stoppingTeam;
       this.clearDialogs();
       if (this.runtime.sessionId)
         await this.checkpointRecorder
@@ -2302,8 +2394,10 @@ export class AgentService extends EventEmitter {
     const wasRunning = busy(this.runtime.status) && !this.connecting;
     this.stopEpoch++;
     this.stopRequested = true;
-    await this.modelReader?.killTree();
-    await this.rpc?.killTree();
+    const stoppingTeam = this.runtime.sessionId
+      ? this.teamHost?.stop(this.runtime.sessionId, false, true)
+      : undefined;
+    await Promise.all([stoppingTeam, this.modelReader?.killTree(), this.rpc?.killTree()]);
     this.activeWriteTargets.clear();
     if (this.runtime.sessionId)
       await this.checkpointRecorder
@@ -2499,6 +2593,7 @@ export class AgentService extends EventEmitter {
     return this.readTranscript(s.file, live, id);
   }
   async dispose() {
+    if (this.runtime.sessionId) await this.teamHost?.stop(this.runtime.sessionId, true);
     await this.stopSideChat();
     this.shutdown = true;
     this.stopEpoch++;

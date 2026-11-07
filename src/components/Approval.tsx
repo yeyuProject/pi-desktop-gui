@@ -111,7 +111,11 @@ export function ApprovalCard({
   dialog,
   first,
   respond,
+  sourceName,
+  openMember,
 }: {
+  sourceName?: string;
+  openMember?: () => void;
   dialog: ExtensionDialog;
   first: boolean;
   respond: (value: string) => void;
@@ -162,6 +166,7 @@ export function ApprovalCard({
       aria-label={`等待批准：${a.toolName}`}
     >
       <header>
+        {sourceName && <span>成员 · {sourceName}</span>}
         {a.kind === 'shell' ? <Terminal size={15} /> : <FileText size={15} />}
         <strong>
           {a.kind === 'shell'
@@ -206,6 +211,7 @@ export function ApprovalCard({
       ) : (
         <pre className="approval-command">{a.summary}</pre>
       )}
+      {sourceName && <button onClick={openMember}>在成员中查看</button>}
       {reason === null ? (
         <div className="approval-actions">
           <button
@@ -221,7 +227,7 @@ export function ApprovalCard({
           </button>
           {a.grant && (
             <button onClick={() => respond(APPROVAL_ALWAYS)} title={grantLabel(a.grant)}>
-              {grantActionLabel(a.grant)}
+              {sourceName ? '此成员总是允许' : grantActionLabel(a.grant)}
             </button>
           )}
           <button

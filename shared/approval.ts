@@ -46,6 +46,8 @@ export function decide(
       'desktop_goal_plan',
       'desktop_plan',
       'desktop_ask_user',
+      'desktop_team_roles',
+      'desktop_team_dispatch',
       'desktop_goal_complete',
       'desktop_goal_blocked',
     ].includes(toolName) ||

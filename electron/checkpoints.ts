@@ -87,6 +87,11 @@ export class Checkpoints {
   readonly directory: string;
   private tracking = new Map<string, SessionTracking>();
   private tools = new Map<string, ToolBoundary>();
+  private teamLeads = new Map<string, string>();
+  linkTeamMember(memberId: string, leadId?: string) {
+    if (leadId) this.teamLeads.set(memberId, leadId);
+    else this.teamLeads.delete(memberId);
+  }
   private operation: Promise<unknown> = Promise.resolve();
   private cached?: { sessionId: string; records: CheckpointRecord[] };
   private hashes = new Map<
@@ -646,7 +651,7 @@ export class Checkpoints {
     name: string,
     args: Record<string, unknown>,
   ) {
-    const command = name === 'bash' || name === 'powershell';
+    const command = name === 'bash' || name === 'powershell' || name === 'desktop_team_dispatch';
     const write = name === 'edit' || name === 'write';
     if (!command && !write) return;
     let names: string[] | undefined;
@@ -667,6 +672,8 @@ export class Checkpoints {
     const others = [...this.tools.values()].filter(
       (tool) =>
         tool.sessionId !== sessionId &&
+        this.teamLeads.get(sessionId) !== tool.sessionId &&
+        this.teamLeads.get(tool.sessionId) !== sessionId &&
         (isWithinDirectory(root, tool.root) || isWithinDirectory(tool.root, root)),
     );
     for (const tool of others) tool.overlapping = true;

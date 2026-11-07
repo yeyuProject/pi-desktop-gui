@@ -28,6 +28,10 @@ export function QuickSwitch({
     [index, setIndex] = useState(0);
   const list = useRef<HTMLDivElement>(null);
   const q = query.trim().toLowerCase();
+  const memberLabel = (s: Session) =>
+    s.team
+      ? `成员 · ${state.sessions.find((lead) => lead.id === s.team!.leadId)?.title ?? '已删除的负责人'} · `
+      : '';
   const projectName = (id?: string) => state.projects.find((p) => p.id === id)?.name ?? '独立对话';
   useEffect(() => {
     if (scope !== 'desktop' || q.length < 2) {
@@ -95,7 +99,7 @@ export function QuickSwitch({
               key: s.id,
               icon: s.pinned ? <Pin size={15} /> : <MessageSquare size={15} />,
               title: s.title,
-              meta: projectName(s.projectId) + ' · ' + relativeTime(s.updatedAt),
+              meta: memberLabel(s) + projectName(s.projectId) + ' · ' + relativeTime(s.updatedAt),
               run: () => select(s),
             })),
             ...contentHits.flatMap((m) => {
@@ -106,7 +110,7 @@ export function QuickSwitch({
                       key: 'c' + s.id,
                       icon: <TextSearch size={15} />,
                       title: s.title,
-                      meta: projectName(s.projectId) + ' · 内容匹配',
+                      meta: memberLabel(s) + projectName(s.projectId) + ' · 内容匹配',
                       snippet: m.snippet,
                       run: () => select(s),
                     },

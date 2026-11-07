@@ -1,3 +1,4 @@
+import { DEFAULT_TEAM_SETTINGS, isTeamLink, isTeamSettings, teamMemberActive } from '../shared/team';
 import { readGoalDraft } from '../shared/goal-input';
 import path from 'node:path';
 import { THEMES, UI_STYLES, styleTheme } from '../shared/window-theme';
@@ -5,6 +6,7 @@ import { busy, type AppState, type Project, type Session, type Settings } from '
 import { isDraftQuote } from '../shared/message-content';
 
 export const defaultSettings: Settings = {
+  team: DEFAULT_TEAM_SETTINGS,
   piPath: '',
   nodePath: '',
   agentDir: '',
@@ -32,7 +34,7 @@ export const emptyState = (): AppState => ({
   version: 1,
   projects: [],
   sessions: [],
-  settings: { ...defaultSettings },
+  settings: { ...defaultSettings, team: { ...DEFAULT_TEAM_SETTINGS } },
 });
 const object = (value: unknown): value is Record<string, unknown> =>
   Boolean(value) && typeof value === 'object' && !Array.isArray(value);
@@ -88,7 +90,16 @@ export function parseState(value: unknown) {
       continue;
     }
     projectIds.add(row.id);
-    state.projects.push(row as unknown as Project);
+    const project = { ...row } as unknown as Project;
+    if (
+      project.teamRoleApprovals &&
+      (!object(project.teamRoleApprovals) ||
+        !Object.values(project.teamRoleApprovals).every(
+          (v) => typeof v === 'string' && /^[a-f0-9]{64}$/.test(v),
+        ))
+    )
+      delete project.teamRoleApprovals;
+    state.projects.push(project);
   }
   for (const row of value.sessions) {
     if (
@@ -101,6 +112,9 @@ export function parseState(value: unknown) {
       !statuses.has(row.lastStatus) ||
       (row.projectId !== undefined &&
         (typeof row.projectId !== 'string' || !projectIds.has(row.projectId))) ||
+      (row.teamEnabled !== undefined && typeof row.teamEnabled !== 'boolean') ||
+      (row.teamHintSeen !== undefined && typeof row.teamHintSeen !== 'boolean') ||
+      (row.team !== undefined && (!isTeamLink(row.team) || row.team.leadId === row.id)) ||
       (row.draft !== undefined && typeof row.draft !== 'string') ||
       (row.attachments !== undefined && !strings(row.attachments)) ||
       !optionalPath(row.file) ||
@@ -155,6 +169,11 @@ export function parseState(value: unknown) {
       attachments: row.attachments ?? [],
     } as unknown as Session;
     if (busy(session.lastStatus)) session.lastStatus = 'interrupted';
+    if (session.team) {
+      session.teamEnabled = false;
+      session.unread = false;
+      if (teamMemberActive(session.team.status)) session.team = { ...session.team, status: 'interrupted' };
+    }
     state.sessions.push(session);
   }
   const settings = object(value.settings) ? value.settings : {};
@@ -168,13 +187,15 @@ export function parseState(value: unknown) {
     if (!(key in settings)) continue;
     const candidate = settings[key];
     const valid =
-      key === 'theme'
-        ? (THEMES as readonly unknown[]).includes(candidate)
-        : key === 'uiStyle'
-          ? (UI_STYLES as readonly unknown[]).includes(candidate)
-          : typeof defaultSettings[key] === 'number'
-            ? typeof candidate === 'number' && Number.isFinite(candidate) && candidate > 0
-            : typeof candidate === typeof defaultSettings[key];
+      key === 'team'
+        ? isTeamSettings(candidate)
+        : key === 'theme'
+          ? (THEMES as readonly unknown[]).includes(candidate)
+          : key === 'uiStyle'
+            ? (UI_STYLES as readonly unknown[]).includes(candidate)
+            : typeof defaultSettings[key] === 'number'
+              ? typeof candidate === 'number' && Number.isFinite(candidate) && candidate > 0
+              : typeof candidate === typeof defaultSettings[key];
     if (valid) Object.assign(state.settings, { [key]: candidate });
     else repairedSettings++;
   }

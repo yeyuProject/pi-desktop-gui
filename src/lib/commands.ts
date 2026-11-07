@@ -1,5 +1,6 @@
 export const commandOrder = ['desktop', 'prompt', 'skill', 'extension'];
 export const builtinCommands = [
+  ['team', '团队：on 开启、off 关闭；不带参数查看角色与成员'],
   ['new', '新建当前范围的对话'],
   ['resume', '搜索和恢复历史'],
   ['find', '查找当前会话的消息与工具输出'],

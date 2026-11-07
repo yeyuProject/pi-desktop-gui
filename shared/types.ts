@@ -1,3 +1,4 @@
+import type { TeamLink, TeamSettings, TeamSnapshot, TeamRole, TeamRoleInput } from './team';
 import type { PlanSnapshot } from './plan';
 import type { AskAnswer, AskRequest } from './ask';
 import type { GoalDraft, GoalStartInput } from './goal-input';
@@ -38,10 +39,14 @@ export interface Project {
   name: string;
   path: string;
   trusted: boolean;
+  teamRoleApprovals?: Record<string, string>;
   approvalMode?: ApprovalMode;
   createdAt: number;
 }
 export interface Session {
+  teamEnabled?: boolean;
+  teamHintSeen?: boolean;
+  team?: TeamLink;
   historyNotice?: string;
   id: string;
   projectId?: string;
@@ -67,6 +72,7 @@ export interface Session {
   approvalMode?: ApprovalMode;
 }
 export interface Settings {
+  team: TeamSettings;
   piPath: string;
   nodePath: string;
   agentDir: string;
@@ -154,6 +160,7 @@ export interface ToolActivity {
 }
 export interface ExtensionDialog {
   id: string;
+  createdAt?: number;
   method: 'select' | 'confirm' | 'input' | 'editor';
   title: string;
   /** Present when the dialog is a tool approval request from the desktop bridge. */
@@ -247,6 +254,7 @@ export interface ProviderInfo {
   apiKey: boolean;
 }
 export interface Runtime {
+  team?: TeamSnapshot[];
   goal?: GoalSnapshot | null;
   plan?: PlanSnapshot | null;
   planUpdateRequest?: number;
@@ -507,6 +515,12 @@ export interface ApiMap {
   setSessionThinking: { args: [string, string]; result: void };
   messageAction: { args: [string, MessageAction, 'user' | 'assistant', number]; result: void };
   abortRetry: { args: [sessionId: string]; result: void };
+  setTeamEnabled: { args: [string, boolean]; result: void };
+  stopTeamMember: { args: [leadId: string, memberId?: string]; result: void };
+  listTeamRoles: { args: [string]; result: TeamRole[] };
+  readTeamRole: { args: [string, 'user' | 'project', string]; result: { role: TeamRole; text: string } };
+  saveTeamRole: { args: [string, TeamRoleInput]; result: TeamRole };
+  deleteTeamRole: { args: [string, 'user' | 'project', string, string]; result: void };
   setApprovalMode: { args: [string, ApprovalMode]; result: void };
   revokeApproval: { args: [string, string?]; result: void };
   checkpoints: { args: [string]; result: CheckpointSummary[] };

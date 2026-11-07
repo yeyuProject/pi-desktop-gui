@@ -1,3 +1,4 @@
+import { TeamService } from './team';
 import { EventEmitter } from 'node:events';
 import { AgentService } from './agent';
 import type { Store } from './store';
@@ -10,6 +11,7 @@ import { agentDirectory } from './environment';
 /** Each connected conversation owns its process, queue and operation ordering. */
 export class SessionAgents extends EventEmitter {
   private agents = new Map<string, AgentService>();
+  readonly team: TeamService;
   private moving = new Set<string>();
   assertNoSessionMove(id?: string) {
     if (id ? this.moving.has(id) : this.moving.size > 0) throw new Error('会话正在移动，请稍后重试');
@@ -46,6 +48,23 @@ export class SessionAgents extends EventEmitter {
     private idleMs = 5 * 60 * 1000,
   ) {
     super();
+    this.team = new TeamService(store, workspace, {
+      get: (id) => this.agents.get(id) ?? this.get(id),
+      changed: () => this.emit('state', this.store.state),
+      publish: (id, snapshots) => {
+        const agent = this.agents.get(id);
+        if (!agent) return;
+        agent.runtime.team = snapshots;
+        if (snapshots.length && ['running', 'waiting'].includes(agent.runtime.status)) {
+          const waiting = snapshots.some((snapshot) =>
+            snapshot.members.some((member) => member.status === 'waiting'),
+          );
+          agent.runtime.status = waiting || agent.runtime.dialogs.length ? 'waiting' : 'running';
+          this.store.session(id).lastStatus = agent.runtime.status;
+        }
+        agent.publish(true);
+      },
+    });
     this.idleTimer = setInterval(() => {
       void this.collectIdle().catch(() => {});
     }, 60_000);
@@ -65,6 +84,7 @@ export class SessionAgents extends EventEmitter {
       this.developmentRoot,
       this.bridgeSource,
       async (operation, target) => {
+        if (operation === 'connect') this.team.assertMayConnect(id);
         if (await this.inTerminal(id))
           throw new Error('此会话已交给 Pi 终端，请关闭该终端后重新连接；其他会话仍可使用');
         await this.assertResourcesAvailable(id);
@@ -79,6 +99,13 @@ export class SessionAgents extends EventEmitter {
             throw new Error('此目录正在撤销或修改文件，请完成后重试；仍可查看已保存的历史');
         }
       },
+      {
+        request: (id, value, valid) => this.team.handle(id, value, valid),
+        stop: (id, interrupted, force) => this.team.stopLead(id, true, interrupted, force),
+        usage: (id, value) => this.team.usage(id, value),
+        beforeSend: (id) => this.team.assertMaySend(id),
+        cancel: (id, toolCallId) => this.team.cancelDispatch(id, toolCallId),
+      },
     );
     agent.suspendReload(this.reloadSuspended);
     agent.setVisible(this.visible);
@@ -88,6 +115,7 @@ export class SessionAgents extends EventEmitter {
         const touched = this.touched.get(id);
         if (touched) touched.at = Date.now();
       }
+      this.team.observe(id, agent.runtime);
       this.emit('runtimePatch', patch);
       this.emit('attention', agent.runtime);
     });
@@ -108,6 +136,8 @@ export class SessionAgents extends EventEmitter {
           approvalMode: session.approvalMode,
           // Goal actions change the editor while the list status can stay running.
           draftGoal: session.draftGoal,
+          teamEnabled: session.teamEnabled,
+          team: session.team,
         })),
       });
       // Draft contents are compared by reference: writers replace these fields, and
@@ -141,11 +171,13 @@ export class SessionAgents extends EventEmitter {
 
   get hasPendingWork() {
     return (
-      this.workspaceOperations.size > 0 || [...this.agents.values()].some((agent) => agent.hasPendingWork)
+      this.team.active ||
+      this.workspaceOperations.size > 0 ||
+      [...this.agents.values()].some((agent) => agent.hasPendingWork)
     );
   }
   get requiresStopConfirmation() {
-    return [...this.agents.values()].some((agent) => agent.requiresStopConfirmation);
+    return this.team.active || [...this.agents.values()].some((agent) => agent.requiresStopConfirmation);
   }
   diagnostics() {
     return [...this.agents.values()].map((agent) => agent.diagnostics());
@@ -165,7 +197,12 @@ export class SessionAgents extends EventEmitter {
     };
   }
   active(id: string) {
-    return this.moving.has(id) || (this.agents.get(id)?.hasPendingWork ?? false);
+    return (
+      this.team.owns(id) ||
+      this.team.hasLead(id) ||
+      this.moving.has(id) ||
+      (this.agents.get(id)?.hasPendingWork ?? false)
+    );
   }
 
   connected(id: string) {
@@ -178,6 +215,8 @@ export class SessionAgents extends EventEmitter {
   async handoffToTerminal<T>(id: string, action: () => Promise<T>) {
     if (await this.inTerminal(id)) throw new Error('此会话已交给 Pi 终端，或正在交接，请关闭相关终端后重试');
     if (this.terminalHandoffs.has(id)) throw new Error('此会话正在交给 Pi 终端，请稍候');
+    if (this.team.owns(id) || this.team.hasLead(id))
+      throw new Error('团队任务尚未结束，请先停止再交给 Pi 终端。');
     this.terminalHandoffs.add(id);
     try {
       await this.assertResourcesAvailable(id);
@@ -340,7 +379,8 @@ export class SessionAgents extends EventEmitter {
   async release(id: string) {
     const agent = this.agents.get(id);
     if (!agent) return;
-    if (agent.hasPendingWork) throw new Error('请先等待这个会话的操作结束或停止任务');
+    if (agent.hasPendingWork || this.team.owns(id) || this.team.hasLead(id))
+      throw new Error('请先等待这个会话的操作结束或停止任务');
     this.releasing.add(id);
     try {
       await agent.disconnect();
@@ -362,6 +402,8 @@ export class SessionAgents extends EventEmitter {
         if (!touched || this.releasing.has(id)) continue;
         if (
           id === this.store.state.selectedSessionId ||
+          this.team.owns(id) ||
+          this.team.hasLead(id) ||
           agent.hasPendingWork ||
           this.terminalHandoffs.has(id)
         ) {
@@ -415,6 +457,7 @@ export class SessionAgents extends EventEmitter {
 
   async dispose() {
     this.closing = true;
+    await this.team.dispose();
     clearInterval(this.idleTimer);
     // Start cancellation first. A workspace operation may be waiting for a Pi
     // reader/dialog which only AgentService.dispose can close.

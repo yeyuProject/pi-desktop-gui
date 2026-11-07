@@ -72,6 +72,7 @@ export function useRuntime(
   const state = snapshot?.state;
   const anyRunning = runtimes.anyRunning;
   return {
+    runtimes,
     state,
     stateRevision: snapshot?.revision ?? 0,
     receivedState,

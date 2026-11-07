@@ -1,16 +1,19 @@
 import { messageArrayChanges, type Message } from '../../shared/types';
 import { isGoalStartMessage } from '../../shared/goal-input';
 import { hidePlanTools } from './plan-transcript';
+import { restoreTeamCalls } from './team-transcript';
 import { hideRecoveredErrors } from './conversation-layout';
 export function deriveHistory(messages: Message[], start = 0) {
-  return hideRecoveredErrors(
-    hidePlanTools(
-      messages
-        .slice(start)
-        .map((message, offset) =>
-          isGoalStartMessage(messages, start + offset) ? { ...message, goalStart: true } : message,
-        )
-        .filter((message) => message.role !== 'custom' || message.display !== false),
+  return restoreTeamCalls(
+    hideRecoveredErrors(
+      hidePlanTools(
+        messages
+          .slice(start)
+          .map((message, offset) =>
+            isGoalStartMessage(messages, start + offset) ? { ...message, goalStart: true } : message,
+          )
+          .filter((message) => message.role !== 'custom' || message.display !== false),
+      ),
     ),
   );
 }

@@ -1,3 +1,4 @@
+import { readTeamRole, saveTeamRole, deleteTeamRole } from '../team-roles';
 import { shell } from 'electron';
 import { execFile } from 'node:child_process';
 import fs from 'node:fs/promises';
@@ -30,6 +31,12 @@ interface AgentHandlerContext extends Pick<
   terminalLock: (id: string) => string;
 }
 export type AgentHandlerName =
+  | 'setTeamEnabled'
+  | 'stopTeamMember'
+  | 'listTeamRoles'
+  | 'readTeamRole'
+  | 'saveTeamRole'
+  | 'deleteTeamRole'
   | 'setSessionModel'
   | 'setSessionThinking'
   | 'messageAction'
@@ -91,6 +98,40 @@ export function createAgentHandlers(context: AgentHandlerContext) {
   }
 
   const handlers: HandlerMap<AgentHandlerName> = {
+    setTeamEnabled: async (id, enabled) => {
+      text(id, 100);
+      await service.team.setEnabled(id, enabled);
+      await service.get(id).setTeamEnabled(id, enabled);
+    },
+    stopTeamMember: async (id, memberId) => {
+      text(id, 100);
+      if (memberId !== undefined) {
+        text(memberId, 100);
+        if (store.session(memberId).team?.leadId !== id) throw new Error('成员不属于此负责人。');
+        await service.team.stopMember(memberId);
+      } else await service.team.stopLead(id, false);
+    },
+    listTeamRoles: async (id) => {
+      text(id, 100);
+      return service.team.roles(id);
+    },
+    readTeamRole: async (id, source, name) => {
+      text(id, 100);
+      text(name, 80);
+      if (!['user', 'project'].includes(source)) throw new Error('角色来源无效。');
+      return readTeamRole(service.team.roleContext(id), source, name);
+    },
+    saveTeamRole: async (id, input) => {
+      text(id, 100);
+      return saveTeamRole(service.team.roleContext(id), input);
+    },
+    deleteTeamRole: async (id, source, name, revision) => {
+      text(id, 100);
+      text(name, 80);
+      text(revision, 64);
+      if (!['user', 'project'].includes(source)) throw new Error('角色来源无效。');
+      await deleteTeamRole(service.team.roleContext(id), source, name, revision);
+    },
     setSessionModel: async (id, provider, modelId) => {
       text(id, 100);
       text(provider, 200);

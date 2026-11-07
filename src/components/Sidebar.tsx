@@ -80,6 +80,7 @@ export function Sidebar(
     }
     return new Set(project ? [project.id] : []);
   });
+  const [teamOpen, setTeamOpen] = useState<Set<string>>(new Set());
   const [moving, setMoving] = useState<Set<string>>(new Set());
   const [moveId, setMoveId] = useState<string>();
   const [moveStatuses, setMoveStatuses] = useState<Record<string, string>>({});
@@ -129,6 +130,7 @@ export function Sidebar(
   };
   const moveReason = (id: string) => {
     const session = state.sessions.find((s) => s.id === id);
+    if (session?.team || state.sessions.some((s) => s.team?.leadId === id)) return '团队会话暂不支持移动';
     if (moving.has(id)) return '会话正在移动，请稍候';
     if (!props.storage.writable) return '本地数据只读，暂时不能移动';
     if (activities[id]?.pending) return '有待处理的确认，处理后才能移动';
@@ -239,6 +241,11 @@ export function Sidebar(
       );
     return null;
   };
+  const pendingFor = (s: Session) =>
+    (activities[s.id]?.pending ?? 0) +
+    state.sessions
+      .filter((member) => member.team?.leadId === s.id)
+      .reduce((sum, member) => sum + (activities[member.id]?.pending ?? 0), 0);
   const renderSession = (s: Session) => (
     <div
       className={
@@ -275,12 +282,12 @@ export function Sidebar(
             }
           />
         )}
-        {!!activities[s.id]?.pending && (
-          <span className="project-waiting" aria-label={`待确认 ${activities[s.id].pending} 项`}>
+        {!!pendingFor(s) && (
+          <span className="project-waiting" aria-label={`待确认 ${pendingFor(s)} 项`}>
             待确认
           </span>
         )}
-        {!activities[s.id]?.pending && busy(activities[s.id]?.status ?? s.lastStatus) && (
+        {!pendingFor(s) && busy(activities[s.id]?.status ?? s.lastStatus) && (
           <LoaderCircle size={12} className="spin" />
         )}
       </button>
@@ -369,13 +376,55 @@ export function Sidebar(
   const bySidebarOrder = (a: Session, b: Session) =>
     Number(!!b.pinned) - Number(!!a.pinned) || b.updatedAt - a.updatedAt;
   const renderSessionList = (projectId?: string) => {
-    const sessions = state.sessions.filter((session) => session.projectId === projectId).sort(bySidebarOrder);
+    const sessions = state.sessions
+      .filter(
+        (session) =>
+          session.projectId === projectId &&
+          (!session.team || !state.sessions.some((s) => s.id === session.team!.leadId)),
+      )
+      .sort(bySidebarOrder);
+    const renderGroup = (session: Session) => {
+      const members = state.sessions.filter((s) => s.team?.leadId === session.id);
+      const active = members.filter((s) => busy(activities[s.id]?.status ?? s.lastStatus)).length;
+      const open =
+        teamOpen.has(session.id) ||
+        members.some(
+          (s) =>
+            activities[s.id]?.pending ||
+            ['failed', 'waiting'].includes(s.team!.status) ||
+            s.id === selected?.id,
+        );
+      return (
+        <div key={session.id}>
+          {renderSession(session)}
+          {members.length > 0 && (
+            <>
+              <button
+                className="team-sidebar-toggle"
+                aria-expanded={open}
+                onClick={() =>
+                  setTeamOpen((before) => {
+                    const next = new Set(before);
+                    if (next.has(session.id)) next.delete(session.id);
+                    else next.add(session.id);
+                    return next;
+                  })
+                }
+              >
+                {open ? '▾' : '▸'} 成员 · {active}/{members.length} 运行中
+              </button>
+              {open && <div className="team-sidebar-members">{members.map(renderSession)}</div>}
+            </>
+          )}
+        </div>
+      );
+    };
     const now = Date.now();
     const old = sessions.filter((session) => isOlderSession(session, now));
     const key = projectId ?? 'standalone';
     return (
       <>
-        {sessions.filter((session) => !isOlderSession(session, now)).map(renderSession)}
+        {sessions.filter((session) => !isOlderSession(session, now)).map(renderGroup)}
         {old.length > 0 && (
           <div className="older-sessions">
             <button
@@ -393,7 +442,7 @@ export function Sidebar(
               <ChevronDown size={13} />
               更早的会话 ({old.length})
             </button>
-            {olderOpen.has(key) && old.map(renderSession)}
+            {olderOpen.has(key) && old.map(renderGroup)}
           </div>
         )}
       </>

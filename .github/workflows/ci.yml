@@ -66,6 +66,9 @@ jobs:
       - name: Measure ten session switches in the packaged app
         if: matrix.os != 'ubuntu-latest'
         run: npm run test:session-ui -- --packaged
+      - name: Test team collaboration in the packaged app
+        if: matrix.os != 'ubuntu-latest'
+        run: npm run test:team-ui -- --packaged
       - name: Install Linux desktop test dependencies
         if: matrix.os == 'ubuntu-latest'
         run: npx playwright install-deps chromium

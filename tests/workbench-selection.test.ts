@@ -207,6 +207,10 @@ function harness(
     '../lib/notice-store': { notice: noticeStore.notice, dismissNotice: noticeStore.dismiss },
     react: hooks,
     './useRuntime': { useRuntime: () => view },
+    './useTeamApprovals': {
+      useTeamApprovals: (_store: unknown, runtime: types.Runtime) =>
+        runtime.dialogs.filter((d) => d.approval).map((d) => ({ ...d, sourceSessionId: runtime.sessionId })),
+    },
     './useDraft': { useDraft: () => draft },
     './useSideChat': { useSideChat: () => ({ open: false }) },
     './useWorkspace': { useWorkspace: () => workspace },

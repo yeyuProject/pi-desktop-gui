@@ -1,3 +1,4 @@
+import { isTeamSettings } from '../../shared/team';
 import { BrowserWindow, dialog, nativeTheme } from 'electron';
 import { nativeThemeSource, STYLE_META, styleTheme, THEMES, UI_STYLES } from '../../shared/window-theme';
 import { updateFeed, updateProxy } from '../update-network';
@@ -20,6 +21,10 @@ export function createSettingsHandlers(context: SettingsHandlerContext) {
     saveSettings: async (value) => {
       if (!value || typeof value !== 'object' || Array.isArray(value)) throw new Error('设置格式无效');
       const next = { ...store.state.settings };
+      if (value.team !== undefined) {
+        if (!isTeamSettings(value.team)) throw new Error('团队设置无效。');
+        next.team = structuredClone(value.team);
+      }
       for (const key of [
         'piPath',
         'nodePath',
@@ -75,6 +80,7 @@ export function createSettingsHandlers(context: SettingsHandlerContext) {
       store.state.settings = next;
       await save();
       if (modelsChanged) service.invalidateModels();
+      if (value.team !== undefined) service.team.settingsChanged();
       nativeTheme.themeSource = nativeThemeSource(next.theme);
       updateWindowTheme();
       context.updates.configure(next.autoDownloadUpdates);

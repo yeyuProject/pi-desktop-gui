@@ -263,6 +263,10 @@ function updateAttentionBadge() {
 let _lastToast: Notification | undefined;
 function notifyAttention(runtime: Runtime) {
   if (!runtime.sessionId) return;
+  const sourceSession = store.state.sessions.find((s) => s.id === runtime.sessionId);
+  const leadSession = sourceSession?.team
+    ? store.state.sessions.find((s) => s.id === sourceSession.team!.leadId)
+    : undefined;
   const previous = attention.get(runtime.sessionId);
   const finished = !!previous && busy(previous.status) && !busy(runtime.status);
   const goal = runtime.goal;
@@ -282,7 +286,9 @@ function notifyAttention(runtime: Runtime) {
   if (
     !window ||
     window.isDestroyed() ||
-    (window.isFocused() && store.state.selectedSessionId === runtime.sessionId)
+    (window.isFocused() &&
+      (store.state.selectedSessionId === runtime.sessionId ||
+        store.state.selectedSessionId === leadSession?.id))
   )
     return;
   if (!previous) return;
@@ -298,7 +304,17 @@ function notifyAttention(runtime: Runtime) {
     body = question
       ? `${question.header}：${redact(question.question).replace(/\s+/g, ' ').slice(0, 80)}`
       : dialog?.title || session.title;
-  } else if (finished && goalOutcome) {
+    if (sourceSession?.team) {
+      title = '成员需要确认 · ' + (leadSession?.title ?? session.title);
+      const approval = dialog?.approval;
+      const operation = approval?.kind === 'shell' ? '运行 ' : approval?.kind === 'write' ? '写入 ' : '';
+      body = `${sourceSession.team.name} · ${operation}${approval?.summary ?? dialog?.title ?? ''}`.slice(
+        0,
+        160,
+      );
+    }
+  } else if (sourceSession?.team) return;
+  else if (finished && goalOutcome) {
     if (!store.state.settings.notifyOnFinish) return;
     title = goalOutcome.title + ' · ' + session.title;
     body = goalOutcome.body;
@@ -322,7 +338,7 @@ function notifyAttention(runtime: Runtime) {
     void flushRendererDraft()
       .then(async () => {
         if (closing || quitting || !store.state.sessions.some((s) => s.id === session.id)) return;
-        store.selectSession(session.id);
+        store.selectSession(leadSession?.id ?? session.id);
         await save();
         if (runtime.dialogs.some((dialog) => dialog.approval))
           send({ type: 'action', action: 'focusApproval' });

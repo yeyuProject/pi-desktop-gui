@@ -141,7 +141,7 @@ export function usePiFeatures({
         setDirty(false);
         setReadingConfig(false);
       }
-      if (tab === 'prefs' || tab === 'settings' || tab === 'mcp' || tab === 'help') return;
+      if (tab === 'roles' || tab === 'prefs' || tab === 'settings' || tab === 'mcp' || tab === 'help') return;
       if (tab === 'session') {
         const summary = await api.invoke('usageSummary');
         if (!current()) return;

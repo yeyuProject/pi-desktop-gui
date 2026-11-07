@@ -21,6 +21,8 @@ export function createSessionMoveHandlers(context: Context) {
     store.assertWritable();
     await assertTerminalClosed(id);
     const session = store.session(id);
+    if (session.team || store.state.sessions.some((s) => s.team?.leadId === id))
+      throw new Error('团队会话暂不支持移动');
     const agent = service.get(id);
     if (service.active(id)) throw new Error('任务进行中，结束后才能移动');
     if (agent.runtime.dialogs.length) throw new Error('有待处理的确认，处理后才能移动');
@@ -95,7 +97,9 @@ export function createSessionMoveHandlers(context: Context) {
       const session = store.session(id);
       const status = service.moveStatus(id);
       let reason = '';
-      if (!store.storage.writable) reason = '本地数据只读，暂时不能移动';
+      if (session.team || store.state.sessions.some((s) => s.team?.leadId === id))
+        reason = '团队会话暂不支持移动';
+      else if (!store.storage.writable) reason = '本地数据只读，暂时不能移动';
       else if (moving.has(id) || status.moving) reason = '会话正在移动，请稍候';
       else if (status.pending) reason = '有待处理的确认，处理后才能移动';
       else if (status.active) reason = '任务进行中，结束后才能移动';

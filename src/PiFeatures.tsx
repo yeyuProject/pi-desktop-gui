@@ -1,3 +1,5 @@
+import { RolesTab } from './features/RolesTab';
+import { useState } from 'react';
 import type { Session, Runtime, Environment, StorageStatus } from '../shared/types';
 import { Modal } from './components/Modal';
 import { ErrorFeedback } from './components/ErrorFeedback';
@@ -32,7 +34,8 @@ export function PiFeatures({
 }) {
   const model = usePiFeatures({ session, runtime, initialTab, close, environment, storage, projectEnabled });
   const { tab, setTab, pending, error, notice, setLocal, setKind, setDocument, dirty } = model;
-  const guard = useUnsavedChanges(dirty);
+  const [roleDirty, setRoleDirty] = useState(false);
+  const guard = useUnsavedChanges(dirty || roleDirty);
   const requestClose = () => {
     if (!pending) guard.confirmLeave(close);
   };
@@ -45,6 +48,7 @@ export function PiFeatures({
               ['session', '会话与上下文'],
               ['tree', '会话树与分支'],
               ['resources', 'Skills 与扩展'],
+              ['roles', '角色'],
               ['mcp', 'MCP 服务器'],
               ['providers', '供应商与登录'],
               ['prefs', '常用设置'],
@@ -54,7 +58,7 @@ export function PiFeatures({
               <button
                 key={id}
                 className={tab === id ? 'active' : ''}
-                disabled={dirty || pending}
+                disabled={dirty || roleDirty || pending}
                 title={dirty ? '请先保存或放弃当前修改' : pending ? '请等待当前操作完成' : ''}
                 onClick={() => {
                   if (id === tab) return;
@@ -107,6 +111,9 @@ export function PiFeatures({
             {tab === 'session' && <SessionTab {...model} />}
             {tab === 'tree' && <TreeTab {...model} />}
             {tab === 'resources' && <ResourcesTab {...model} />}
+            {tab === 'roles' && (
+              <RolesTab session={session} disabled={!storage.writable} dirty={setRoleDirty} />
+            )}
             {tab === 'providers' && <ProvidersTab {...model} onAuthenticated={onAuthenticated} />}
             {tab === 'mcp' && <McpTab {...model} />}
             {tab === 'prefs' && <PreferencesTab {...model} />}
