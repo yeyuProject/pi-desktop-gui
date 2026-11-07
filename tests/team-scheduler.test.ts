@@ -253,3 +253,35 @@ test('dispose waits for final checkpoint cleanup and marks queued members interr
   assert.ok(value.members.every((m) => m.status === 'interrupted'));
   assert.equal(team.active, false);
 });
+
+test('stopping the lead while a completed member is still saving keeps that member completed', async (t) => {
+  const { team, store, lead, get, dispatch } = await fixture(t);
+  const result = dispatch(['已完成', '仍在运行']);
+  await until(() => store.state.sessions.filter((s) => s.team && get(s.id).calls.sends === 1).length === 2);
+  const done = store.state.sessions.find((s) => s.team?.name === '已完成')!;
+  const running = store.state.sessions.find((s) => s.team?.name === '仍在运行')!;
+  const saving = gate();
+  const save = store.save.bind(store);
+  t.mock.method(store, 'save', async () => {
+    await saving.promise;
+    await save();
+  });
+  const runtime = get(done.id).runtime;
+  runtime.messages.push({ id: 'report', role: 'assistant', content: '完成前的汇报。', timestamp: 1 });
+  runtime.status = 'completed';
+  team.observe(done.id, runtime);
+  // The session already records completion; the final save has not returned yet.
+  await until(() => done.team!.status === 'completed');
+  const stopping = team.stopLead(lead.id);
+  await new Promise((r) => setTimeout(r, 20));
+  saving.resolve();
+  await stopping;
+  const value = await result;
+  validateTeamResult(value);
+  assert.equal(value.cancelled, true);
+  const member = value.members.find((m) => m.sessionId === done.id)!;
+  assert.equal(member.status, 'completed');
+  assert.equal(member.report, '完成前的汇报。');
+  assert.equal(done.team!.status, 'completed');
+  assert.equal(value.members.find((m) => m.sessionId === running.id)!.status, 'stopped');
+});

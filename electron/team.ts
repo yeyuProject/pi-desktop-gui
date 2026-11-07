@@ -582,10 +582,13 @@ export class TeamService {
     const run = this.runs.get(id);
     if (!run) return;
     if (run.settled) return run.finalizing;
+    // Finalizing without a stop in progress means the member already ended on its own
+    // (for example, completed and still saving). Stopping finishes cleanup but keeps that outcome.
+    const ended = Boolean(run.finalizing) && !run.stopping;
     run.stop = status;
     if (run.stopping && !force) return run.stopping;
     if (!run.launched) {
-      run.snapshot.status = status;
+      if (!ended) run.snapshot.status = status;
       return this.finish(run);
     }
     run.stopping = (async () => {
@@ -593,9 +596,11 @@ export class TeamService {
       if (force) await agent.forceStop();
       else await agent.stop();
       agent.assertCommandsStopped();
-      run.snapshot.status = status;
-      const last = agent.runtime.messages.findLast((m) => m.role === 'assistant');
-      Object.assign(run.snapshot, truncateTeamReport(last ? messageText(last) : ''));
+      if (!ended) {
+        run.snapshot.status = status;
+        const last = agent.runtime.messages.findLast((m) => m.role === 'assistant');
+        Object.assign(run.snapshot, truncateTeamReport(last ? messageText(last) : ''));
+      }
       await this.finish(run);
     })().finally(() => {
       run.stopping = undefined;
