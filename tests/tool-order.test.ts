@@ -2,7 +2,15 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { AgentService } from '../electron/agent';
 import { placeRuntimeTools, RuntimeToolPlacer } from '../src/lib/conversation-layout';
-import { messageArrayChanges, type Message, type ToolActivity } from '../shared/types';
+import {
+  applyRuntimePatch,
+  emptyRuntime,
+  messageArrayChanges,
+  type Message,
+  type Runtime,
+  type ToolActivity,
+} from '../shared/types';
+import { deriveHistory, HistoryDeriver } from '../src/lib/history-derive';
 
 const activity = (id: string, parentToolCallId?: string): ToolActivity => ({
   id,
@@ -156,4 +164,65 @@ test('tool execution events retain the native parent call id through completion'
   } finally {
     await service.dispose();
   }
+});
+
+test('a tool result delivered with a steering message in one patch stays before the final answer', () => {
+  const history = new HistoryDeriver();
+  const placer = new RuntimeToolPlacer();
+  const rg = (status: ToolActivity['status']): ToolActivity => ({ ...activity('rg'), status });
+  const patch = (
+    runtime: Runtime,
+    messagesFrom: number,
+    messages: Message[],
+    tools: ToolActivity[],
+  ): Runtime =>
+    applyRuntimePatch(runtime, {
+      sessionId: 'session',
+      messagesFrom,
+      messages,
+      messageCount: messagesFrom + messages.length,
+      toolsFrom: 0,
+      tools,
+      toolCount: tools.length,
+    });
+  const check = (runtime: Runtime) => {
+    const messages = history.derive(runtime.messages);
+    const placed = placer.place(messages, runtime.tools);
+    assert.deepEqual(placed, placeRuntimeTools(deriveHistory(runtime.messages), runtime.tools));
+    return placed;
+  };
+  let runtime: Runtime = { ...emptyRuntime(), sessionId: 'session' };
+  runtime = patch(
+    runtime,
+    0,
+    [
+      { role: 'user', content: '扫描素材' },
+      { role: 'assistant', content: [{ type: 'toolCall', id: 'rg', name: 'bash', arguments: {} }] },
+    ],
+    [rg('running')],
+  );
+  assert.deepEqual(
+    check(runtime).trailing.map((tool) => tool.id),
+    ['rg'],
+  );
+  // Pi delivers the queued steering message immediately after the failed command's result.
+  runtime = patch(
+    runtime,
+    2,
+    [
+      { role: 'toolResult', toolCallId: 'rg', toolName: 'bash', content: 'exit code 1', isError: true },
+      { role: 'user', content: '补充要求' },
+    ],
+    [rg('error')],
+  );
+  assert.deepEqual(check(runtime).trailing, []);
+  runtime = patch(
+    runtime,
+    4,
+    [{ role: 'assistant', content: '最终回复', stopReason: 'stop' }],
+    [rg('error')],
+  );
+  const placed = check(runtime);
+  assert.deepEqual(placed.trailing, []);
+  assert.equal(placed.messageForTool.get('rg'), 2);
 });

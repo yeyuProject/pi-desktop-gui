@@ -31,6 +31,10 @@ export class HistoryDeriver {
       (change?.previous.deref() === this.source
         ? change.from >= this.boundary
         : this.source.slice(0, -1).every((message, index) => message === messages[index]));
+    // Only messages before the previous boundary are unchanged. When a new user message
+    // moves the boundary forward, messages added before it (for example a tool result
+    // delivered with a steering message) are new and must be reported as changed.
+    const unchanged = this.prefix.length;
     let boundary = this.boundary;
     if (!common) boundary = 0;
     for (
@@ -55,7 +59,7 @@ export class HistoryDeriver {
         tailOnly && result.length === this.result.length
           ? Math.max(0, result.length - 1)
           : common
-            ? this.prefix.length
+            ? Math.min(unchanged, this.prefix.length)
             : 0,
     });
     this.result = result;
