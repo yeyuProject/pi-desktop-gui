@@ -10,7 +10,7 @@ import {
   type ReactNode,
 } from 'react';
 import { FileText, WrapText, BookOpen, ChevronDown, ChevronRight } from 'lucide-react';
-import Markdown from 'react-markdown';
+import Markdown, { defaultUrlTransform, type UrlTransform } from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import { type Message } from '../../../shared/types';
 import { Lightbox } from '../../lib/lazy-dialogs';
@@ -20,6 +20,8 @@ import { SearchHighlight } from './SearchHighlight';
 import type { SessionMatch } from '../../lib/session-search';
 import { streamingMarkdown, type MarkdownParts } from '../../lib/streaming-markdown';
 import { CopyButton } from '../CopyButton';
+import { notice } from '../../lib/notice-store';
+import { readableError } from '../../lib/format';
 const api = window.desktop;
 function codeText(children: ReactNode): string {
   return Children.toArray(children)
@@ -73,9 +75,34 @@ export function CodeBlock({ children }: { children: ReactNode }) {
     </div>
   );
 }
+function linkTitle(href: string) {
+  try {
+    return decodeURI(href);
+  } catch {
+    return href;
+  }
+}
+async function openMessageLink(href: string) {
+  try {
+    if ((await api.invoke('openMessageLink', href)) === 'revealed') {
+      const manager =
+        api.platform === 'win32' ? '资源管理器' : api.platform === 'darwin' ? '访达' : '文件管理器';
+      notice(`已在${manager}中显示。为安全起见，这类文件不会从对话中直接打开。`, { level: 'info' });
+    }
+  } catch (error) {
+    notice(readableError(error), { level: 'warning' });
+  }
+}
+// Local file links are allowed so replies can point at generated reports; images stay restricted.
+const urlTransform: UrlTransform = (url, key) =>
+  key === 'href' && /^file:/i.test(url) ? url : defaultUrlTransform(url);
 export const markdownComponents = {
   a: ({ href, children }: { href?: string; children?: ReactNode }) => (
-    <button className="inline-link" onClick={() => href && void api.invoke('openLink', href).catch(() => {})}>
+    <button
+      className="inline-link"
+      title={href ? linkTitle(href) : undefined}
+      onClick={() => href && void openMessageLink(href)}
+    >
       {children}
     </button>
   ),
@@ -85,7 +112,12 @@ export const markdownComponents = {
 export const remarkPlugins = [remarkGfm];
 const MarkdownBlock = memo(function MarkdownBlock({ text }: { text: string }) {
   return (
-    <Markdown remarkPlugins={remarkPlugins} skipHtml components={markdownComponents}>
+    <Markdown
+      remarkPlugins={remarkPlugins}
+      skipHtml
+      urlTransform={urlTransform}
+      components={markdownComponents}
+    >
       {text}
     </Markdown>
   );

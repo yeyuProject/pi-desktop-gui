@@ -626,6 +626,7 @@ export interface ApiMap {
   openResource: { args: [string, string]; result: void };
   referenceDropped: { args: [string, string[]]; result: { accepted: string[]; rejected: string[] } };
   openLink: { args: [string]; result: void };
+  openMessageLink: { args: [string]; result: 'opened' | 'revealed' };
   copy: { args: [string]; result: void };
   copyImage: { args: [string]; result: void };
   exportOutput: { args: [sessionId: string]; result: string | null };

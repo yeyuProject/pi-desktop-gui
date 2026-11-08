@@ -132,6 +132,7 @@ export const IPC_POLICIES: Record<keyof ApiMap, IpcPolicy> = {
   openResource: read,
   referenceDropped: write,
   openLink: read,
+  openMessageLink: read,
   copy: { ...read, duringUpdate: true, duringDialog: true },
   copyImage: { ...read, duringDialog: true },
   exportOutput: read,

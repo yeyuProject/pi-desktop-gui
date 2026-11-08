@@ -53,7 +53,8 @@ import { createSessionHandlers, type SessionHandlerName } from './ipc/session-ha
 import { createSettingsHandlers, type SettingsHandlerName } from './ipc/settings-handlers';
 import { createWorkspaceHandlers, type WorkspaceHandlerName } from './ipc/workspace-handlers';
 import { clearDesktopRecords } from './local-data';
-import { isMac, loadLoginShellPath, pathKey, samePath, terminalOpen } from './platform';
+import { planMessageLink } from './message-link';
+import { isMac, loadLoginShellPath, openWithApp, pathKey, samePath, terminalOpen } from './platform';
 import { SessionAgents } from './session-agents';
 import { SideChats } from './side-chats';
 import { readSignedUpdate } from './signed-update-provider';
@@ -865,6 +866,21 @@ const handlers: Record<
     const parsed = new URL(url);
     if (!['https:', 'http:'].includes(parsed.protocol)) throw new Error('只能打开网页链接');
     await shell.openExternal(parsed.href);
+  },
+  openMessageLink: async (href) => {
+    text(href, 4096);
+    const editor = store.state.settings.editorPath || undefined;
+    const plan = await planMessageLink(href, editor);
+    if (plan.action === 'web') await shell.openExternal(plan.url);
+    else if (plan.action === 'editor') await openWithApp(editor!, plan.path);
+    else if (plan.action === 'reveal') {
+      shell.showItemInFolder(plan.path);
+      return 'revealed';
+    } else {
+      const error = await shell.openPath(plan.path);
+      if (error) throw new Error(`无法打开文件：${error}`);
+    }
+    return 'opened';
   },
   copy: async (value) => {
     text(value, 10 * 1024 * 1024);
