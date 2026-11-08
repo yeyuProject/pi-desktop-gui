@@ -4,7 +4,7 @@
  * - LacunaPanel：右侧的解释卡片，顶部是一路问下来的路径，卡片里的词也能接着点开；
  *   在卡片里选中文字，可以问“这是什么意思”，问题会填进输入框。
  */
-import { useEffect, useLayoutEffect, useRef, useState } from 'react';
+import { useEffect, useLayoutEffect, useRef, useState, type KeyboardEvent } from 'react';
 import { X } from 'lucide-react';
 import { lacunaQuestion, type LacunaNode, type LacunaTerm } from '../../../shared/lacuna';
 import { LACUNA_TERM_CLASS } from '../../lib/lacuna-remark';
@@ -123,7 +123,20 @@ export function LacunaPanel() {
   const [ask, setAsk] = useState<{ text: string; x: number; y: number }>();
   const id = panel?.stack.at(-1);
 
-  useLayer(aside, panel !== undefined, closeLacunaPanel, { kind: 'panel' });
+  // 和侧边对话一样：只有窗口窄、面板盖在对话上面时才算弹层。靠边显示时不能算，
+  // 否则输入框看到有弹层就不处理按键，回车发不出去。
+  const [narrow, setNarrow] = useState(window.innerWidth < 900);
+  useEffect(() => {
+    const resize = () => setNarrow(window.innerWidth < 900);
+    window.addEventListener('resize', resize);
+    return () => window.removeEventListener('resize', resize);
+  }, []);
+  useLayer(aside, panel !== undefined && narrow, closeLacunaPanel, { kind: 'panel', trapFocus: true });
+  const escape = (event: KeyboardEvent<HTMLElement>) => {
+    if (event.key !== 'Escape' || narrow || event.nativeEvent.isComposing || event.defaultPrevented) return;
+    event.preventDefault();
+    closeLacunaPanel();
+  };
 
   // 知识库变化后重新读取，解释可能被 agent 改过。
   useEffect(() => setNodes({}), [revision]);
@@ -153,6 +166,7 @@ export function LacunaPanel() {
         className={'lacuna-panel' + (panel.view === 'graph' ? ' wide' : '')}
         ref={aside}
         aria-label="知溯知识图"
+        onKeyDown={escape}
       >
         <header>
           <strong className="lacuna-panel-title">知溯</strong>
@@ -198,7 +212,7 @@ export function LacunaPanel() {
   };
 
   return (
-    <aside className="lacuna-panel" ref={aside} aria-label="知溯解释">
+    <aside className="lacuna-panel" ref={aside} aria-label="知溯解释" onKeyDown={escape}>
       <header>
         <nav aria-label="解释路径">
           <button onClick={() => backToLacunaNode(-1)}>知识图</button>

@@ -138,6 +138,7 @@ const install = ({ messages, nodes, graph }) => {
     }
     if (method === 'lacunaNode') return nodes[args[1]] ?? null;
     if (method === 'lacunaGraph') return { graph };
+    if (method === 'send') window.lacunaSent = [...(window.lacunaSent ?? []), args[1]];
     if (method === 'bootstrap') {
       const value = await original(method, ...args);
       const query = new URLSearchParams(location.search);
@@ -265,6 +266,18 @@ try {
     await expect(panel.locator('h3')).toHaveText('变分自编码器');
     await panel.locator('nav button', { hasText: '知识图' }).click();
     await expect(panel.getByRole('tab', { name: '关系图' })).toHaveAttribute('aria-selected', 'true');
+
+    // 面板靠边显示时不是弹层：输入框照常回车发送；在面板里按 Esc 关掉面板。
+    await composer.fill(`面板开着也能发送 ${style}-${theme}`);
+    await composer.press('Enter');
+    await expect
+      .poll(() => page.evaluate(() => window.lacunaSent ?? []))
+      .toContain(`面板开着也能发送 ${style}-${theme}`);
+    await panel.getByRole('tab', { name: '大纲' }).click();
+    await panel.getByLabel('搜索问过的词').press('Escape');
+    await expect(panel).toHaveCount(0);
+    await toggle.click();
+    await expect(panel).toBeVisible();
     await toggle.click();
     await expect(panel).toHaveCount(0);
   }
