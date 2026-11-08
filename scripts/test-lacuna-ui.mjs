@@ -34,7 +34,8 @@ const messages = [
     content:
       'SoVITS 解码器的核心是一个 VAE，它的隐变量带着音色信息。\n\n' +
       '代码里写成 `VAE()`，链接 [VAE](https://example.com) 里的不标。\n\n' +
-      '**变分自编码器**也就是 VAE。',
+      '**变分自编码器**也就是 VAE。\n\n' +
+      '实验记录在[这份报告](file:///tmp/lacuna-report.md)里。',
   },
 ].map((message, index) => ({ ...message, timestamp: 1800000000000 + index }));
 const nodes = {
@@ -191,6 +192,11 @@ try {
     // VAE、隐变量、变分自编码器、VAE；代码和链接里的两个 VAE 不标。
     await expect(terms).toHaveText(['VAE', '隐变量', '变分自编码器', 'VAE']);
     await expect(reply.locator('code .lacuna-term, .inline-link .lacuna-term')).toHaveCount(0);
+    // 开了认词的回复照样允许本地文件链接（v0.14.75 的 urlTransform），链接地址不能被清掉。
+    await expect(reply.getByRole('button', { name: '这份报告' })).toHaveAttribute(
+      'title',
+      'file:///tmp/lacuna-report.md',
+    );
 
     await terms.first().hover();
     const preview = page.locator('.lacuna-preview');
