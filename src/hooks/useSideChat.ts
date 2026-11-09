@@ -120,6 +120,8 @@ export function useSideChat(
     if (!id || chat?.running || sending === id || (!draft.text.trim() && !draft.quotes.length)) return;
     setSending(id);
     setError('');
+    // The request resolves only after the whole answer, so clear the question as soon as it is sent.
+    updateDraft({ text: '', quotes: [] });
     try {
       await api.invoke('sideChatSend', id, {
         id: crypto.randomUUID(),
@@ -128,13 +130,14 @@ export function useSideChat(
         scope: draft.scope,
         replyTimestamp: draft.replyTimestamp,
       });
-      setDrafts((before) =>
-        before[id]?.text === draft.text && before[id]?.quotes === draft.quotes
-          ? { ...before, [id]: { ...before[id], text: '', quotes: [] } }
-          : before,
-      );
     } catch (e) {
       setError(readableError(e));
+      // Rejected before it was asked: give the question back unless a new one was started.
+      setDrafts((before) =>
+        before[id] && !before[id].text && !before[id].quotes.length
+          ? { ...before, [id]: { ...before[id], text: draft.text, quotes: draft.quotes } }
+          : before,
+      );
     } finally {
       setSending((current) => (current === id ? undefined : current));
     }
