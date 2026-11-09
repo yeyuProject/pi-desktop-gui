@@ -129,8 +129,6 @@ const sendModes = [
   { mode: 'followUp', label: '完成后执行', hint: '排在这一轮结束之后', Icon: ListEnd },
 ] as const;
 export function Composer(props: ComposerProps) {
-  const [teamHint, setTeamHint] = useState(false);
-  useEffect(() => setTeamHint(false), [props.selected?.id]);
   const {
     state,
     storage,
@@ -277,12 +275,13 @@ export function Composer(props: ComposerProps) {
   const [lightboxIndex, setLightboxIndex] = useState<number | null>(null),
     [snippetId, setSnippetId] = useState('');
   const [parameterError, setParameterError] = useState('');
-  const [approvalFeedback, setApprovalFeedback] = useState<{ text: string }>();
+  const [toolbarFeedback, setToolbarFeedback] = useState<{ text: string }>();
   useEffect(() => {
-    if (!approvalFeedback) return;
-    const timer = setTimeout(() => setApprovalFeedback(undefined), noticeDuration(approvalFeedback.text));
+    if (!toolbarFeedback) return;
+    const timer = setTimeout(() => setToolbarFeedback(undefined), noticeDuration(toolbarFeedback.text));
     return () => clearTimeout(timer);
-  }, [approvalFeedback]);
+  }, [toolbarFeedback]);
+  useEffect(() => setToolbarFeedback(undefined), [selected?.id]);
   const parameterPick = useRef<((path: string) => void) | null>(null);
   useEffect(() => {
     setParameterError('');
@@ -895,19 +894,16 @@ export function Composer(props: ComposerProps) {
                   selected &&
                   void attempt(async () => {
                     await api.invoke('setTeamEnabled', selected.id, !selected.teamEnabled);
-                    if (!selected.teamEnabled && !selected.teamHintSeen) setTeamHint(true);
+                    if (!selected.teamEnabled && !selected.teamHintSeen)
+                      setToolbarFeedback({
+                        text: '开启后 Pi 可以把子任务交给成员并行处理，用量随成员数量增加。',
+                      });
                   })
                 }
               >
                 <Users size={14} />
                 团队
               </button>
-            )}
-            {teamHint && (
-              <span className="team-first-hint" role="status">
-                开启后 Pi 可以把子任务交给成员并行处理，用量随成员数量增加。
-                <button onClick={() => setTeamHint(false)}>知道了</button>
-              </span>
             )}
             {goal?.status === 'completed' && (
               <button
@@ -928,7 +924,7 @@ export function Composer(props: ComposerProps) {
                 selected &&
                 void attempt(async () => {
                   await api.invoke('setApprovalMode', selected.id, mode);
-                  setApprovalFeedback({
+                  setToolbarFeedback({
                     text: running
                       ? '审批模式用于后续工具调用；已开始的命令和已有审批不变'
                       : mode === 'auto'
@@ -1074,7 +1070,7 @@ export function Composer(props: ComposerProps) {
           </div>
         </div>
       </div>
-      <ErrorFeedback className="approval-mode-feedback" role="status" message={approvalFeedback?.text} />
+      <ErrorFeedback className="approval-mode-feedback" role="status" message={toolbarFeedback?.text} />
       <ComposerFooter {...props} />
       {lightboxIndex !== null && images.length > 0 && (
         <Suspense fallback={null}>
