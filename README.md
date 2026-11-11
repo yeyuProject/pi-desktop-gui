@@ -53,7 +53,7 @@ Sessions and workspaces stay on your machine. Model requests go to whichever pro
 - **Team collaboration** — Enable Team per chat to let the lead delegate 1–8 independent tasks to managed member sessions and collect their reports in the same turn. Members keep their own context, native history, approvals and checkpoints. A global limit (default 3) and one writable member per directory control concurrency; team cards show progress, usage, changes and reports. Handle member approvals from the lead, stop one or all members, and manage Markdown/YAML roles in Pi Features. Team is off by default; no nested delegation or worktree orchestration. See [team controls and boundaries](docs/team.md).
 - **Steer while it runs** — Add instructions mid-run (steer) or queue follow-ups within each conversation.
 - **Questions from Pi** — Answer up to three questions above the composer, with single or multiple choices, recommendations and your own text. Replies continue the same turn and preserve its plan. Unfinished answers survive chat switches, and completed question cards can be searched and copied. Active Goals wait up to ten minutes before continuing with recommended choices; ordinary tasks keep waiting.
-- **Lacuna term explanations** — If the [lacuna](https://github.com/yeyuProject/lacuna) command is installed, words you have asked about in its knowledge base get a dotted underline in replies. Hover to see the short explanation, click to open a card where words inside the explanation can be opened in turn, and select text to ask “这是什么意思” (the question is added to the composer). The **知溯** button in the header opens a knowledge map of your topics and the words asked under them, as an outline or a relationship graph. Pi Desktop loads the lacuna installed on your machine; without it nothing changes. Turn it off in Settings → Appearance & Editor.
+- **Lacuna term explanations** — If the [lacuna](https://github.com/yeyuProject/lacuna) command is installed, words you have asked about in its knowledge base get a dotted underline in replies. Hover to see the short explanation, click to open a card where words inside the explanation can be opened in turn, and select text to ask “这是什么意思” (the question is added to the composer). The **知识图** button in the header shows everything you have asked about as one graph of your topics and the words asked under them, as a relationship graph or an outline. There is only one knowledge base, so the panel stays open when you switch sessions. Pi Desktop loads the lacuna installed on your machine; without it nothing changes. Turn it off in Settings → Appearance & Editor.
 - **Task plans** — When Pi creates a plan for a multi-step task, a compact bar above the composer shows the current step. Expand the checklist, keep its view across chats and restarts, and recover the active branch’s plan. Finished plans shrink to a dot after eight seconds; unfinished ones show the remaining count. Planning depends on the model, and simple tasks keep the existing layout.
 - **Built-in Goals** — Start a Goal directly from the composer, keeping files, images, pasted snippets and conversation quotes. Inline budget controls and a separate objective editor preserve your unsent drafts across sessions and restarts. Keep working without a continuation-count limit. A compact bar shows a plan or active elapsed time, with pause, resume and objective editing. Completion requires a requirement-by-requirement audit; optional usage limits allow a bounded wrap-up. Goal usage excludes cache hits, and provider quota failures have their own state. Completed Goals collapse after eight seconds; saved active Goals reopen paused. `/goal edit` and other commands remain available. See [Goal controls and limits](docs/goal.md).
 - **Clear retry progress** — See retry backoff and response wait time, cancel an active retry request, and distinguish recovered attempts from failures in the run log. Consecutive empty error replies show the latest failure once, with earlier attempts expandable.
@@ -170,22 +170,22 @@ Side Chat answers separate questions while the main task runs; it has no tools, 
 
 ### Keyboard shortcuts
 
-| Action                               |             Windows / Linux              |                 macOS                  |
-| :----------------------------------- | :--------------------------------------: | :------------------------------------: |
-| New chat                             |       <kbd>Ctrl</kbd> <kbd>N</kbd>       |       <kbd>⌘</kbd> <kbd>N</kbd>        |
-| Search sessions and messages         |       <kbd>Ctrl</kbd> <kbd>K</kbd>       |       <kbd>⌘</kbd> <kbd>K</kbd>        |
-| Find in current session              |       <kbd>Ctrl</kbd> <kbd>F</kbd>       |       <kbd>⌘</kbd> <kbd>F</kbd>        |
-| Quote selected conversation text     |       <kbd>Ctrl</kbd> <kbd>'</kbd>       |       <kbd>⌘</kbd> <kbd>'</kbd>        |
-| Side Chat / ask about selection      |       <kbd>Ctrl</kbd> <kbd>L</kbd>       |       <kbd>⌘</kbd> <kbd>L</kbd>        |
+| Action                               |              Windows / Linux               |                  macOS                   |
+| :----------------------------------- | :----------------------------------------: | :--------------------------------------: |
+| New chat                             |        <kbd>Ctrl</kbd> <kbd>N</kbd>        |        <kbd>⌘</kbd> <kbd>N</kbd>         |
+| Search sessions and messages         |        <kbd>Ctrl</kbd> <kbd>K</kbd>        |        <kbd>⌘</kbd> <kbd>K</kbd>         |
+| Find in current session              |        <kbd>Ctrl</kbd> <kbd>F</kbd>        |        <kbd>⌘</kbd> <kbd>F</kbd>         |
+| Quote selected conversation text     |        <kbd>Ctrl</kbd> <kbd>'</kbd>        |        <kbd>⌘</kbd> <kbd>'</kbd>         |
+| Side Chat / ask about selection      |        <kbd>Ctrl</kbd> <kbd>L</kbd>        |        <kbd>⌘</kbd> <kbd>L</kbd>         |
 | Previous / next user turn            | <kbd>Alt</kbd> <kbd>↑</kbd> / <kbd>↓</kbd> | <kbd>⌥</kbd> <kbd>↑</kbd> / <kbd>↓</kbd> |
-| Toggle sidebar                       |       <kbd>Ctrl</kbd> <kbd>B</kbd>       |       <kbd>⌘</kbd> <kbd>B</kbd>        |
-| Toggle workspace panel               |       <kbd>Ctrl</kbd> <kbd>J</kbd>       |       <kbd>⌘</kbd> <kbd>J</kbd>        |
-| Switch Changes / Files / Output tab  | <kbd>Alt</kbd> <kbd>1</kbd>–<kbd>3</kbd> | <kbd>⌥</kbd> <kbd>1</kbd>–<kbd>3</kbd> |
-| Settings                             |       <kbd>Ctrl</kbd> <kbd>,</kbd>       |       <kbd>⌘</kbd> <kbd>,</kbd>        |
-| Shortcut cheat sheet                 |       <kbd>Ctrl</kbd> <kbd>/</kbd>       |       <kbd>⌘</kbd> <kbd>/</kbd>        |
-| Browse sent history (empty composer) |       <kbd>↑</kbd> / <kbd>↓</kbd>        |      <kbd>↑</kbd> / <kbd>↓</kbd>       |
-| Close panel and focus composer       |              <kbd>Esc</kbd>              |             <kbd>Esc</kbd>             |
-| **Stop the current chat's task**     |      <kbd>Esc</kbd> <kbd>Esc</kbd>       |     <kbd>Esc</kbd> <kbd>Esc</kbd>      |
+| Toggle sidebar                       |        <kbd>Ctrl</kbd> <kbd>B</kbd>        |        <kbd>⌘</kbd> <kbd>B</kbd>         |
+| Toggle workspace panel               |        <kbd>Ctrl</kbd> <kbd>J</kbd>        |        <kbd>⌘</kbd> <kbd>J</kbd>         |
+| Switch Changes / Files / Output tab  |  <kbd>Alt</kbd> <kbd>1</kbd>–<kbd>3</kbd>  |  <kbd>⌥</kbd> <kbd>1</kbd>–<kbd>3</kbd>  |
+| Settings                             |        <kbd>Ctrl</kbd> <kbd>,</kbd>        |        <kbd>⌘</kbd> <kbd>,</kbd>         |
+| Shortcut cheat sheet                 |        <kbd>Ctrl</kbd> <kbd>/</kbd>        |        <kbd>⌘</kbd> <kbd>/</kbd>         |
+| Browse sent history (empty composer) |        <kbd>↑</kbd> / <kbd>↓</kbd>         |       <kbd>↑</kbd> / <kbd>↓</kbd>        |
+| Close panel and focus composer       |               <kbd>Esc</kbd>               |              <kbd>Esc</kbd>              |
+| **Stop the current chat's task**     |       <kbd>Esc</kbd> <kbd>Esc</kbd>        |      <kbd>Esc</kbd> <kbd>Esc</kbd>       |
 
 Turn navigation works from the conversation or an empty text input. When the focused input contains text, Alt/Option+↑/↓ keeps its normal text-navigation behavior.
 

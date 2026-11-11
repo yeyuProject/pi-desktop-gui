@@ -1,7 +1,8 @@
 // 知溯术语解释：真实 Electron 渲染进程，模拟的知溯知识库。
 // 检查：助手回复里问过的词带下划线（代码和链接里的不标）、悬停显示简短解释、点击打开解释卡片、
 // 卡片里的词能接着点开并显示路径、在卡片和对话里选中文字问“这是什么意思”会把问题填进输入框、
-// 顶栏打开知识图（大纲、关系图）并从中打开卡片、关掉设置后不再标。
+// 顶栏打开知识图（默认关系图，可切到大纲）并从中打开卡片、切换会话时知识图不关、
+// 窗口窄时知识图盖在对话上面、关掉设置后不再标。
 import assert from 'node:assert/strict';
 import fs from 'node:fs/promises';
 import os from 'node:os';
@@ -132,13 +133,25 @@ const install = ({ messages, nodes, graph }) => {
   };
   window.lacunaRequests = 0;
   window.desktop.invoke = async (method, ...args) => {
-    if (method === 'selectSession' || method === 'readHistory') return messages;
+    if (method === 'readHistory') return messages;
+    // 记下选中的会话，工作台确认选择时（navigationState）才会真的切过去。
+    if (method === 'selectSession') {
+      window.lacunaSelected = args[0];
+      return messages;
+    }
+    if (method === 'navigationState') {
+      const value = await original(method, ...args);
+      if (window.lacunaSelected) value.state.selectedSessionId = window.lacunaSelected;
+      return value;
+    }
     if (method === 'lacunaAnnotate') {
       window.lacunaRequests++;
-      return args[1].map(annotate);
+      return args[0].map(annotate);
     }
-    if (method === 'lacunaNode') return nodes[args[1]] ?? null;
+    if (method === 'lacunaNode') return nodes[args[0]] ?? null;
     if (method === 'lacunaGraph') return { graph };
+    // 点会话时侧边栏会检查能否拖动；空字符串表示可以。
+    if (method === 'sessionMoveStatus') return { reason: '' };
     if (method === 'send') window.lacunaSent = [...(window.lacunaSent ?? []), args[1]];
     if (method === 'bootstrap') {
       const value = await original(method, ...args);
@@ -236,9 +249,25 @@ try {
     await panel.getByRole('button', { name: '关闭知溯解释' }).click();
     await expect(panel).toHaveCount(0);
 
-    // 知识图：顶栏的“知溯”打开，大纲和关系图里点任何一个词都进入解释卡片。
-    const toggle = page.getByRole('button', { name: '知溯', exact: true });
+    // 知识图：顶栏的“知识图”打开，默认是关系图；关系图和大纲里点任何一个词都进入解释卡片。
+    const toggle = page.locator('.workspace-header').getByRole('button', { name: '知识图', exact: true });
     await toggle.click();
+    await expect(panel.getByRole('tab', { name: '关系图' })).toHaveAttribute('aria-selected', 'true');
+    await expect(panel).toHaveClass(/wide/);
+    await expect(panel).not.toHaveClass(/drawer/);
+    const graphNodes = panel.locator('.lacuna-graph-node');
+    await expect(graphNodes).toHaveCount(4);
+    await expect(panel.locator('.lacuna-graph-edge')).toHaveCount(4);
+    await graphNodes.filter({ hasText: '隐变量' }).hover();
+    await expect(panel.locator('.lacuna-graph-node.dim')).toHaveCount(1);
+    await page.screenshot({ path: path.join(output, `lacuna-graph-${style}-${theme}.png`) });
+    await graphNodes.filter({ hasText: '变分自编码器' }).click();
+    await expect(panel.locator('h3')).toHaveText('变分自编码器');
+    await panel.locator('nav button', { hasText: '知识图' }).click();
+    await expect(panel.getByRole('tab', { name: '关系图' })).toHaveAttribute('aria-selected', 'true');
+
+    await panel.getByRole('tab', { name: '大纲' }).click();
+    await expect(panel).not.toHaveClass(/wide/);
     const titles = panel.locator('.lacuna-outline-title');
     await expect(titles).toHaveText([
       '如何优化 GPT-SoVITS 的效果？',
@@ -259,19 +288,17 @@ try {
     await expect(panel.locator('h3')).toHaveText('零样本');
     await expect(panel.locator('nav button')).toHaveText(['知识图']);
     await panel.locator('nav button', { hasText: '知识图' }).click();
+    await expect(panel.getByRole('tab', { name: '大纲' })).toHaveAttribute('aria-selected', 'true');
 
-    await panel.getByRole('tab', { name: '关系图' }).click();
-    await expect(panel).toHaveClass(/wide/);
-    const graphNodes = panel.locator('.lacuna-graph-node');
-    await expect(graphNodes).toHaveCount(4);
-    await expect(panel.locator('.lacuna-graph-edge')).toHaveCount(4);
-    await graphNodes.filter({ hasText: '隐变量' }).hover();
-    await expect(panel.locator('.lacuna-graph-node.dim')).toHaveCount(1);
-    await page.screenshot({ path: path.join(output, `lacuna-graph-${style}-${theme}.png`) });
-    await graphNodes.filter({ hasText: '变分自编码器' }).click();
-    await expect(panel.locator('h3')).toHaveText('变分自编码器');
-    await panel.locator('nav button', { hasText: '知识图' }).click();
-    await expect(panel.getByRole('tab', { name: '关系图' })).toHaveAttribute('aria-selected', 'true');
+    // 知识库只有一个，和会话无关：切换会话时知识图不关，看的还是大纲。
+    const session = (id) => page.locator(`.session-row[data-session-id="${id}"] > button`).first();
+    await session('s2').click();
+    await expect(session('s2')).toHaveAttribute('aria-current', 'page');
+    await expect(panel).toBeVisible();
+    await expect(panel.getByRole('tab', { name: '大纲' })).toHaveAttribute('aria-selected', 'true');
+    await session('s1').click();
+    await expect(session('s1')).toHaveAttribute('aria-current', 'page');
+    await expect(panel).toBeVisible();
 
     // 面板靠边显示时不是弹层：输入框照常回车发送；在面板里按 Esc 关掉面板。
     await composer.fill(`面板开着也能发送 ${style}-${theme}`);
@@ -279,13 +306,44 @@ try {
     await expect
       .poll(() => page.evaluate(() => window.lacunaSent ?? []))
       .toContain(`面板开着也能发送 ${style}-${theme}`);
-    await panel.getByRole('tab', { name: '大纲' }).click();
     await panel.getByLabel('搜索问过的词').press('Escape');
     await expect(panel).toHaveCount(0);
     await toggle.click();
     await expect(panel).toBeVisible();
     await toggle.click();
     await expect(panel).toHaveCount(0);
+  }
+
+  // 窗口窄、靠边显示会让对话窄于 520px 时，和侧边对话一样盖在对话上面：点旁边或按 Esc 关掉。
+  await page.goto(`${server.url}?style=classic&theme=light`);
+  const resize = (width) =>
+    app.evaluate(
+      ({ BrowserWindow }, width) => BrowserWindow.getAllWindows()[0].setContentSize(width, 1000),
+      width,
+    );
+  {
+    const panel = page.locator('.lacuna-panel');
+    const toggle = page.locator('.workspace-header').getByRole('button', { name: '知识图', exact: true });
+    await resize(900);
+    await toggle.click();
+    await expect(panel).toHaveClass(/drawer/);
+    await expect(panel).toHaveAttribute('role', 'dialog');
+    const conversation = await page.locator('.conversation').boundingBox();
+    const box = await panel.boundingBox();
+    assert.ok(box.x + box.width <= conversation.x + conversation.width + 1, '盖在对话上面，不占对话的宽度');
+    await page.screenshot({ path: path.join(output, 'lacuna-graph-drawer.png') });
+    await page.locator('.lacuna-backdrop').click({ position: { x: 10, y: 10 } });
+    await expect(panel).toHaveCount(0);
+    await toggle.click();
+    await expect(panel).toHaveClass(/drawer/);
+    await page.keyboard.press('Escape');
+    await expect(panel).toHaveCount(0);
+    // 窗口变宽后靠边显示，不再是弹层。
+    await resize(1440);
+    await toggle.click();
+    await expect(panel).not.toHaveClass(/drawer/);
+    await expect(page.locator('.lacuna-backdrop')).toHaveCount(0);
+    await toggle.click();
   }
 
   // 关掉设置后不认词，选区菜单里也没有“这是什么意思”。
@@ -302,7 +360,7 @@ try {
 
   assert.deepEqual(errors, []);
   console.log(
-    'PASS lacuna terms: underline, hover, nested cards, ask from card and conversation, knowledge map, setting off',
+    'PASS lacuna terms: underline, hover, nested cards, ask from card and conversation, knowledge graph, session switch, drawer, setting off',
   );
 } finally {
   await closeApp(app);

@@ -638,13 +638,10 @@ export interface ApiMap {
   exportDiagnostics: { args: []; result: string | null };
   revealData: { args: []; result: void };
   quit: { args: []; result: void };
-  lacunaStatus: { args: [sessionId: string]; result: import('./lacuna').LacunaStatus };
-  lacunaAnnotate: {
-    args: [sessionId: string, texts: string[]];
-    result: import('./lacuna').LacunaAnnotation[];
-  };
-  lacunaNode: { args: [sessionId: string, id: string]; result: import('./lacuna').LacunaNode | null };
-  lacunaGraph: { args: [sessionId: string]; result: import('./lacuna').LacunaGraphResult };
+  lacunaStatus: { args: []; result: import('./lacuna').LacunaStatus };
+  lacunaAnnotate: { args: [texts: string[]]; result: import('./lacuna').LacunaAnnotation[] };
+  lacunaNode: { args: [id: string]; result: import('./lacuna').LacunaNode | null };
+  lacunaGraph: { args: []; result: import('./lacuna').LacunaGraphResult };
 }
 export interface DesktopApi {
   platform: 'win32' | 'darwin' | 'linux' | string;

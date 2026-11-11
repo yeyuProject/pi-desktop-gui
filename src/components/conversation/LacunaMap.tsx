@@ -1,5 +1,5 @@
 /**
- * 知溯知识图：右侧面板里的“大纲”和“关系图”。点任何一个词都打开它的解释卡片。
+ * 知溯知识图：右侧面板里的“关系图”和“大纲”。点任何一个词都打开它的解释卡片。
  * 数据来自主进程（lacunaGraph），布局在 src/lib/lacuna-layout.ts。
  */
 import {
@@ -19,12 +19,7 @@ import {
   type GraphLayout,
   type LaidOutNode,
 } from '../../lib/lacuna-layout';
-import {
-  currentLacunaSession,
-  openLacunaNode,
-  useLacunaRevision,
-  type LacunaMapView,
-} from '../../lib/lacuna-store';
+import { openLacunaNode, useLacunaRevision, type LacunaMapView } from '../../lib/lacuna-store';
 
 const api = window.desktop;
 
@@ -32,11 +27,9 @@ export function LacunaMap({ view }: { view: LacunaMapView }) {
   const revision = useLacunaRevision();
   const [result, setResult] = useState<LacunaGraphResult>();
   useEffect(() => {
-    const session = currentLacunaSession();
-    if (!session) return;
     let cancelled = false;
     void api
-      .invoke('lacunaGraph', session)
+      .invoke('lacunaGraph')
       .catch(() => undefined)
       .then((value) => {
         if (!cancelled) setResult(value ?? { reason: '读取知识图时出错，详细信息已写入诊断日志' });

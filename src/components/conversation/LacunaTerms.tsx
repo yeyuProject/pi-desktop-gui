@@ -1,8 +1,9 @@
 /**
  * 知溯术语解释的界面：
  * - LacunaHover：鼠标停在带下划线的词上时显示简短解释，点击打开解释卡片；
- * - LacunaPanel：右侧的解释卡片，顶部是一路问下来的路径，卡片里的词也能接着点开；
- *   在卡片里选中文字，可以问“这是什么意思”，问题会填进输入框。
+ * - LacunaPanel：右侧面板。没有打开词时显示知识图，打开后是解释卡片，顶部是一路问下来的路径，
+ *   卡片里的词也能接着点开；在卡片里选中文字，可以问“这是什么意思”，问题会填进输入框。
+ *   知识库只有一个，面板和当前会话无关，切换会话时保持打开。
  */
 import { useEffect, useLayoutEffect, useRef, useState, type KeyboardEvent } from 'react';
 import { X } from 'lucide-react';
@@ -11,19 +12,23 @@ import { LACUNA_TERM_CLASS } from '../../lib/lacuna-remark';
 import {
   backToLacunaNode,
   closeLacunaPanel,
-  currentLacunaSession,
   lacunaTerm,
   openLacunaNode,
   setLacunaMapView,
   useLacunaPanel,
   useLacunaRevision,
 } from '../../lib/lacuna-store';
-import { useLayer } from '../../hooks/useLayer';
+import { topLayer, useLayer } from '../../hooks/useLayer';
 import { LacunaMap } from './LacunaMap';
 import { RichText } from './Markdown';
 
 const api = window.desktop;
 const SHOW_DELAY = 250;
+/** 和 useWorkbench 里侧边面板的规则一致：靠边显示会让对话窄于这个宽度时，面板改成盖在对话上面。 */
+const MIN_CONVERSATION_WIDTH = 520;
+/** 面板靠边显示时的宽度，和 lacuna.css 里的 .lacuna-panel、.lacuna-panel.wide 一致。 */
+const PANEL_WIDTH = 340;
+const WIDE_PANEL_WIDTH = 480;
 
 /** 把“这是什么意思”的问题交给工作台：追加到输入框并聚焦，由用户确认后发送。 */
 export function askLacuna(question: string) {
@@ -122,30 +127,53 @@ export function LacunaPanel() {
   const [nodes, setNodes] = useState<Record<string, LacunaNode | null>>({});
   const [ask, setAsk] = useState<{ text: string; x: number; y: number }>();
   const id = panel?.stack.at(-1);
+  const open = panel !== undefined;
+  const wide = open && !id && panel.view === 'graph';
 
-  // 和侧边对话一样：只有窗口窄、面板盖在对话上面时才算弹层。靠边显示时不能算，
-  // 否则输入框看到有弹层就不处理按键，回车发不出去。
-  const [narrow, setNarrow] = useState(window.innerWidth < 900);
-  useEffect(() => {
-    const resize = () => setNarrow(window.innerWidth < 900);
-    window.addEventListener('resize', resize);
-    return () => window.removeEventListener('resize', resize);
-  }, []);
-  useLayer(aside, panel !== undefined && narrow, closeLacunaPanel, { kind: 'panel', trapFocus: true });
+  // 和侧边对话一样：靠边显示会让对话太窄时，面板盖在对话上面。可用的宽度是对话的宽度，
+  // 加上面板靠边时自己占的宽度；盖上去以后对话变宽，可用的宽度不变，所以不会来回切换。
+  const [overlay, setOverlay] = useState(false);
+  useLayoutEffect(() => {
+    const element = aside.current;
+    const conversation = element?.parentElement?.querySelector<HTMLElement>(':scope > .conversation');
+    if (!element || !conversation) return;
+    const width = wide ? WIDE_PANEL_WIDTH : PANEL_WIDTH;
+    const layout = () => {
+      const current = aside.current ?? element;
+      const docked = current.classList.contains('drawer') ? 0 : current.getBoundingClientRect().width;
+      setOverlay(conversation.getBoundingClientRect().width + docked - width < MIN_CONVERSATION_WIDTH);
+    };
+    layout();
+    const observer = new ResizeObserver(layout);
+    observer.observe(conversation);
+    return () => observer.disconnect();
+  }, [open, wide]);
+  // 只有盖在对话上面时才算弹层。靠边显示时不能算，否则输入框看到有弹层就不处理按键，回车发不出去。
+  useLayer(aside, open && overlay, closeLacunaPanel, { kind: 'panel', trapFocus: true });
   const escape = (event: KeyboardEvent<HTMLElement>) => {
-    if (event.key !== 'Escape' || narrow || event.nativeEvent.isComposing || event.defaultPrevented) return;
+    if (event.key !== 'Escape' || event.nativeEvent.isComposing || event.defaultPrevented) return;
+    if (topLayer() && topLayer()?.kind !== 'panel') return;
     event.preventDefault();
+    event.stopPropagation();
     closeLacunaPanel();
   };
+  const frame = (label: string, className: string) => ({
+    ref: aside,
+    className: 'lacuna-panel' + className + (overlay ? ' drawer' : ''),
+    role: overlay ? 'dialog' : 'complementary',
+    'aria-label': label,
+    'aria-modal': overlay || undefined,
+    onKeyDown: escape,
+  });
+  const backdrop = overlay && <div className="lacuna-backdrop" onClick={closeLacunaPanel} />;
 
   // 知识库变化后重新读取，解释可能被 agent 改过。
   useEffect(() => setNodes({}), [revision]);
   useEffect(() => {
-    const session = currentLacunaSession();
-    if (!id || !session || id in nodes) return;
+    if (!id || id in nodes) return;
     let cancelled = false;
     void api
-      .invoke('lacunaNode', session, id)
+      .invoke('lacunaNode', id)
       .catch(() => null)
       .then((node) => {
         if (!cancelled) setNodes((previous) => ({ ...previous, [id]: node }));
@@ -162,39 +190,37 @@ export function LacunaPanel() {
   if (!panel) return null;
   if (!id)
     return (
-      <aside
-        className={'lacuna-panel' + (panel.view === 'graph' ? ' wide' : '')}
-        ref={aside}
-        aria-label="知溯知识图"
-        onKeyDown={escape}
-      >
-        <header>
-          <strong className="lacuna-panel-title">知溯</strong>
-          <div className="lacuna-tabs" role="tablist" aria-label="知识图的显示方式">
-            {(
-              [
-                ['outline', '大纲'],
-                ['graph', '关系图'],
-              ] as const
-            ).map(([view, label]) => (
-              <button
-                key={view}
-                role="tab"
-                aria-selected={panel.view === view}
-                onClick={() => setLacunaMapView(view)}
-              >
-                {label}
-              </button>
-            ))}
+      <>
+        {backdrop}
+        <aside {...frame('知溯知识图', wide ? ' wide' : '')}>
+          <header>
+            <strong className="lacuna-panel-title">知识图</strong>
+            <div className="lacuna-tabs" role="tablist" aria-label="知识图的显示方式">
+              {(
+                [
+                  ['graph', '关系图'],
+                  ['outline', '大纲'],
+                ] as const
+              ).map(([view, label]) => (
+                <button
+                  key={view}
+                  role="tab"
+                  aria-selected={panel.view === view}
+                  onClick={() => setLacunaMapView(view)}
+                >
+                  {label}
+                </button>
+              ))}
+            </div>
+            <button aria-label="关闭知识图" onClick={closeLacunaPanel}>
+              <X size={15} />
+            </button>
+          </header>
+          <div className="lacuna-card lacuna-map-body">
+            <LacunaMap view={panel.view} />
           </div>
-          <button aria-label="关闭知溯" onClick={closeLacunaPanel}>
-            <X size={15} />
-          </button>
-        </header>
-        <div className="lacuna-card lacuna-map-body">
-          <LacunaMap view={panel.view} />
-        </div>
-      </aside>
+        </aside>
+      </>
     );
   const node = nodes[id];
   const title = (nodeId: string) => nodes[nodeId]?.title ?? lacunaTerm(nodeId)?.title ?? nodeId;
@@ -212,57 +238,60 @@ export function LacunaPanel() {
   };
 
   return (
-    <aside className="lacuna-panel" ref={aside} aria-label="知溯解释" onKeyDown={escape}>
-      <header>
-        <nav aria-label="解释路径">
-          <button onClick={() => backToLacunaNode(-1)}>知识图</button>
-          {panel.stack.map((item, index) => (
-            <span key={item + index}>
-              <span className="lacuna-path-separator">›</span>
-              {index === panel.stack.length - 1 ? (
-                <strong aria-current="page">{title(item)}</strong>
-              ) : (
-                <button onClick={() => backToLacunaNode(index)}>{title(item)}</button>
-              )}
-            </span>
-          ))}
-        </nav>
-        <button aria-label="关闭知溯解释" onClick={closeLacunaPanel}>
-          <X size={15} />
-        </button>
-      </header>
-      <div className="lacuna-card" onPointerUp={readSelection} onKeyUp={readSelection}>
-        {node === undefined ? (
-          <p className="lacuna-muted">正在读取解释…</p>
-        ) : node === null ? (
-          <p className="lacuna-muted">知识库里没有这个词了，可能已经被删除。</p>
-        ) : (
-          <>
-            <h3>{node.title}</h3>
-            {node.aliases.length > 0 && <p className="lacuna-aliases">也叫：{node.aliases.join('、')}</p>}
-            <div className="message-content lacuna-body" ref={body}>
-              {node.body ? <RichText text={node.body} terms /> : <p className="lacuna-muted">还没有解释</p>}
-            </div>
-            <LacunaRefs label="要先懂的" refs={node.dependsOn} />
-            <LacunaRefs label="在这些地方问到" refs={node.dependedBy} />
-          </>
+    <>
+      {backdrop}
+      <aside {...frame('知溯解释', '')}>
+        <header>
+          <nav aria-label="解释路径">
+            <button onClick={() => backToLacunaNode(-1)}>知识图</button>
+            {panel.stack.map((item, index) => (
+              <span key={item + index}>
+                <span className="lacuna-path-separator">›</span>
+                {index === panel.stack.length - 1 ? (
+                  <strong aria-current="page">{title(item)}</strong>
+                ) : (
+                  <button onClick={() => backToLacunaNode(index)}>{title(item)}</button>
+                )}
+              </span>
+            ))}
+          </nav>
+          <button aria-label="关闭知溯解释" onClick={closeLacunaPanel}>
+            <X size={15} />
+          </button>
+        </header>
+        <div className="lacuna-card" onPointerUp={readSelection} onKeyUp={readSelection}>
+          {node === undefined ? (
+            <p className="lacuna-muted">正在读取解释…</p>
+          ) : node === null ? (
+            <p className="lacuna-muted">知识库里没有这个词了，可能已经被删除。</p>
+          ) : (
+            <>
+              <h3>{node.title}</h3>
+              {node.aliases.length > 0 && <p className="lacuna-aliases">也叫：{node.aliases.join('、')}</p>}
+              <div className="message-content lacuna-body" ref={body}>
+                {node.body ? <RichText text={node.body} terms /> : <p className="lacuna-muted">还没有解释</p>}
+              </div>
+              <LacunaRefs label="要先懂的" refs={node.dependsOn} />
+              <LacunaRefs label="在这些地方问到" refs={node.dependedBy} />
+            </>
+          )}
+        </div>
+        {ask && node && (
+          <button
+            className="lacuna-ask"
+            style={{ left: ask.x, top: ask.y }}
+            onPointerDown={(event) => event.preventDefault()}
+            onClick={() => {
+              askLacuna(lacunaQuestion(ask.text, { id: node.id, title: node.title }));
+              window.getSelection()?.removeAllRanges();
+              setAsk(undefined);
+            }}
+          >
+            这是什么意思
+          </button>
         )}
-      </div>
-      {ask && node && (
-        <button
-          className="lacuna-ask"
-          style={{ left: ask.x, top: ask.y }}
-          onPointerDown={(event) => event.preventDefault()}
-          onClick={() => {
-            askLacuna(lacunaQuestion(ask.text, { id: node.id, title: node.title }));
-            window.getSelection()?.removeAllRanges();
-            setAsk(undefined);
-          }}
-        >
-          这是什么意思
-        </button>
-      )}
-    </aside>
+      </aside>
+    </>
   );
 }
 

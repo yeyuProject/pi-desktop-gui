@@ -104,24 +104,27 @@ async function until(check: () => boolean, timeoutMs = 3000) {
 
 test('找不到 lacuna 时关闭术语功能：说明原因，认词返回空结果', async (t) => {
   const { lacuna } = service(t, {
+    cwd: await project(t),
     locate: async () => {
       throw new LacunaUnavailable(
         '没有找到 lacuna 命令。安装 lacuna 并让它出现在 PATH 里，然后重新打开 Pi Desktop',
       );
     },
   });
-  const directory = await project(t);
-  assert.deepEqual(await lacuna.status(directory), {
+  assert.deepEqual(await lacuna.status(), {
     available: false,
     reason: '没有找到 lacuna 命令。安装 lacuna 并让它出现在 PATH 里，然后重新打开 Pi Desktop',
   });
-  assert.deepEqual(await lacuna.annotate(directory, ['VAE']), [{ matches: [], terms: {} }]);
-  assert.equal(await lacuna.node(directory, 'vae'), null);
+  assert.deepEqual(await lacuna.annotate(['VAE']), [{ matches: [], terms: {} }]);
+  assert.equal(await lacuna.node('vae'), null);
 });
 
 test('本机的 lacuna 缺少需要的函数时，说明版本太旧', async (t) => {
-  const { lacuna } = service(t, { load: async () => ({ readStore: () => ({ nodes: [] }) }) });
-  const status = await lacuna.status(await project(t));
+  const { lacuna } = service(t, {
+    cwd: await project(t),
+    load: async () => ({ readStore: () => ({ nodes: [] }) }),
+  });
+  const status = await lacuna.status();
   assert.equal(status.available, false);
   assert.match(
     status.available ? '' : status.reason,
@@ -130,13 +133,13 @@ test('本机的 lacuna 缺少需要的函数时，说明版本太旧', async (t)
 });
 
 test('认词只保留指向已有节点的结果，并带上悬停要用的解释', async (t) => {
-  const { lacuna } = service(t);
   const directory = await project(t, {
     vae: '变分自编码器|把数据压成隐变量的分布。',
     gan: '生成对抗网络|两个网络互相对抗。',
   });
+  const { lacuna } = service(t, { cwd: directory });
 
-  const [annotation] = await lacuna.annotate(directory, ['先学变分自编码器，再看 [[missing]] 和 [[gan]]']);
+  const [annotation] = await lacuna.annotate(['先学变分自编码器，再看 [[missing]] 和 [[gan]]']);
   assert.deepEqual(
     annotation?.matches.map((m) => [m.text, m.ids, m.kind]),
     [
@@ -151,12 +154,12 @@ test('认词只保留指向已有节点的结果，并带上悬停要用的解�
     summary: '把数据压成隐变量的分布。',
   });
 
-  const node = await lacuna.node(directory, 'vae');
+  const node = await lacuna.node('vae');
   assert.equal(node?.body, '把数据压成隐变量的分布。\n\n更多解释。');
   assert.deepEqual(node?.dependsOn, [{ id: 'missing' }]);
   assert.deepEqual(node?.dependedBy, [{ id: 'gan', title: '生成对抗网络' }]);
-  assert.equal(await lacuna.node(directory, 'nope'), null);
-  assert.deepEqual(await lacuna.status(directory), {
+  assert.equal(await lacuna.node('nope'), null);
+  assert.deepEqual(await lacuna.status(), {
     available: true,
     scope: 'project',
     root: path.join(directory, '.lacuna'),
@@ -166,9 +169,9 @@ test('认词只保留指向已有节点的结果，并带上悬停要用的解�
 });
 
 test('agent 写入新词后通知界面，再认词就能认出来', async (t) => {
-  const { lacuna, events } = service(t);
   const directory = await project(t, { vae: '变分自编码器|简短解释' });
-  await lacuna.status(directory);
+  const { lacuna, events } = service(t, { cwd: directory });
+  await lacuna.status();
 
   await fs.writeFile(path.join(directory, '.lacuna', 'nodes', 'latent.md'), '潜变量|没有直接观测到的变量。');
   await until(() => events.length > 0);
@@ -177,7 +180,7 @@ test('agent 写入新词后通知界面，再认词就能认出来', async (t) =
     root: path.join(directory, '.lacuna'),
     revision: 1,
   });
-  const [annotation] = await lacuna.annotate(directory, ['潜变量']);
+  const [annotation] = await lacuna.annotate(['潜变量']);
   assert.deepEqual(
     annotation?.matches.map((m) => m.ids),
     [['latent']],
@@ -185,9 +188,9 @@ test('agent 写入新词后通知界面，再认词就能认出来', async (t) =
 });
 
 test('知识库还没有 nodes/ 目录时，等它出现再开始监听', async (t) => {
-  const { lacuna, events } = service(t);
   const directory = await project(t);
-  assert.deepEqual(await lacuna.status(directory), {
+  const { lacuna, events } = service(t, { cwd: directory });
+  assert.deepEqual(await lacuna.status(), {
     available: true,
     scope: 'project',
     root: path.join(directory, '.lacuna'),
@@ -198,19 +201,20 @@ test('知识库还没有 nodes/ 目录时，等它出现再开始监听', async 
   await fs.mkdir(path.join(directory, '.lacuna', 'nodes'), { recursive: true });
   await fs.writeFile(path.join(directory, '.lacuna', 'nodes', 'vae.md'), '变分自编码器|简短解释');
   await until(() => events.length > 0);
-  const status = await lacuna.status(directory);
+  const status = await lacuna.status();
   assert.equal(status.available && status.nodeCount, 1);
 });
 
 test('知识图：较早的 lacuna 没有大纲函数时说明原因；有时返回大纲，知识库变化后重新计算', async (t) => {
-  const old = service(t);
   const directory = await project(t, { vae: '变分自编码器|简短解释' });
-  assert.deepEqual(await old.lacuna.graph(directory), {
+  const old = service(t, { cwd: directory });
+  assert.deepEqual(await old.lacuna.graph(), {
     reason: '本机的 lacuna 版本太旧，还不能显示知识图。更新 lacuna 后重新打开 Pi Desktop',
   });
 
   let calls = 0;
   const current = service(t, {
+    cwd: directory,
     load: async () => ({
       ...fakeLacuna(),
       outlineOf: (nodes: Array<{ id: string; title: string }>) => {
@@ -226,14 +230,31 @@ test('知识图：较早的 lacuna 没有大纲函数时说明原因；有时返
       }),
     }),
   });
-  const first = await current.lacuna.graph(directory);
+  const first = await current.lacuna.graph();
   assert.deepEqual('graph' in first && first.graph.outline.loose.map((item) => item.title), ['变分自编码器']);
-  await current.lacuna.graph(directory);
+  await current.lacuna.graph();
   assert.equal(calls, 1, '知识库没变时用缓存');
 
   await fs.writeFile(path.join(directory, '.lacuna', 'nodes', 'latent.md'), '潜变量|没有直接观测到的变量。');
   await until(() => current.events.length > 0);
-  const second = await current.lacuna.graph(directory);
+  const second = await current.lacuna.graph();
   assert.deepEqual('graph' in second && second.graph.nodes.map((node) => node.id).sort(), ['latent', 'vae']);
   assert.equal(calls, 2);
+});
+
+test('知识库只有一个：不传目录时从用户主目录找，并且总是要个人知识库', async (t) => {
+  const calls: Array<{ cwd: string; personal: boolean }> = [];
+  const { lacuna } = service(t, {
+    load: async () => ({
+      ...fakeLacuna(),
+      resolveStore: (options: { cwd: string; personal: boolean }) => {
+        calls.push(options);
+        return { root: path.join(options.cwd, '.lacuna'), scope: 'personal' as const };
+      },
+    }),
+  });
+  await lacuna.status();
+  await lacuna.annotate(['VAE']);
+  assert.deepEqual(calls.at(0), { cwd: os.homedir(), personal: true });
+  assert.ok(calls.every((call) => call.cwd === os.homedir() && call.personal));
 });

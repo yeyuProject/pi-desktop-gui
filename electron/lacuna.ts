@@ -3,10 +3,11 @@
  *
  * Pi Desktop 不打包 lacuna，而是像对待 pi 一样，在运行时找到本机安装的 lacuna 并加载它的库
  * （lacuna ADR-0009）。认词规则只在 lacuna 里实现一次，这里只负责：为会话找到知识库、读进内存、
- * 监听变化，以及把认词结果交给界面。没装 lacuna 时，术语功能关闭，其他功能不受影响。
+ * 监听变化，以及把认词结果交给界面。知识库只有一个（lacuna ADR-0010），和会话无关。没装 lacuna 时，术语功能关闭，其他功能不受影响。
  */
 import { existsSync, watch, type FSWatcher } from 'node:fs';
 import fs from 'node:fs/promises';
+import { homedir } from 'node:os';
 import path from 'node:path';
 import { pathToFileURL } from 'node:url';
 import type {
@@ -76,6 +77,8 @@ interface Options {
   pollMs?: number;
   /** 加载失败后多久允许重试，比如用户刚装好 lacuna。 */
   retryMs?: number;
+  /** 传给 resolveStore 的目录。知识库只有一个（lacuna ADR-0010），默认用户主目录；测试时替换。 */
+  cwd?: string;
 }
 
 interface LoadedStore {
@@ -107,9 +110,9 @@ export class LacunaService {
   }
 
   /** 会话目录对应的知识库是否可用。 */
-  async status(directory: string): Promise<LacunaStatus> {
+  async status(): Promise<LacunaStatus> {
     try {
-      const store = await this.#store(directory);
+      const store = await this.#store();
       return {
         available: true,
         scope: store.scope,
@@ -123,12 +126,12 @@ export class LacunaService {
   }
 
   /** 在几段文字里认词。lacuna 不可用时返回空结果，界面照常显示原文。 */
-  async annotate(directory: string, texts: string[]): Promise<LacunaAnnotation[]> {
+  async annotate(texts: string[]): Promise<LacunaAnnotation[]> {
     let store: LoadedStore;
     let lacuna: LacunaModule;
     try {
       lacuna = await this.#lacuna();
-      store = await this.#store(directory);
+      store = await this.#store();
     } catch {
       return texts.map(emptyAnnotation);
     }
@@ -147,9 +150,9 @@ export class LacunaService {
   }
 
   /** 读取一个节点的完整解释。节点不存在或 lacuna 不可用时返回 null。 */
-  async node(directory: string, id: string): Promise<LacunaNode | null> {
+  async node(id: string): Promise<LacunaNode | null> {
     try {
-      const view = (await this.#store(directory)).views.get(id);
+      const view = (await this.#store()).views.get(id);
       return view ? nodeOf(view) : null;
     } catch {
       return null;
@@ -157,12 +160,12 @@ export class LacunaService {
   }
 
   /** 知识图面板的数据。 */
-  async graph(directory: string): Promise<LacunaGraphResult> {
+  async graph(): Promise<LacunaGraphResult> {
     let lacuna: LacunaModule;
     let store: LoadedStore;
     try {
       lacuna = await this.#lacuna();
-      store = await this.#store(directory);
+      store = await this.#store();
     } catch (error) {
       return { reason: reasonOf(error) };
     }
@@ -205,9 +208,11 @@ export class LacunaService {
     return promise;
   }
 
-  async #store(directory: string): Promise<LoadedStore> {
+  async #store(): Promise<LoadedStore> {
     const lacuna = await this.#lacuna();
-    const { root, scope } = lacuna.resolveStore({ cwd: directory, personal: false });
+    // 知识库只有一个（lacuna ADR-0010），和会话、项目无关。较早的 lacuna 还认项目知识库，
+    // 传 personal: true 让它也只用个人知识库，两种版本结果一致。
+    const { root, scope } = lacuna.resolveStore({ cwd: this.#options.cwd ?? homedir(), personal: true });
     let store = this.#stores.get(root);
     if (!store) {
       store = { root, scope, revision: 0, ...read(lacuna, root) };

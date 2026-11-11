@@ -11,7 +11,7 @@ import { Suspense, memo, useEffect, useMemo, useRef, useState } from 'react';
 import { UpdateBadge } from './components/Updates';
 import { ResizeHandle } from './components/ResizeHandle';
 import { LacunaHover, LacunaPanel } from './components/conversation/LacunaTerms';
-import { setLacunaContext } from './lib/lacuna-store';
+import { setLacunaEnabled } from './lib/lacuna-store';
 import {
   AboutUpdates,
   preloadDialogs,
@@ -49,10 +49,10 @@ export default function App() {
   const model = useWorkbench();
   const [updateOpen, setUpdateOpen] = useState(false);
   const { state, compact, columns, error } = model;
-  // 知溯术语解释跟着当前会话走：不同会话可能对应不同的知识库。
+  // 知溯只有一个知识库，和当前会话无关，这里只跟着设置里的开关走。
   useEffect(() => {
-    setLacunaContext(model.selected?.id, state?.settings.lacunaTerms !== false);
-  }, [model.selected?.id, state?.settings.lacunaTerms]);
+    setLacunaEnabled(state?.settings.lacunaTerms !== false);
+  }, [state?.settings.lacunaTerms]);
   // “这是什么意思”：把问题追加到输入框并聚焦，和“询问这处变更”一样由用户确认后发送。
   const askHunk = useRef(model.messageContext.askHunk);
   askHunk.current = model.messageContext.askHunk;

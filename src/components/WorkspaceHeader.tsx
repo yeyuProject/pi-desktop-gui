@@ -114,14 +114,14 @@ export function WorkspaceHeader(
   );
 }
 
-/** 打开知溯知识图。设置里关掉了术语解释时不显示。 */
+/** 打开知溯知识图：所有问过的词连成的一张图。设置里关掉了术语解释时不显示。 */
 function LacunaButton() {
   const enabled = useLacunaEnabled();
   const panel = useLacunaPanel();
   if (!enabled) return null;
   return (
     <button aria-pressed={panel?.stack.length === 0} onClick={toggleLacunaMap}>
-      知溯
+      知识图
     </button>
   );
 }
