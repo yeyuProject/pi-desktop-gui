@@ -355,19 +355,29 @@ export default function App() {
           </section>
           {model.sideChat.open && (
             <>
-              <ResizeHandle
-                label="侧边对话宽度"
-                variable="--side-chat-width"
-                value={state.settings.sideChatWidth ?? 360}
-                min={300}
-                max={560}
-                defaultValue={360}
-                direction={-1}
-                save={(width) => saveWidth('sideChatWidth', width)}
-              />
+              {!model.sideChatOverlay && (
+                <ResizeHandle
+                  label="侧边对话宽度"
+                  variable="--side-chat-width"
+                  value={state.settings.sideChatWidth ?? 360}
+                  min={300}
+                  max={560}
+                  defaultValue={360}
+                  direction={-1}
+                  save={(width) => saveWidth('sideChatWidth', width)}
+                />
+              )}
               <Suspense fallback={null}>
                 <SideChatPanel
-                  {...pick(model, ['sideChat', 'runtime', 'selected', 'openSettings', 'connect', 'copy'])}
+                  {...pick(model, [
+                    'sideChat',
+                    'sideChatOverlay',
+                    'runtime',
+                    'selected',
+                    'openSettings',
+                    'connect',
+                    'copy',
+                  ])}
                 />
               </Suspense>
             </>

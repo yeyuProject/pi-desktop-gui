@@ -19,37 +19,55 @@
   padding: 10px 12px;
   border-bottom: 1px solid var(--line);
 }
-.side-chat > header strong {
+.side-chat-title {
   flex: 1;
+  min-width: 0;
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+}
+.side-chat-title strong {
+  flex-shrink: 0;
+}
+.side-chat-title small {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  min-width: 0;
+  font-size: calc(11px * var(--font-scale));
+  color: var(--muted);
 }
 .side-chat > header button {
   min-height: 26px;
   padding: 4px;
   border: 0;
+  border-radius: 6px;
   background: transparent;
-}
-.side-chat-options {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 7px;
-  padding: 8px 12px;
-  font-size: 11px;
   color: var(--muted);
+}
+.side-chat > header button:hover:not(:disabled) {
+  background: var(--hover);
+  color: var(--ink);
+}
+.side-chat-empty {
+  margin: 24px 8px;
+  text-align: center;
+  font-size: calc(12px * var(--font-scale));
+  line-height: 1.7;
+  color: var(--muted);
+}
+.side-chat-thinking {
+  display: flex;
   align-items: center;
+  gap: 6px;
+  margin: 0;
+  color: var(--muted);
 }
-.side-chat-options select {
-  max-width: 150px;
-  padding: 4px;
-}
-.side-chat-options small {
-  width: 100%;
+.side-chat-omitted {
+  display: block;
+  padding: 0 14px 6px;
+  font-size: calc(11px * var(--font-scale));
   color: var(--signal);
-}
-.side-chat-options > span {
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  min-width: 0;
 }
 .side-chat-messages {
   flex: 1;
@@ -58,21 +76,38 @@
   padding: 12px;
 }
 .side-message {
-  margin-bottom: 22px;
+  margin-bottom: 18px;
   font-size: calc(13px * var(--font-scale));
-  line-height: 1.8;
+  line-height: 1.75;
   overflow-wrap: anywhere;
 }
 .side-message > strong {
   color: var(--muted);
   display: block;
-  margin-bottom: 8px;
+  margin-bottom: 4px;
   font-size: 11px;
 }
+/* The question reads like the main conversation: a right-aligned bubble without a visible speaker. */
 .side-message.user {
-  padding: 10px;
-  border-radius: 9px;
-  background: var(--accent-soft);
+  width: fit-content;
+  max-width: 88%;
+  margin-left: auto;
+  padding: 8px 12px;
+  border-radius: 12px 12px 4px 12px;
+  background: var(--bubble, var(--rail));
+  line-height: 1.6;
+}
+.side-message.user > strong {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  margin: -1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+}
+.side-message.user p {
+  margin: 0;
 }
 .side-message pre {
   overflow: auto;
@@ -86,34 +121,100 @@
 .side-message footer {
   display: flex;
   flex-wrap: wrap;
-  gap: 8px;
-  margin-top: 8px;
+  gap: 2px;
+  margin-top: 4px;
+  margin-left: -6px;
 }
 .side-message footer button {
   border: 0;
+  border-radius: 6px;
   background: transparent;
-  padding: 2px 0;
+  padding: 2px 6px;
   min-height: 22px;
   font-size: 11px;
   color: var(--muted);
 }
+.side-message footer button:hover:not(:disabled) {
+  background: var(--hover);
+  color: var(--ink);
+}
 .side-chat-composer {
-  padding: 10px 12px;
-  border-top: 1px solid var(--line);
+  margin: 0 12px 12px;
+  border: 1px solid var(--line);
+  border-radius: 14px;
+  background: var(--surface);
+  transition:
+    border-color 160ms ease,
+    box-shadow 160ms ease;
+}
+.side-chat-composer:focus-within {
+  border-color: color-mix(in srgb, var(--accent) 65%, var(--line));
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 8%, transparent);
+}
+.side-chat-composer.disabled {
+  opacity: 0.6;
 }
 .side-chat-composer textarea {
   display: block;
   width: 100%;
-  min-height: 74px;
+  field-sizing: content;
+  min-height: 3lh;
   max-height: 200px;
-  resize: vertical;
-  font-size: 13px;
+  padding: 10px 12px 4px;
+  border: 0;
+  background: transparent;
+  resize: none;
+  line-height: 1.6;
+  font-size: calc(13px * var(--font-scale));
+}
+.side-chat-composer textarea:focus {
+  outline: none;
+}
+.side-chat-composer textarea::placeholder {
+  color: var(--muted);
+}
+.side-chat-toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 2px 8px 8px;
+}
+.side-chat-toolbar select {
+  max-width: 150px;
+  padding: 4px;
+  border: 0;
+  background: transparent;
+  font-size: calc(12px * var(--font-scale));
+  color: var(--muted);
 }
 .side-chat-send {
-  margin-top: 8px;
-  margin-left: auto;
-  display: flex;
-  font-size: 12px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  width: 30px;
+  height: 30px;
+  min-height: 0;
+  padding: 0;
+  border: 0;
+  border-radius: 9px;
+  background: var(--primary);
+  color: var(--on-primary);
+}
+.side-chat-send:hover:not(:disabled) {
+  background: var(--primary);
+  filter: brightness(1.1);
+}
+.side-chat-send:disabled {
+  background: var(--hover);
+  color: var(--muted);
+  opacity: 1;
+}
+.side-chat-send.stop {
+  background: var(--signal-soft);
+  color: var(--signal);
+  border: 1px solid color-mix(in srgb, var(--signal) 45%, var(--line));
 }
 .side-chat .inline-error,
 .side-chat-unavailable {
@@ -125,13 +226,16 @@
   font-size: 11px;
   margin: 5px 5px 0 0;
 }
+.side-draft-quotes {
+  padding: 8px 8px 0;
+}
 .side-draft-quotes span {
   display: block;
   font-size: 11px;
   background: var(--accent-soft);
-  border-radius: 5px;
-  padding: 4px 6px;
-  margin-bottom: 5px;
+  border-radius: 7px;
+  padding: 4px 6px 4px 8px;
+  margin-bottom: 4px;
   overflow-wrap: anywhere;
 }
 .side-draft-quotes button {
@@ -156,8 +260,7 @@
   min-width: min(300px, 100%);
   box-shadow: var(--shadow);
 }
-@media (max-width: 899px) {
-  [aria-label='侧边对话宽度'] {
-    display: none;
-  }
+/* With the inspector inline, the drawer covers it exactly instead of leaving a strip of it visible. */
+.workspace-columns:not(.compact):has(> .inspector) > .side-chat.drawer {
+  width: max(var(--side-chat-width, 360px), min(var(--inspector-width), 48%));
 }

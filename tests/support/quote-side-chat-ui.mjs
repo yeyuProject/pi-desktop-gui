@@ -176,6 +176,9 @@ export async function verifyQuoteSideChatUI({ app, page, fixture, provider, outp
   await expect(input).toHaveValue('主会话保留草稿');
   await panel.getByRole('button', { name: '发送侧边问题', exact: true }).click();
   await expect(panel.locator('.side-message.assistant').last()).toContainText('开始流式回复');
+  // The sent question leaves the input while the answer streams, and the next one can be drafted.
+  await expect(question).toHaveValue('');
+  await expect(question).toBeEnabled();
   const stopping = Date.now();
   await panel.getByRole('button', { name: '停止侧边回答', exact: true }).click();
   await expect(panel.locator('.side-message.assistant').last()).toContainText('已停止');

@@ -626,6 +626,7 @@ export interface ApiMap {
   };
   cancelDiff: { args: [string]; result: void };
   openFile: { args: [string, string]; result: void };
+  openProjectPath: { args: [string, string, 'open' | 'reveal']; result: 'opened' | 'revealed' };
   openResource: { args: [string, string]; result: void };
   referenceDropped: { args: [string, string[]]; result: { accepted: string[]; rejected: string[] } };
   openLink: { args: [string]; result: void };

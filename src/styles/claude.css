@@ -180,20 +180,6 @@
 [data-style='claude'] .send-button {
   border-radius: 8px;
 }
-/* Side chat can leave a narrow composer even in a wide desktop window. */
-[data-style='claude'] .composer-toolbar > div {
-  flex-wrap: wrap;
-  max-width: 100%;
-}
-[data-style='claude'] .composer-toolbar .approval-switch {
-  flex-shrink: 0;
-}
-[data-style='claude'] .composer-toolbar .model-picker-anchor {
-  max-width: 100%;
-}
-[data-style='claude'] .composer-toolbar .model-pill {
-  max-width: min(250px, 100%);
-}
 [data-style='claude'] .message.assistant .message-content {
   font-family: var(--font-reply, inherit);
   font-size: calc(15px * var(--font-scale));

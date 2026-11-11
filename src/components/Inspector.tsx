@@ -22,6 +22,7 @@ import { IconButton } from './IconButton';
 import { CopyButton } from './CopyButton';
 import { ErrorFeedback } from './ErrorFeedback';
 import { FileTree } from './FileTree';
+import { FileContextMenu, fileMenuTarget, type FileMenuTarget } from './FileContextMenu';
 import { DiffView } from './DiffView';
 import { AnsiOutput } from './AnsiOutput';
 import { stripAnsi } from '../../shared/ansi';
@@ -116,6 +117,8 @@ export function Inspector(
     rerunCommand,
     saveInspectorSplit,
   } = props;
+  const [fileMenu, setFileMenu] = useState<FileMenuTarget>();
+  useEffect(() => setFileMenu(undefined), [project?.id, inspector]);
   const [maximized, setMaximized] = useState(false),
     [fullDiff, setFullDiff] = useState(false);
   const [selection, setSelection] = useState<{ startLine: number; endLine: number }>();
@@ -299,6 +302,9 @@ export function Inspector(
 
   return (
     <>
+      {fileMenu && project && (
+        <FileContextMenu projectId={project.id} target={fileMenu} close={() => setFileMenu(undefined)} />
+      )}
       {inspector && (
         <button
           className="inspector-scrim"
@@ -479,6 +485,11 @@ export function Inspector(
                           key={f.path}
                           className={'change-row ' + (selectedFile === f.path ? 'active' : '')}
                           onClick={() => void inspectFile(f.path, 'changes')}
+                          onContextMenu={(event) =>
+                            f.status === '删除'
+                              ? event.preventDefault()
+                              : setFileMenu(fileMenuTarget(event, f.path))
+                          }
                         >
                           <span className={'change-symbol ' + f.status}>
                             {f.status === '新增' ? '+' : f.status === '删除' ? '−' : 'M'}
@@ -608,6 +619,7 @@ export function Inspector(
                   changes={changes?.files}
                   revision={workspaceRevision}
                   onSelect={(p) => void inspectFile(p, 'files')}
+                  onFileMenu={setFileMenu}
                 />
               </div>
               {divider}

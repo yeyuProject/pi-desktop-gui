@@ -53,7 +53,14 @@ export async function planMessageLink(href: string, editor?: string): Promise<Me
   if (/^https?:\/\//i.test(value)) return { action: 'web', url: new URL(value).href };
   const target = localPath(value);
   if (!target) throw new Error('只能打开网页链接或本地文件的完整路径');
-  const file = await existing(target);
+  return planLocalFile(await existing(target), editor);
+}
+
+/** The same rules for an existing file the user picked, such as from the project file tree. */
+export async function planLocalFile(
+  file: string,
+  editor?: string,
+): Promise<Exclude<MessageLinkPlan, { action: 'web' }>> {
   // Decide by the real target, so a renamed symlink cannot pass a script off as a document.
   const real = await fs.realpath(file);
   const stat = await fs.stat(real);

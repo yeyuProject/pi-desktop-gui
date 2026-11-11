@@ -32,6 +32,7 @@ import { useLayer } from './useLayer';
 import { type MessageContext } from '../components/conversation/ChatMessage';
 const api = window.desktop;
 const noTools: ToolActivity[] = [];
+const MIN_CONVERSATION_WIDTH = 520;
 export interface OutgoingMessage {
   id: number;
   sessionId: string;
@@ -77,6 +78,7 @@ export function useWorkbench() {
   const openModelPicker = () => setModelPickerRequest((value) => value + 1);
   const [sidebar, setSidebar] = useState(() => localStorage.getItem('pi.sidebar') !== 'hidden'),
     [compact, setCompact] = useState(false),
+    [sideChatOverlay, setSideChatOverlay] = useState(false),
     [inspector, setInspector] = useState(false);
   const [expanded, setExpanded] = useState<string[]>([]),
     [messageLimit, setMessageLimit] = useState(80),
@@ -262,12 +264,25 @@ export function useWorkbench() {
       document.querySelector<HTMLButtonElement>('[aria-controls="project-sidebar"]')?.focus();
     }
   }, [sidebar]);
+  // A side panel that would leave the conversation narrower than this overlays it instead.
+  // Only the two outcomes are state, so resizing the window re-renders only when one changes.
+  const inspectorSetting = state?.settings.inspectorWidth ?? 380,
+    sideChatSetting = state?.settings.sideChatWidth ?? 360;
   useEffect(() => {
     if (!columns.current) return;
-    const observer = new ResizeObserver(([entry]) => setCompact(entry.contentRect.width < 900));
+    const layout = (width: number) => {
+      const inspectorWidth = Math.min(inspectorSetting, width * 0.48);
+      const overlayInspector = width - inspectorWidth < MIN_CONVERSATION_WIDTH;
+      setCompact(overlayInspector);
+      setSideChatOverlay(
+        width - sideChatSetting - (inspector && !overlayInspector ? inspectorWidth : 0) <
+          MIN_CONVERSATION_WIDTH,
+      );
+    };
+    const observer = new ResizeObserver(([entry]) => layout(entry.contentRect.width));
     observer.observe(columns.current);
     return () => observer.disconnect();
-  }, [Boolean(state)]);
+  }, [Boolean(state), inspector, inspectorSetting, sideChatSetting]);
 
   useEffect(() => {
     if (!state) return;
@@ -892,6 +907,7 @@ export function useWorkbench() {
       ...workspace,
       ...draftState,
       sideChat,
+      sideChatOverlay,
       askHunk,
       rerunCommand,
       updates,

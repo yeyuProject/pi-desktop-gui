@@ -4,6 +4,7 @@ import { type Project, type FileItem, type Change } from '../../shared/types';
 import { readableError } from '../lib/format';
 import { IconButton } from './IconButton';
 import { ErrorFeedback } from './ErrorFeedback';
+import { fileMenuTarget, type FileMenuTarget } from './FileContextMenu';
 const api = window.desktop;
 
 interface FileTreeProps {
@@ -12,6 +13,7 @@ interface FileTreeProps {
   selectedFile?: string;
   changes?: Change[];
   revision?: number;
+  onFileMenu?: (target: FileMenuTarget) => void;
 }
 
 function ChangeMarker({ change }: { change?: Change }) {
@@ -28,6 +30,7 @@ function Directory({
   selectedFile,
   changes,
   revision,
+  onFileMenu,
   directory = '',
   depth = 0,
   locate,
@@ -78,6 +81,7 @@ function Directory({
             className={'file-row ' + (item.path === selectedFile ? 'active' : '')}
             style={{ paddingLeft: 12 + depth * 14 }}
             title={item.path}
+            onContextMenu={onFileMenu && ((event) => onFileMenu(fileMenuTarget(event, item.path)))}
             onClick={() =>
               item.directory
                 ? setOpen((old) =>
@@ -111,6 +115,7 @@ function Directory({
               selectedFile={selectedFile}
               changes={changes}
               revision={revision}
+              onFileMenu={onFileMenu}
               locate={locate}
             />
           )}
@@ -187,6 +192,7 @@ export function FileTree(props: FileTreeProps) {
               className={'file-row ' + (props.selectedFile === name ? 'active' : '')}
               key={name}
               onClick={() => props.onSelect(name)}
+              onContextMenu={props.onFileMenu && ((event) => props.onFileMenu!(fileMenuTarget(event, name)))}
               title={name}
             >
               <FileText size={14} />
