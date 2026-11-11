@@ -17,6 +17,7 @@ import {
 import { projectRules, createAgentRules } from '../project-rules';
 import { readImageAttachment } from '../images';
 import { openTextEditor, openWithApp } from '../platform';
+import { planLocalFile } from '../message-link';
 
 export type WorkspaceHandlerName =
   | 'checkpoints'
@@ -37,6 +38,7 @@ export type WorkspaceHandlerName =
   | 'diff'
   | 'cancelDiff'
   | 'openFile'
+  | 'openProjectPath'
   | 'referenceDropped';
 
 interface WorkspaceHandlerContext {
@@ -236,6 +238,28 @@ export function createWorkspaceHandlers(context: WorkspaceHandlerContext) {
       const editor = store.state.settings.editorPath;
       if (editor) await openWithApp(editor, file);
       else shell.showItemInFolder(file);
+    },
+    openProjectPath: async (id, relative, action) => {
+      text(id, 100);
+      text(relative, 4096);
+      if (action !== 'open' && action !== 'reveal') throw new Error('不支持的文件操作');
+      const file = await safePath(store.project(id).path, relative);
+      if (action === 'reveal') {
+        shell.showItemInFolder(file);
+        return 'revealed';
+      }
+      // A default app can run scripts, so only passive documents and folders open directly.
+      const editor = store.state.settings.editorPath || undefined;
+      const plan = await planLocalFile(file, editor);
+      if (plan.action === 'editor') await openWithApp(editor!, plan.path);
+      else if (plan.action === 'reveal') {
+        shell.showItemInFolder(plan.path);
+        return 'revealed';
+      } else {
+        const error = await shell.openPath(plan.path);
+        if (error) throw new Error(`无法打开文件：${error}`);
+      }
+      return 'opened';
     },
     referenceDropped: async (id, files) => {
       text(id, 100);

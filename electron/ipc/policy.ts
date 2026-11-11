@@ -129,6 +129,7 @@ export const IPC_POLICIES: Record<keyof ApiMap, IpcPolicy> = {
   diff: read,
   cancelDiff: { ...read, duringDialog: true },
   openFile: read,
+  openProjectPath: read,
   openResource: read,
   referenceDropped: write,
   openLink: read,

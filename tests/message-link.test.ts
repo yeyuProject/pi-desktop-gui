@@ -6,7 +6,7 @@ import path from 'node:path';
 import { pathToFileURL } from 'node:url';
 import React from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
-import { planMessageLink } from '../electron/message-link';
+import { planLocalFile, planMessageLink } from '../electron/message-link';
 
 Object.defineProperty(globalThis, 'window', {
   configurable: true,
@@ -76,4 +76,17 @@ test('rendered replies keep local link targets but still drop unsafe schemes', (
   assert.match(html, /title="\/Users\/yeyu\/洛茜 报告\/report.html"/);
   assert.match(html, /title="file:\/\/\/Users\/yeyu\/findings.md"/);
   assert.doesNotMatch(html, /javascript:/);
+});
+
+test('project files opened from the file menu use the same rules without decoding their names', async (t) => {
+  const { dir, folder, report, script } = await fixture(t);
+  const literal = path.join(dir, 'a%20b.md');
+  await fs.writeFile(literal, '# literal');
+  assert.deepEqual(await planLocalFile(literal), { action: 'open', path: literal });
+  assert.deepEqual(await planLocalFile(report), { action: 'open', path: report });
+  assert.deepEqual(await planLocalFile(folder), { action: 'open', path: folder });
+  assert.deepEqual(await planLocalFile(script), { action: 'reveal', path: script });
+  assert.deepEqual(await planLocalFile(script, '/editor'), { action: 'editor', path: script });
+  const bundle = path.join(dir, 'Tool.app');
+  assert.deepEqual(await planLocalFile(bundle), { action: 'reveal', path: bundle });
 });
