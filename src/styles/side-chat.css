@@ -260,8 +260,7 @@
   min-width: min(300px, 100%);
   box-shadow: var(--shadow);
 }
-@media (max-width: 899px) {
-  [aria-label='侧边对话宽度'] {
-    display: none;
-  }
+/* With the inspector inline, the drawer covers it exactly instead of leaving a strip of it visible. */
+.workspace-columns:not(.compact):has(> .inspector) > .side-chat.drawer {
+  width: max(var(--side-chat-width, 360px), min(var(--inspector-width), 48%));
 }

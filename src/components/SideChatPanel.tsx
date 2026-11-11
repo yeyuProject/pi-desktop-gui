@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useRef } from 'react';
 import { X, Square, ArrowUp, Trash2, LoaderCircle } from 'lucide-react';
 import type { Workbench } from '../hooks/useWorkbench';
 import { RichText } from './conversation/Markdown';
@@ -9,20 +9,18 @@ import { useLayer, topLayer } from '../hooks/useLayer';
 
 export function SideChatPanel({
   sideChat,
+  sideChatOverlay: narrow,
   runtime,
   selected,
   openSettings,
   connect,
   copy,
-}: Pick<Workbench, 'sideChat' | 'runtime' | 'selected' | 'openSettings' | 'connect' | 'copy'>) {
+}: Pick<
+  Workbench,
+  'sideChat' | 'sideChatOverlay' | 'runtime' | 'selected' | 'openSettings' | 'connect' | 'copy'
+>) {
   const panel = useRef<HTMLElement>(null),
     output = useRef<HTMLDivElement>(null);
-  const [narrow, setNarrow] = useState(window.innerWidth < 900);
-  useEffect(() => {
-    const resize = () => setNarrow(window.innerWidth < 900);
-    window.addEventListener('resize', resize);
-    return () => window.removeEventListener('resize', resize);
-  }, []);
   useLayer(panel, sideChat.open && narrow, () => sideChat.setOpen(false), { kind: 'panel', trapFocus: true });
   // Follow the answer only while the reader is at the bottom; always jump to a newly sent question.
   const pinned = useRef(true),

@@ -500,11 +500,26 @@
   gap: 8px;
   padding: 4px 10px 10px;
 }
+/* A narrow composer wraps whole controls onto another row instead of breaking their labels. */
 .composer-toolbar > div {
   display: flex;
   align-items: center;
+  flex-wrap: wrap;
   gap: 6px;
   min-width: 0;
+  max-width: 100%;
+}
+.composer-toolbar > div:first-child > *,
+.composer-toolbar .approval-pill {
+  flex-shrink: 0;
+  white-space: nowrap;
+}
+.composer-toolbar .model-picker-anchor {
+  flex-shrink: 1;
+  max-width: 100%;
+}
+.composer-toolbar .model-pill {
+  max-width: min(250px, 100%);
 }
 .goal-button {
   display: inline-flex;
