@@ -145,6 +145,7 @@
   max-height: min(460px, 62vh);
   display: flex;
   flex-direction: column;
+  white-space: normal;
   background: var(--surface);
   border: 1px solid var(--line);
   border-radius: 14px;
