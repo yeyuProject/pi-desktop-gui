@@ -124,18 +124,26 @@ async function contrast(theme) {
 }
 async function noOverflow(label) {
   const composer = uiStyle === 'claude' ? ', .composer, .composer-toolbar > div' : '';
-  const values = await page
-    .locator('.thread, .message.user .message-content' + composer)
-    .evaluateAll((nodes) =>
-      nodes.map((node) => ({
-        selector: node.className,
-        width: node.clientWidth,
-        scroll: node.scrollWidth,
-      })),
-    );
-  assert.ok(values.length >= 2);
-  for (const value of values)
-    assert.ok(value.scroll <= value.width + 1, `${label}: ${JSON.stringify(value)}`);
+  let values;
+  // Resizing updates the responsive panels and toolbar through ResizeObserver.
+  await expect
+    .poll(
+      async () => {
+        values = await page
+          .locator('.thread, .message.user .message-content' + composer)
+          .evaluateAll((nodes) =>
+            nodes.map((node) => ({
+              selector: node.className,
+              width: node.clientWidth,
+              scroll: node.scrollWidth,
+            })),
+          );
+        assert.ok(values.length >= 2);
+        return values.filter((value) => value.scroll > value.width + 1);
+      },
+      { message: `${label}: horizontal overflow` },
+    )
+    .toEqual([]);
   report.overflow.push({ label, values });
 }
 async function screenshot(mode, name) {
