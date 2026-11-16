@@ -223,6 +223,7 @@ try {
   assert.equal(service.runtime.status, 'completed', service.runtime.error ?? '');
   assert.ok((await readSessionFile(nativeChat.file)).messages.some((m) => m.role === 'assistant'));
   console.log('PASS new project/chat histories use Pi native directories after resuming legacy files');
+  await waitFor(() => !service.hasPendingWork);
   await service.disconnect();
   const settingsFile = path.join(fixture.agentDir, 'settings.json');
   const piSettings = JSON.parse(await fs.readFile(settingsFile, 'utf8'));
