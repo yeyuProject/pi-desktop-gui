@@ -335,18 +335,21 @@
   font-size: calc(11px * var(--font-scale));
   background: transparent;
 }
-.new-content {
+.conversation-jumps {
   position: absolute;
   bottom: calc(var(--composer-offset, 188px) + 12px);
   left: 50%;
-  /* `translate` composes with the `rise` transform instead of being replaced by it. */
   translate: -50% 0;
+  display: flex;
+  gap: 8px;
+  z-index: 2;
+}
+.new-content {
   animation: rise var(--motion-fast) var(--ease-out);
   background: var(--surface);
   box-shadow: var(--shadow);
   border-radius: 20px;
   font-size: calc(11px * var(--font-scale));
-  z-index: 2;
 }
 .tool-card {
   border: 1px solid transparent;
@@ -496,30 +499,44 @@
   display: flex;
   align-items: center;
   justify-content: space-between;
-  flex-wrap: wrap;
   gap: 8px;
   padding: 4px 10px 10px;
 }
-/* A narrow composer wraps whole controls onto another row instead of breaking their labels. */
+/* The toolbar stays on one row: labels give way to icons and the model name truncates. */
 .composer-toolbar > div {
   display: flex;
   align-items: center;
-  flex-wrap: wrap;
   gap: 6px;
   min-width: 0;
-  max-width: 100%;
 }
-.composer-toolbar > div:first-child > *,
-.composer-toolbar .approval-pill {
+.composer-toolbar > div:first-child > * {
   flex-shrink: 0;
+}
+/* Only the controls themselves; their menus must still wrap and stack their items. */
+.composer-toolbar > div > button,
+.composer-toolbar .approval-pill {
   white-space: nowrap;
 }
-.composer-toolbar .model-picker-anchor {
+.composer-toolbar > div:first-child > .model-picker-anchor {
   flex-shrink: 1;
-  max-width: 100%;
+  min-width: 0;
 }
 .composer-toolbar .model-pill {
   max-width: min(250px, 100%);
+}
+.composer-toolbar .model-pill > span {
+  min-width: 0;
+}
+.composer-toolbar .model-pill > em {
+  flex-shrink: 0;
+}
+.composer-toolbar.compact .toolbar-label,
+.composer-toolbar.compact .approval-pill > span,
+.composer-toolbar.narrow .composer-hint {
+  display: none;
+}
+.composer-toolbar.compact .attachment-capacity small {
+  max-width: 140px;
 }
 .goal-button {
   display: inline-flex;

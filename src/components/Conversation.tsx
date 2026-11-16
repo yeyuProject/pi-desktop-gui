@@ -10,7 +10,7 @@ const api = window.desktop;
 import type { Workbench } from '../hooks/useWorkbench';
 import { messageText, type AppState, type ToolActivity } from '../../shared/types';
 import type { ReactNode } from 'react';
-import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useEffectEvent, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { SessionSearch } from '../lib/session-search';
 import { messagePageSize, messageWindow, windowConversation } from '../lib/message-window';
 import { RuntimeToolPlacer, turnThinking } from '../lib/conversation-layout';
@@ -24,8 +24,20 @@ import { SelectionMenu } from './conversation/SelectionMenu';
 import { quoteMessageIndex, type DraftQuote } from '../../shared/message-content';
 import { APPROVAL_ALWAYS, grantLabel } from '../../shared/approval';
 import { ConversationDeriver } from '../lib/conversation-derive';
-import { isFollowing, keyIntent, nextReleased, wheelIntent } from '../lib/follow-scroll';
+import {
+  isFollowing,
+  isReplyStartAboveViewport,
+  keyIntent,
+  nextReleased,
+  wheelIntent,
+} from '../lib/follow-scroll';
 import { smoothBehavior } from '../lib/motion';
+
+function messageElement(container: HTMLElement | null, index: number, reply = false) {
+  return container?.querySelector<HTMLElement>(
+    `[data-message-index="${index}"]${reply ? ' > article.message' : ''}`,
+  );
+}
 
 function turnScrollTop(container: HTMLElement, target: HTMLElement) {
   const bounds = (target.querySelector('.message.user') ?? target).getBoundingClientRect();
@@ -113,8 +125,11 @@ export function Conversation(
     [query, setQuery] = useState(''),
     [matchIndex, setMatchIndex] = useState(0);
   const [activeTurn, setActiveTurn] = useState(1),
-    [jumpIndex, setJumpIndex] = useState<{ index: number; turn: boolean } | null>(null);
-  const [turnJump, setTurnJump] = useState<{ index: number } | null>(null);
+    [jumpIndex, setJumpIndex] = useState<{ index: number; target: 'message' | 'turn' | 'reply' } | null>(
+      null,
+    );
+  const [turnJump, setTurnJump] = useState<{ index: number; target?: 'reply' } | null>(null);
+  const [replyJumpVisible, setReplyJumpVisible] = useState(false);
   const [quoteTarget, setQuoteTarget] = useState<DraftQuote>();
   const requestedTurn = useRef<number | undefined>(undefined);
   const [historyWindow, setHistoryWindow] = useState<{ sessionId?: string; start: number }>();
@@ -215,18 +230,56 @@ export function Conversation(
     () => windowConversation(items, startIndex, endIndex),
     [items, startIndex, endIndex],
   );
-  const jump = (index: number, turn = false) => {
+  const replyIndex = turns.at(-1)?.replyIndex;
+  const availableReply =
+    !(ownRuntime && running) &&
+    approvals.length === 0 &&
+    replyIndex !== undefined &&
+    startIndex <= replyIndex &&
+    replyIndex < endIndex
+      ? replyIndex
+      : undefined;
+  const updateReplyJump = useCallback(
+    (viewportTop?: number) => {
+      const container = thread.current;
+      const reply =
+        availableReply === undefined ? undefined : messageElement(container, availableReply, true);
+      const visible = !!(
+        container &&
+        reply &&
+        isReplyStartAboveViewport(
+          { top: viewportTop ?? container.getBoundingClientRect().top },
+          reply.getBoundingClientRect(),
+        )
+      );
+      if (visible !== replyJumpVisible) setReplyJumpVisible(visible);
+    },
+    [availableReply, replyJumpVisible, thread],
+  );
+  useLayoutEffect(() => {
+    updateReplyJump();
+  }, [updateReplyJump, selected?.id, turns]);
+  const resizeReplyJump = useEffectEvent(updateReplyJump);
+  /**
+   * 1. 停止跟随底部，避免阅读落点被新输出拉走。
+   * 2. 只加载目标所在的历史窗口，保持长会话的消息数量限制。
+   * 3. 记下落点类型，等对应窗口渲染后滚动。
+   */
+  const jump = (index: number, target: 'message' | 'turn' | 'reply' = 'message') => {
+    // 1. 主动跳转后由读者决定阅读位置。
     requestedTurn.current = undefined;
     autoScroll.current = false;
-    const target = messageWindow(messages.length, index);
+    // 2. 跳到旧消息也不一次挂载全部历史。
+    const window = messageWindow(messages.length, index);
     setHistoryWindow(
-      target.end < messages.length ? { sessionId: selected?.id, start: target.start } : undefined,
+      window.end < messages.length ? { sessionId: selected?.id, start: window.start } : undefined,
     );
     setMessageLimit(messagePageSize);
-    setJumpIndex({ index, turn });
+    // 3. 正文、提问和搜索结果各有自己的落点。
+    setJumpIndex({ index, target });
   };
   const jumpToTurn = (index: number) => {
-    jump(index, true);
+    jump(index, 'turn');
     setTurnJump({ index });
     const turn = turns.find((item) => item.index === index);
     if (turn) {
@@ -398,15 +451,21 @@ export function Conversation(
     window.addEventListener('pi:turn', navigate);
     return () => window.removeEventListener('pi:turn', navigate);
   }, [turns, activeTurn, selected?.id]);
+  /**
+   * 1. 等目标渲染后找到高亮位置；结论只高亮正文。
+   * 2. 重复跳转重新计时，1 秒后清除高亮。
+   * 3. 换会话或换落点时清理旧动画和定时器。
+   */
   useEffect(() => {
     if (!turnJump) return;
     let element: HTMLElement | null | undefined;
     let clear: ReturnType<typeof setTimeout> | undefined;
     const frame = requestAnimationFrame(() => {
-      element = thread.current?.querySelector<HTMLElement>(`[data-message-index="${turnJump.index}"]`);
+      // 1. 回复前的思考块不属于结论高亮范围。
+      element = messageElement(thread.current, turnJump.index, turnJump.target === 'reply');
       if (!element) return;
+      // 2. 同一个落点再次点击时，也给足 1 秒的识别反馈。
       element.classList.remove('turn-jump-highlight');
-      // A repeated click on the same turn should restart the one-second feedback.
       void element.offsetWidth;
       element.classList.add('turn-jump-highlight');
       clear = setTimeout(() => {
@@ -415,6 +474,7 @@ export function Conversation(
       }, 1000);
     });
     return () => {
+      // 3. 防止旧会话的定时器清掉新落点的状态。
       cancelAnimationFrame(frame);
       clearTimeout(clear);
       element?.classList.remove('turn-jump-highlight');
@@ -470,6 +530,7 @@ export function Conversation(
         setNewContent(false);
       }
       threadViewport.current = { width: container.clientWidth, height: container.clientHeight };
+      resizeReplyJump();
     });
     observer.observe(container);
     observer.observe(content);
@@ -483,21 +544,43 @@ export function Conversation(
     );
     return () => cancelAnimationFrame(timer);
   }, [activeMatch]);
+  /**
+   * 1. 等历史窗口渲染后定位消息；找到目标就清掉本次请求，后续新消息不重复跳转。
+   * 2. 结论跳到正文前 12 px，焦点移回对话区，避免停在消失的按钮上。
+   * 3. 轮次和搜索继续使用各自原有的落点。
+   */
   useEffect(() => {
     if (jumpIndex === null) return;
     const timer = requestAnimationFrame(() => {
+      // 1. 每次点击只执行一次跳转，不能让下一轮的新消息把视图拉回旧落点。
       const container = thread.current;
-      const target = container?.querySelector<HTMLElement>(`[data-message-index="${jumpIndex.index}"]`);
+      const target = messageElement(container, jumpIndex.index, jumpIndex.target === 'reply');
       if (!container || !target) return;
-      if (jumpIndex.turn) {
+      setJumpIndex(null);
+      // 2. 保留少量顶部空隙，让读者能认出回复从哪里开始。
+      if (jumpIndex.target === 'reply') {
+        container.scrollTo({
+          top:
+            container.scrollTop +
+            target.getBoundingClientRect().top -
+            container.getBoundingClientRect().top -
+            12,
+          behavior: smoothBehavior(),
+        });
+        container.focus({ preventScroll: true });
+        return;
+      }
+      // 3. 轮次目录仍然定位提问，搜索仍然定位匹配内容。
+      if (jumpIndex.target === 'turn') {
         const top = turnScrollTop(container, target);
         if (Math.abs(container.scrollTop - top) <= 2) requestedTurn.current = undefined;
         container.scrollTo({ top, behavior: smoothBehavior() });
-      } else
-        target.scrollIntoView({
-          block: activeMatch ? 'center' : 'start',
-          behavior: activeMatch ? 'instant' : smoothBehavior(),
-        });
+        return;
+      }
+      target.scrollIntoView({
+        block: activeMatch ? 'center' : 'start',
+        behavior: activeMatch ? 'instant' : smoothBehavior(),
+      });
     });
     return () => cancelAnimationFrame(timer);
   }, [jumpIndex, startIndex, endIndex, activeMatch]);
@@ -781,6 +864,7 @@ export function Conversation(
           setNewContent(!autoScroll.current);
           if (selected) lastView.current = { id: selected.id, top: el.scrollTop };
           const top = el.getBoundingClientRect().top;
+          updateReplyJump(top);
           if (requestedTurn.current !== undefined) {
             const target = el.querySelector<HTMLElement>(`[data-turn="${requestedTurn.current}"]`);
             if (target && Math.abs(el.scrollTop - turnScrollTop(el, target)) <= 2)
@@ -1007,16 +1091,31 @@ export function Conversation(
           notice={props.setNotice}
         />
       )}
-      {(newContent || endIndex < messages.length || (approvals.length > 0 && !approvalVisible)) && (
-        <button
-          className={'new-content' + (approvals.length && !approvalVisible ? ' approval-attention' : '')}
-          title="滚到底部并继续跟随输出"
-          onClick={approvals.length && !approvalVisible ? () => focusApproval() : showLatest}
-        >
-          <ArrowDown size={14} />
-          {approvals.length && !approvalVisible ? `有 ${approvals.length} 项待审批` : '回到最新'}
-        </button>
-      )}
+      <div className="conversation-jumps">
+        {replyJumpVisible && availableReply !== undefined && (
+          <button
+            className="new-content"
+            title="滚到本轮最终回复的开头"
+            onClick={() => {
+              jump(availableReply, 'reply');
+              setTurnJump({ index: availableReply, target: 'reply' });
+            }}
+          >
+            <ArrowUp size={14} />
+            跳到结论
+          </button>
+        )}
+        {(newContent || endIndex < messages.length || (approvals.length > 0 && !approvalVisible)) && (
+          <button
+            className={'new-content' + (approvals.length && !approvalVisible ? ' approval-attention' : '')}
+            title="滚到底部并继续跟随输出"
+            onClick={approvals.length && !approvalVisible ? () => focusApproval() : showLatest}
+          >
+            <ArrowDown size={14} />
+            {approvals.length && !approvalVisible ? `有 ${approvals.length} 项待审批` : '回到最新'}
+          </button>
+        )}
+      </div>
     </>
   );
 }
