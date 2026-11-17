@@ -176,7 +176,8 @@ export default function App() {
         storage={model.storage}
         updateBadge={updateBadge}
       />
-      {model.sidebar && !compact && (
+      {/* Not tied to `compact`: the handle's width would flip the measurement that sets it. */}
+      {model.sidebar && (
         <ResizeHandle
           label="项目侧栏宽度"
           variable="--sidebar-width"
