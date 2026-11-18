@@ -4,6 +4,102 @@
 
 界面用词见[术语表](glossary.md)。本次优化的实现和验证记录见[测试记录](testing/optimization-prd.md)。
 
+## 检测与更新 Pi（待实现）
+
+### E5 在桌面端检查 Pi 新版本，并一键调用 `pi update` 完成更新
+
+基线为 v0.14.82（`e8df201`），行号以基线为准。Pi 的行号以 1.4.0 的 `node_modules/@earendil-works/pi-coding-agent/dist` 为准。
+
+**背景与问题。**
+
+1. **桌面端只知道当前 Pi 的版本，不知道有没有新版本。** 启动和「重新检测」时执行 `pi --version`（`electron/environment.ts:152-163`），设置 → 运行环境只显示版本号和兼容性（`src/components/SettingsModal.tsx:224-233`）。Pi 发布新版本后，用户只能自己去终端查看。
+2. **更新只能去终端操作。** 设置里只有首次安装的命令（`SettingsModal.tsx:299-310`，`shared/pi-version.ts:3` 的 `PI_INSTALL_COMMAND`）。用户要自己判断安装方式、关掉桌面端里正在运行的 Pi 进程，再回来点「重新检测」。在 Windows 上，如果会话还开着，正在被占用的原生模块可能导致更新失败。
+3. **Pi 已经提供了需要的能力，可以直接复用：**
+   - **查询最新版本：** `utils/version-check.js` 请求 `https://pi.dev/api/latest-version`，返回 `{ version, packageName?, note? }`；`PI_OFFLINE` 有值时不请求。
+   - **自我更新：** `pi update`（也可写作 `pi update pi`，`package-manager-cli.js:310-314`）。默认只更新 Pi 本体，不更新扩展。它会识别 npm、pnpm、yarn、bun 和托管安装（`config.js:44-62`）。在 Windows 上，它会先隔离原生依赖（`package-manager-cli.js:650-657`），但只支持 npm 和 pnpm 安装（`:941-946`）。已是最新版本时输出 `already up to date` 并正常退出（`:599-624`）。
+4. **桌面端已有安全断开 Pi 进程的方法。** `SessionAgents.disconnect()`（`electron/session-agents.ts:437-440`）在仍有任务或操作时会拒绝执行；应用更新的忙碌判断见 `electron/main.ts:1284`。改动 Pi 入口文件后，`preparePi` 的文件指纹会使缓存的检测结果失效（`environment.ts:202-215`）。
+
+**目标。**
+
+- 桌面端能发现 Pi 新版本：启动后自动检查，每 24 小时最多一次；也可以在设置里手动检查。
+- 在设置 → 运行环境中点击「更新 Pi」完成更新。更新期间显示进度和输出；完成后自动重新检测，显示新版本。
+- 更新前说明影响：会断开所有空闲的 Pi 进程；新版本如果还没有经过桌面端回归验证，要明确提示。
+- 失败时告诉用户原因和可以手动执行的命令，原来的 Pi 保持可用。
+
+**不做。**
+
+- 更新扩展、Skills、模型目录（即 `pi update --all`、`--extensions`、`--models`）。这些仍在「Pi 功能」中管理。
+- 降级，或固定到已验证版本 `VERIFIED`。
+- 不经用户点击自动安装更新。
+- 更新 Node.js、Git，或桌面端自身（桌面端更新已有独立流程）。
+- 在终端里打开的 Pi（`openPiTerminal`）。桌面端无法管理这些进程，只在确认弹窗里提示。
+
+**方案。**
+
+1. **检查新版本（主进程）**
+   - 新增 `electron/pi-update.ts`，导出 `checkPiUpdate(current)`。请求 `https://pi.dev/api/latest-version`，10 秒超时，`accept: application/json`，`User-Agent` 为 `pi-desktop/<桌面端版本> pi/<当前 Pi 版本>`。
+   - 代理沿用桌面端更新的设置（`electron/update-network.ts:9` 的 `updateProxy`）。环境变量 `PI_OFFLINE` 有值时不检查。
+   - 返回 `{ current, latest, packageName?, note?, newer, checkedAt }`。用 semver 比较版本：只有 `latest > current` 时 `newer` 才为真；版本号无法解析时，按"有更新"处理，并在界面上显示原始字符串。
+   - 结果保存到 store 的 `piUpdate` 字段。启动时如果距离上次检查超过 24 小时，在环境检测完成后后台检查一次。手动检查不受间隔限制。检查失败不弹窗，只在设置中显示「检查失败：<原因>」。
+   - 新增 IPC：`checkPiUpdate`（手动检查）和 `updatePi`（执行更新），在 `electron/ipc/policy.ts` 中登记：`checkPiUpdate` 用 `read`，`updatePi` 用 `configuration`（`:14`），这样它会与其他配置写入串行执行（`main.ts:1385-1398`）。
+
+2. **界面**
+   - 设置 → 运行环境的「Pi 版本」一行：
+     - 有新版本：版本号后面显示「可更新到 1.5.0」（`--accent`），右侧显示「更新 Pi」按钮。如果新版本不等于 `VERIFIED`，追加小字「未经桌面端验证」（`--muted`）。
+     - 已是最新：显示「已是最新 · 2 分钟前检查」，右侧显示「检查更新」按钮。
+     - 检查失败：显示原因和「重试」。
+   - 侧栏底部「设置」入口在有新版本时显示一个小圆点，复用桌面端更新提示的样式。只提醒，不弹窗。每个新版本只提醒一次：用户打开过运行环境页后，圆点消失。
+   - 不能更新时，「更新 Pi」按钮禁用，`title` 说明原因（见第 4 条），并在下方给出可以复制的手动命令。
+
+3. **执行更新**
+   - 点击「更新 Pi」后弹出确认框：
+     - 标题「将 Pi 从 1.4.0 更新到 1.5.0」。
+     - 正文说明：所有空闲会话的 Pi 进程会先断开，下次发送消息时自动重新连接；终端里打开的 Pi 需要自己关闭。如果新版本不等于 `VERIFIED`，加一句「1.5.0 尚未完成桌面端回归验证，可以使用；遇到问题可在诊断中附上版本号」，和 `compatibilityMessage` 的说法一致。有 `note` 时一并显示。
+     - 按钮「更新」「取消」。
+   - 确认后，主进程依次执行：
+     1. 检查前置条件（第 4 条），不满足就停止并显示原因。
+     2. 调用 `service.suspendReload(true)`，再调用 `service.disconnect()`。
+     3. 用 `resolvePi` 得到的命令执行 `<spec.command> ...spec.args update pi`。环境变量带上 `PI_CODING_AGENT_DIR` 和代理；不分配终端（非 TTY），`windowsHide: true`，超时 10 分钟。
+     4. 逐行把 stdout 和 stderr 推送到渲染端，最多保留 200 行，并用 `redact` 去掉敏感信息。
+     5. 结束后无论成功与否，都调用 `detectEnvironment` 重新检测，并恢复 `suspendReload(false)`。
+     6. 成功的判断标准：退出码为 0，并且重新检测到的版本不低于目标版本。如果退出码为 0 但版本没有变化，按失败处理，提示「Pi 报告更新完成，但检测到的版本仍是 X，可能有多个 Pi 安装」，并显示 `environment.piPath`。
+   - 更新过程中，运行环境页显示「正在更新 Pi…」、一个转圈图标，以及可折叠的输出，默认展开最后 6 行。更新没有可靠的进度百分比，所以不显示进度条。这期间发送、新建会话、连接 Pi 都禁用，原因提示为「Pi 正在更新」。
+   - 成功后显示 toast「Pi 已更新到 1.5.0」，版本一行同步刷新。失败时显示「更新失败」、最后 20 行输出、`PI_INSTALL_COMMAND` 和「复制命令」按钮。
+
+4. **前置条件与禁用原因**（按顺序检查，显示第一个不满足的）
+   - 有会话正在执行、等待审批、侧边对话正在回答、团队成员在运行，或有进行中的操作（`service.hasPendingWork || activeOperations > 0`）：提示「请等待所有任务结束后再更新 Pi」。
+   - 桌面端自身正在安装更新，或应用正在退出：提示「桌面端正在更新或退出」。
+   - 当前用的是开发环境内置的 Pi（`resolvePi` 从 `developmentRoot` 的 `node_modules` 找到入口）：提示「开发环境使用项目内的 Pi，请用 npm 更新依赖」。
+   - Pi 是单文件可执行版本（入口不是 `.js`，且同目录没有 `package.json`）：提示「此安装方式不支持自动更新，请按官方说明重新安装」，并附上链接 `https://pi.dev/docs/latest`。
+   - 其他安装方式无法提前可靠判断（例如 Windows 上的 yarn 或 bun），不在这里拦截，交给 Pi 自己报错，按第 3 条的失败流程显示。
+
+5. **数据与类型**
+   - `Settings` 不新增字段；检查结果放在 store 的 `piUpdate`。
+   - `shared/types.ts` 新增 `PiUpdateState`：`{ status: 'idle' | 'checking' | 'available' | 'current' | 'error' | 'updating' | 'failed'; current?; latest?; note?; checkedAt?; error?; output?: string[]; seenVersion? }`，随 state 下发。
+
+**验收标准。**
+
+1. 当前 Pi 版本低于 `latest-version` 返回的版本时：启动后 30 秒内，运行环境页显示「可更新到 X」和「更新 Pi」，设置入口出现圆点；打开运行环境页后圆点消失，重启后不再出现，直到又有更新的版本。
+2. 当前版本已是最新时，显示「已是最新」和检查时间。24 小时内重启不会重复请求；点「检查更新」会立即请求。
+3. 断网，或接口返回非 JSON、缺少 `version` 字段时：显示「检查失败」及原因，不弹窗，其他功能正常。设置了 `PI_OFFLINE` 时不发出请求。
+4. 有任务运行、等待审批、侧边对话正在回答时，「更新 Pi」禁用，并显示对应原因。
+5. 用模拟的 Pi（`update pi` 写入新版本号，退出码 0）更新：所有 Pi 进程被断开；输出逐行显示；结束后版本一行显示新版本，弹出 toast；随后发送消息会自动重新连接，并用新版本回复。
+6. 模拟的 Pi 返回退出码 1 时：显示「更新失败」、最后 20 行输出和手动命令；重新检测后仍是原版本，可以正常发送消息。
+7. 退出码为 0 但版本没有变化时，按失败处理，并显示 `piPath`。
+8. 更新过程中，发送、新建会话、连接 Pi 都被禁用；更新期间退出应用会提示等待，不会留下进程。
+9. 新版本不等于 `VERIFIED` 时，确认框显示"未经桌面端验证"的说明；新版本等于 `VERIFIED` 时不显示。
+10. 输出里的令牌、API Key 等敏感信息被 `redact` 遮盖。
+11. 经典、Codex、Claude 三种风格下，运行环境页的新增元素都不溢出，`npm run test:style-ui` 基线不变。
+
+**测试。**
+
+- **单元：**
+  - `checkPiUpdate` 的版本比较、预发布版本、无法解析的版本、超时、非 JSON、`PI_OFFLINE`。
+  - 前置条件的判断顺序。
+  - 成功判断：退出码与重新检测到的版本组合起来的四种情况。
+- **集成：** 在 `scripts/test-features.ts`，或新建 `scripts/test-pi-update.ts` 中，用一个假的 Pi 入口脚本：`--version` 读取临时文件里的版本号，`update pi` 改写这个文件后按参数决定退出码。验证第 5–8 条，并确认结束后没有残留的 Pi 进程。版本接口用本地 HTTP 服务模拟，不访问 `pi.dev`。
+- **UI：** 在 `scripts/test-pi-settings-ui.mjs` 增加用例，覆盖第 1、4、6、9、11 条的界面状态。
+
 ## 跳到结论（已实现，v0.14.81）
 
 ### UI16 任务完成后一键跳到本轮最终回复的开头
