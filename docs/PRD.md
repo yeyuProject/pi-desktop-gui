@@ -4,7 +4,7 @@
 
 界面用词见[术语表](glossary.md)。本次优化的实现和验证记录见[测试记录](testing/optimization-prd.md)。
 
-## 检测与更新 Pi（v0.14.83）
+## 检测与更新 Pi（v0.14.84）
 
 ### E5 在桌面端检查 Pi 新版本，并一键调用 `pi update` 完成更新
 

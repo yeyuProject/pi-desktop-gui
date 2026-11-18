@@ -117,6 +117,7 @@ try {
         )
         .toBe(160);
       await page.getByRole('button', { name: '查看项目变更', exact: true }).first().click();
+      await expect(page.locator('#workspace-inspector')).toBeVisible();
       await page.mouse.move(1, 1);
       const measurements = {};
       for (const width of [1200, 1440]) {
