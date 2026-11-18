@@ -1,13 +1,13 @@
-import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
+import { lazy, Suspense, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { IconButton } from '../IconButton';
 import { ChevronDown, FileText, Check, AlertCircle, LoaderCircle, Copy, Terminal } from 'lucide-react';
 import { type ToolActivity } from '../../../shared/types';
-import { DiffView } from '../DiffView';
 import { AnsiOutput } from '../AnsiOutput';
 import { stripAnsi } from '../../lib/ansi';
 import type { SessionMatch } from '../../lib/session-search';
 import { SearchHighlight } from './SearchHighlight';
 const api = window.desktop;
+const DiffView = lazy(() => import('../DiffView').then((m) => ({ default: m.DiffView })));
 
 export const patchLines = (patch: string) => {
   const all = patch.split('\n');
@@ -222,12 +222,14 @@ export function ToolCard({
               <SearchHighlight text={match.text} query={match.query} activeStart={match.start} />
             </pre>
           ) : tool.patch ? (
-            <DiffView
-              patch={tool.patch}
-              path={typeof tool.args.path === 'string' ? tool.args.path : undefined}
-              className="inline-diff"
-              onAskHunk={askHunk}
-            />
+            <Suspense fallback={null}>
+              <DiffView
+                patch={tool.patch}
+                path={typeof tool.args.path === 'string' ? tool.args.path : undefined}
+                className="inline-diff"
+                onAskHunk={askHunk}
+              />
+            </Suspense>
           ) : (
             <>
               {Object.keys(tool.args).length > 0 && (

@@ -35,6 +35,7 @@ export function Sidebar(
     | 'storage'
     | 'activities'
     | 'environment'
+    | 'piUpdate'
     | 'setNotice'
     | 'sidebar'
     | 'compact'
@@ -72,6 +73,9 @@ export function Sidebar(
     createSession,
     openSettings,
   } = props;
+  const piUpdating = props.piUpdate?.status === 'updating';
+  const piUpdateUnseen =
+    props.piUpdate?.status === 'available' && props.piUpdate.latest !== props.piUpdate.seenVersion;
   const [expandedProjects, setExpandedProjects] = useState<Set<string>>(() => {
     try {
       const saved = JSON.parse(localStorage.getItem('pi-desktop-expanded-projects') ?? 'null');
@@ -463,7 +467,12 @@ export function Sidebar(
           <Search size={17} />
         </IconButton>
       </div>
-      <button className="new-session" onClick={() => void createSession()}>
+      <button
+        className="new-session"
+        disabled={piUpdating}
+        title={piUpdating ? 'Pi 正在更新' : undefined}
+        onClick={() => void createSession()}
+      >
         <Plus size={17} />
         新建会话<kbd>{shortcut('N')}</kbd>
       </button>
@@ -481,7 +490,11 @@ export function Sidebar(
         </div>
         <div className="section-heading">
           项目
-          <IconButton title="添加项目" onClick={addProject}>
+          <IconButton
+            title={piUpdating ? 'Pi 正在更新' : '添加项目'}
+            disabled={piUpdating}
+            onClick={addProject}
+          >
             <Plus size={15} />
           </IconButton>
         </div>
@@ -504,7 +517,11 @@ export function Sidebar(
                 <ChevronDown size={13} className="project-chevron" />
               </button>
               <div className="project-actions">
-                <IconButton title={`在 ${p.name} 中新建会话`} onClick={() => void createSession(p.id)}>
+                <IconButton
+                  disabled={piUpdating}
+                  title={piUpdating ? 'Pi 正在更新' : `在 ${p.name} 中新建会话`}
+                  onClick={() => void createSession(p.id)}
+                >
                   <Plus size={15} />
                 </IconButton>
                 <IconButton
@@ -552,7 +569,12 @@ export function Sidebar(
               <div className="session-list" aria-label={`${p.name} 的会话`}>
                 {renderSessionList(p.id)}
                 {!state.sessions.some((session) => session.projectId === p.id) && (
-                  <button className="sidebar-project-empty" onClick={() => void createSession(p.id)}>
+                  <button
+                    className="sidebar-project-empty"
+                    disabled={piUpdating}
+                    title={piUpdating ? 'Pi 正在更新' : undefined}
+                    onClick={() => void createSession(p.id)}
+                  >
                     <Plus size={14} />
                     新建项目会话
                   </button>
@@ -578,6 +600,9 @@ export function Sidebar(
         <button onClick={() => openSettings()}>
           <Settings2 size={16} />
           设置
+          {piUpdateUnseen && (
+            <span className="pi-update-badge" aria-label="Pi 有新版本" title="Pi 有新版本" />
+          )}
           <span className={'connection-dot ' + (environment?.supported ? 'ready' : '')} />
         </button>
         <div className="sidebar-version">

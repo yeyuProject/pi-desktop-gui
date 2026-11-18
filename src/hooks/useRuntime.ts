@@ -1,13 +1,19 @@
 import {
   useCallback,
-  useEffect,
+  useLayoutEffect,
   useRef,
   useState,
   useSyncExternalStore,
   type Dispatch,
   type SetStateAction,
 } from 'react';
-import { type AppState, type Environment, type Settings, type StorageStatus } from '../../shared/types';
+import {
+  type AppState,
+  type Environment,
+  type PiUpdateState,
+  type Settings,
+  type StorageStatus,
+} from '../../shared/types';
 import { readableError } from '../lib/format';
 import { UpdateStore } from '../lib/update-store';
 import { RuntimeStore } from '../lib/runtime-store';
@@ -18,6 +24,7 @@ export function useRuntime(
 ) {
   const [snapshot, setSnapshot] = useState<{ state: AppState; revision: number }>(),
     [environment, setEnvironment] = useState<Environment>(),
+    [piUpdate, setPiUpdate] = useState<PiUpdateState>(),
     [storage, setStorage] = useState<StorageStatus>({ writable: false });
   const [runtimes] = useState(() => new RuntimeStore());
   const [updates] = useState(() => new UpdateStore());
@@ -34,13 +41,15 @@ export function useRuntime(
     receivedState.current = next;
     setSnapshot(next);
   };
-  useEffect(() => {
+  // 首次挂载就订阅并请求会话状态，主进程可以在准备页绘制时读取数据。
+  useLayoutEffect(() => {
     let alive = true;
     const unsubscribe = api.onEvent((event) => {
       if (!alive) return;
       if (event.type === 'state') receiveState(event.state, event.revision);
       else if (event.type === 'storage') setStorage(event.storage);
       else if (event.type === 'update') updates.set(event.update);
+      else if (event.type === 'piUpdate') setPiUpdate(event.piUpdate);
       else if (event.type === 'environment') setEnvironment(event.environment);
       else if (event.type === 'runtimeRemoved') {
         runtimes.remove(event.sessionId);
@@ -59,6 +68,7 @@ export function useRuntime(
           if (!runtimes.has(v.runtime.sessionId)) runtimes.set(v.runtime);
         }
         setEnvironment((previous) => previous ?? v.environment);
+        setPiUpdate((previous) => previous ?? v.piUpdate);
         setPrefs((previous) => previous ?? receivedState.current.state?.settings ?? v.state.settings);
         setStorage(v.storage);
         if (!updates.get()) updates.set(v.update);
@@ -82,6 +92,7 @@ export function useRuntime(
     anyRunning,
     environment,
     setEnvironment,
+    piUpdate,
     storage,
     updates,
   };

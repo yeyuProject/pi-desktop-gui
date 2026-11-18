@@ -104,6 +104,7 @@ export interface AppState {
   settings: Settings;
   selectedProjectId?: string;
   selectedSessionId?: string;
+  piUpdate?: PiUpdateState;
 }
 export interface StateSnapshot {
   state: AppState;
@@ -354,12 +355,26 @@ export interface Environment {
   supported: boolean;
   compatibility: PiCompatibility;
   nodePath?: string;
+  piUpdateRestriction?: 'development' | 'standalone';
   git?: string;
   bash?: string;
   agentDir: string;
   authExists: boolean;
   modelsExist: boolean;
   errors: string[];
+}
+export interface PiUpdateState {
+  status: 'idle' | 'checking' | 'available' | 'current' | 'error' | 'updating' | 'failed';
+  current?: string;
+  latest?: string;
+  packageName?: string;
+  note?: string;
+  checkedAt?: number;
+  error?: string;
+  output?: string[];
+  seenVersion?: string;
+  canRetryStop?: boolean;
+  blockedReason?: string;
 }
 export interface FileItem {
   path: string;
@@ -425,6 +440,7 @@ export type AppEvent =
   | ({ type: 'state' } & StateSnapshot)
   | { type: 'storage'; storage: StorageStatus }
   | { type: 'update'; update: UpdateState }
+  | { type: 'piUpdate'; piUpdate: PiUpdateState }
   | { type: 'runtime'; runtime: Runtime }
   | { type: 'environment'; environment: Environment }
   | { type: 'runtimeRemoved'; sessionId: string }
@@ -479,6 +495,7 @@ export interface Bootstrap extends StateSnapshot {
   dataDir: string;
   storage: StorageStatus;
   update: UpdateState;
+  piUpdate?: PiUpdateState;
 }
 export interface ApiMap {
   logRendererError: { args: [string]; result: void };
@@ -495,6 +512,10 @@ export interface ApiMap {
   checkUpdate: { args: []; result: void };
   downloadUpdate: { args: []; result: void };
   installUpdate: { args: []; result: void };
+  checkPiUpdate: { args: []; result: void };
+  seePiUpdate: { args: [version: string]; result: void };
+  updatePi: { args: []; result: string | undefined };
+  retryPiUpdateStop: { args: []; result: void };
   addProject: { args: []; result: Project | null };
   renameProject: { args: [string, string]; result: void };
   removeProject: { args: [string]; result: void };

@@ -195,6 +195,35 @@
 .environment-status svg {
   color: var(--accent);
 }
+.pi-version-status {
+  overflow-wrap: anywhere;
+}
+.pi-version-status .pi-update-available {
+  color: var(--accent);
+}
+.pi-update-available small {
+  display: block;
+  color: var(--muted);
+}
+.pi-update-output,
+.pi-update-tail {
+  margin: 8px 0;
+}
+.pi-update-output pre,
+.pi-update-tail,
+.environment-note pre {
+  max-height: 14em;
+  overflow: auto;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+.pi-update-output[open] + .pi-update-tail,
+.pi-update-tail:empty {
+  display: none;
+}
+.environment-note code {
+  overflow-wrap: anywhere;
+}
 .environment-note {
   font-size: calc(11px * var(--font-scale));
   color: var(--muted);

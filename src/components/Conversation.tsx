@@ -24,6 +24,7 @@ import { SelectionMenu } from './conversation/SelectionMenu';
 import { quoteMessageIndex, type DraftQuote } from '../../shared/message-content';
 import { APPROVAL_ALWAYS, grantLabel } from '../../shared/approval';
 import { ConversationDeriver } from '../lib/conversation-derive';
+import { useStableCallbacks } from '../hooks/useStableCallbacks';
 import {
   isFollowing,
   isReplyStartAboveViewport,
@@ -222,10 +223,15 @@ export function Conversation(
       conversationDeriver.derive(messages, tools, messageContext.toolFor, expanded, ownRuntime && running),
     [conversationDeriver, messages, runtime.tools, messageContext.toolFor, expanded, ownRuntime, running],
   );
-  const replyIndices = useMemo(
-    () => new Set(turns.flatMap((turn) => (turn.replyIndex === undefined ? [] : [turn.replyIndex]))),
-    [turns],
-  );
+  const { turnNumbers, replyIndices } = useMemo(() => {
+    const turnNumbers = new Map<number, number>();
+    const replyIndices = new Set<number>();
+    for (const turn of turns) {
+      turnNumbers.set(turn.index, turn.turn);
+      if (turn.replyIndex !== undefined) replyIndices.add(turn.replyIndex);
+    }
+    return { turnNumbers, replyIndices };
+  }, [turns]);
   const visibleItems = useMemo(
     () => windowConversation(items, startIndex, endIndex),
     [items, startIndex, endIndex],
@@ -281,12 +287,20 @@ export function Conversation(
   const jumpToTurn = (index: number) => {
     jump(index, 'turn');
     setTurnJump({ index });
-    const turn = turns.find((item) => item.index === index);
+    const turn = turnNumbers.get(index);
     if (turn) {
-      requestedTurn.current = turn.turn;
-      setActiveTurn(turn.turn);
+      requestedTurn.current = turn;
+      setActiveTurn(turn);
     }
   };
+  const outlineActions = useStableCallbacks(
+    {
+      jump: jumpToTurn,
+      focusConversation: () => thread.current?.focus({ preventScroll: true }),
+      copyReply: (index: number) => messageContext.copy(messageText(messages[index])),
+    },
+    selected?.id ?? '',
+  );
   useEffect(() => {
     const locate = (event: Event) => {
       const quote = (event as CustomEvent<DraftQuote>).detail;
@@ -715,9 +729,7 @@ export function Conversation(
       <div
         key={`${selected?.id}-${index}`}
         data-message-index={index}
-        data-turn={
-          messages[index].role === 'user' ? turns.find((turn) => turn.index === index)?.turn : undefined
-        }
+        data-turn={turnNumbers.get(index)}
         className={match && match.section !== 'thinking' ? 'search-active' : undefined}
       >
         {match && match.section !== 'thinking' && (
@@ -1085,9 +1097,7 @@ export function Conversation(
           turns={turns}
           active={activeTurn}
           running={ownRuntime && running}
-          jump={jumpToTurn}
-          focusConversation={() => thread.current?.focus({ preventScroll: true })}
-          copyReply={(index) => messageContext.copy(messageText(messages[index]))}
+          {...outlineActions}
           notice={props.setNotice}
         />
       )}

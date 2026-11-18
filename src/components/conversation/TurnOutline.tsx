@@ -61,13 +61,12 @@ export const TurnOutline = memo(function TurnOutline({
   useEffect(() => {
     if (filter !== 'all' && (!hasSummary || !counts[filter])) setFilter('all');
   }, [filter, hasSummary, counts]);
+  const activeIndex = useMemo(() => filtered.findIndex((turn) => turn.turn === active), [filtered, active]);
   useLayoutEffect(() => {
     const element = list.current;
-    if (!element || expanded) return;
+    if (!element || expanded || activeIndex < 0) return;
     const followCurrent = () => {
-      const index = filtered.findIndex((turn) => turn.turn === active);
-      if (index < 0) return;
-      element.scrollTop = Math.max(0, (index + 0.5) * rowHeight - element.clientHeight / 2);
+      element.scrollTop = Math.max(0, (activeIndex + 0.5) * rowHeight - element.clientHeight / 2);
       setOffset(element.scrollTop);
     };
     // Center while collapsed: opening never changes a tick's screen position.
@@ -75,7 +74,7 @@ export const TurnOutline = memo(function TurnOutline({
     const observer = new ResizeObserver(followCurrent);
     observer.observe(element);
     return () => observer.disconnect();
-  }, [active, filtered, expanded]);
+  }, [activeIndex, filtered.length, expanded]);
   useLayoutEffect(() => {
     if (focus === undefined) return;
     const button = list.current?.querySelector<HTMLButtonElement>(`[data-outline-index="${focus}"]`);

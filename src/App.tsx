@@ -3,11 +3,10 @@ import { LoaderCircle } from 'lucide-react';
 import { Conversation as ConversationView } from './components/Conversation';
 import { Sidebar as SidebarView } from './components/Sidebar';
 import { WorkspaceHeader as WorkspaceHeaderView } from './components/WorkspaceHeader';
-import { Inspector as InspectorView } from './components/Inspector';
 import { WorkbenchDialogs as WorkbenchDialogsView } from './components/WorkbenchDialogs';
 import { Composer as ComposerView } from './components/Composer';
 import { StorageBanner } from './components/StorageBanner';
-import { Suspense, memo, useEffect, useMemo, useState } from 'react';
+import { lazy, Suspense, memo, useEffect, useMemo, useState } from 'react';
 import { UpdateBadge } from './components/Updates';
 import { ResizeHandle } from './components/ResizeHandle';
 import {
@@ -24,7 +23,7 @@ import {
 const Sidebar = memo(SidebarView);
 const WorkspaceHeader = memo(WorkspaceHeaderView);
 const Inspector = memo(
-  InspectorView,
+  lazy(() => import('./components/Inspector').then((m) => ({ default: m.Inspector }))),
   (before, after) =>
     before.runtime.sessionId === after.runtime.sessionId &&
     before.runtime.status === after.runtime.status &&
@@ -40,19 +39,25 @@ function pick<T, K extends keyof T>(model: T, keys: readonly K[]): Pick<T, K> {
   return Object.fromEntries(keys.map((key) => [key, model[key]])) as Pick<T, K>;
 }
 export default function App() {
-  useEffect(() => {
-    const idle = window.requestIdleCallback(() => preloadDialogs());
-    return () => window.cancelIdleCallback(idle);
-  }, []);
   const model = useWorkbench();
+  const [inspectorOpened, setInspectorOpened] = useState(false);
+  useEffect(() => {
+    if (model.inspector) setInspectorOpened(true);
+  }, [model.inspector]);
   const [updateOpen, setUpdateOpen] = useState(false);
   const { state, compact, columns, error } = model;
   useEffect(() => {
     if (!state) return;
+    let idle: number | undefined;
     const frame = requestAnimationFrame(() => {
       void window.desktop.invoke('rendererReady').catch(() => {});
+      // 输入框就绪后再预加载弹窗，避免读历史和加载设置同时争用首屏。
+      idle = window.requestIdleCallback(preloadDialogs);
     });
-    return () => cancelAnimationFrame(frame);
+    return () => {
+      cancelAnimationFrame(frame);
+      if (idle !== undefined) window.cancelIdleCallback(idle);
+    };
   }, [Boolean(state)]);
   const updateBadge = useMemo(
     () => <UpdateBadge updates={model.updates} open={() => setUpdateOpen(true)} />,
@@ -111,7 +116,7 @@ export default function App() {
         )}
       </main>
     );
-  const updateBusy = model.anyRunning || model.pending;
+  const updateBusy = model.anyRunning || model.pending || model.piUpdate?.status === 'updating';
   const installUpdate = async () => {
     await model.flushDraft();
     if (model.selected && model.storage.writable)
@@ -156,6 +161,7 @@ export default function App() {
         {...pick(model, [
           'activities',
           'environment',
+          'piUpdate',
           'setNotice',
           'sidebar',
           'compact',
@@ -311,6 +317,7 @@ export default function App() {
                 'selected',
                 'project',
                 'sessionEnabled',
+                'piUpdate',
                 'ownRuntime',
                 'running',
                 'modelLocked',
@@ -365,64 +372,68 @@ export default function App() {
               </Suspense>
             </>
           )}
-          {model.inspector && !compact && (
-            <ResizeHandle
-              label="文件面板宽度"
-              variable="--inspector-width"
-              value={state.settings.inspectorWidth}
-              min={300}
-              max={720}
-              defaultValue={380}
-              direction={-1}
-              save={(width) => saveWidth('inspectorWidth', width)}
-            />
+          {(model.inspector || inspectorOpened) && (
+            <Suspense fallback={null}>
+              {model.inspector && !compact && (
+                <ResizeHandle
+                  label="文件面板宽度"
+                  variable="--inspector-width"
+                  value={state.settings.inspectorWidth}
+                  min={300}
+                  max={720}
+                  defaultValue={380}
+                  direction={-1}
+                  save={(width) => saveWidth('inspectorWidth', width)}
+                />
+              )}
+              <Inspector
+                {...pick(model, [
+                  'runtime',
+                  'pending',
+                  'compact',
+                  'inspector',
+                  'setInspector',
+                  'tab',
+                  'setTab',
+                  'selectTab',
+                  'changeMode',
+                  'setChangeMode',
+                  'changes',
+                  'setChanges',
+                  'selectedFile',
+                  'setSelectedFile',
+                  'filePreview',
+                  'setFilePreview',
+                  'fileDiff',
+                  'setFileDiff',
+                  'split',
+                  'setSplit',
+                  'inspectorPanel',
+                  'project',
+                  'ownRunning',
+                  'diffLines',
+                  'attempt',
+                  'persistDraft',
+                  'focusComposer',
+                  'addAttachment',
+                  'copy',
+                  'revert',
+                  'inspectFile',
+                  'checkpoints',
+                  'checkpointId',
+                  'setCheckpointId',
+                  'previewStale',
+                  'refreshPreview',
+                  'workspaceRevision',
+                  'previewRange',
+                  'askHunk',
+                  'rerunCommand',
+                  'saveInspectorSplit',
+                ])}
+                state={state}
+              />
+            </Suspense>
           )}
-          <Inspector
-            {...pick(model, [
-              'runtime',
-              'pending',
-              'compact',
-              'inspector',
-              'setInspector',
-              'tab',
-              'setTab',
-              'selectTab',
-              'changeMode',
-              'setChangeMode',
-              'changes',
-              'setChanges',
-              'selectedFile',
-              'setSelectedFile',
-              'filePreview',
-              'setFilePreview',
-              'fileDiff',
-              'setFileDiff',
-              'split',
-              'setSplit',
-              'inspectorPanel',
-              'project',
-              'ownRunning',
-              'diffLines',
-              'attempt',
-              'persistDraft',
-              'focusComposer',
-              'addAttachment',
-              'copy',
-              'revert',
-              'inspectFile',
-              'checkpoints',
-              'checkpointId',
-              'setCheckpointId',
-              'previewStale',
-              'refreshPreview',
-              'workspaceRevision',
-              'previewRange',
-              'askHunk',
-              'rerunCommand',
-              'saveInspectorSplit',
-            ])}
-            state={state}
-          />
         </div>
       </main>
       <Suspense fallback={null}>
@@ -465,6 +476,8 @@ export default function App() {
                     'state',
                     'runtime',
                     'environment',
+                    'piUpdate',
+                    'setNotice',
                     'error',
                     'setError',
                     'settingsOpen',

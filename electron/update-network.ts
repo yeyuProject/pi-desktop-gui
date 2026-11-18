@@ -6,8 +6,11 @@ export function updateFeed(value = '') {
   if (!url.pathname.endsWith('/')) url.pathname += '/';
   return url.href;
 }
+export function updateProxyAddress(value = '', env: NodeJS.ProcessEnv = process.env) {
+  return value.trim() || env.HTTPS_PROXY || env.https_proxy || env.ALL_PROXY || env.all_proxy || '';
+}
 export function updateProxy(value = '', env: NodeJS.ProcessEnv = process.env) {
-  const proxy = value.trim() || env.HTTPS_PROXY || env.https_proxy || env.ALL_PROXY || env.all_proxy || '';
+  const proxy = updateProxyAddress(value, env);
   if (!proxy) return { mode: 'system' as const };
   const url = new URL(proxy);
   if (

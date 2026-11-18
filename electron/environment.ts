@@ -13,6 +13,7 @@ import {
   shellCandidates,
   nodeExecutableName,
   loadLoginShellPath,
+  samePath,
 } from './platform';
 const exec = promisify(execFile);
 export async function exists(p: string) {
@@ -28,11 +29,11 @@ export const agentDirectory = (s: Settings) =>
 export async function resolvePi(
   settings: Settings,
   developmentRoot?: string,
-): Promise<{ spec: CommandSpec; entry: string; node?: string }> {
+): Promise<{ spec: CommandSpec; entry: string; node?: string; development?: boolean }> {
   await loadLoginShellPath();
-  let entry = settings.piPath || (await locateExecutable('pi'));
-  if (!entry && developmentRoot) {
-    const local = path.join(
+  const developmentPi =
+    developmentRoot &&
+    path.join(
       developmentRoot,
       'node_modules',
       '@earendil-works',
@@ -41,8 +42,8 @@ export async function resolvePi(
       'bundle',
       'cli.js',
     );
-    if (await exists(local)) entry = local;
-  }
+  let entry = settings.piPath || (await locateExecutable('pi'));
+  if (!entry && developmentPi && (await exists(developmentPi))) entry = developmentPi;
   if (!entry || !(await exists(entry))) throw new Error('未找到 Pi。请安装 Pi 或在设置中选择入口。');
   // npm links have no extension; resolve them so an explicitly chosen Node runtime is honored.
   if (process.platform !== 'win32') entry = await fs.realpath(entry);
@@ -64,7 +65,12 @@ export async function resolvePi(
     const [major, minor] = stdout.trim().replace(/^v/, '').split('.').map(Number);
     if (major < 22 || (major === 22 && minor < 19))
       throw new Error('Pi 需要 Node.js 22.19 或更高版本，请在设置 → 运行环境中选择合适的 Node。');
-    return { entry, node, spec: { command: node, args: [entry] } };
+    return {
+      entry,
+      node,
+      spec: { command: node, args: [entry] },
+      ...(developmentPi && samePath(entry, developmentPi) ? { development: true } : {}),
+    };
   }
   return { entry, spec: { command: entry, args: [] } };
 }
@@ -149,12 +155,18 @@ async function inspectEnvironment(settings: Settings, developmentRoot?: string):
     resolved = await resolvePi(settings, developmentRoot);
     result.piPath = resolved.entry;
     result.nodePath = resolved.node;
+    if (resolved.development) result.piUpdateRestriction = 'development';
+    if (!resolved.node && !(await exists(path.join(path.dirname(resolved.entry), 'package.json'))))
+      result.piUpdateRestriction = 'standalone';
     const { stdout } = await exec(resolved.spec.command, [...resolved.spec.args, '--version'], {
       timeout: 15000,
       windowsHide: true,
       env: { ...process.env, PI_CODING_AGENT_DIR: result.agentDir },
     });
-    result.version = stdout.trim().match(/(?:^|\s)v?(\d+\.\d+\.\d+(?:-[\w.-]+)?(?:\+[\w.-]+)?)(?=\s|$)/)?.[1];
+    const reportedVersion = stdout.trim();
+    result.version =
+      reportedVersion.match(/(?:^|\s)v?(\d+\.\d+\.\d+(?:-[\w.-]+)?(?:\+[\w.-]+)?)(?=\s|$)/)?.[1] ??
+      (/^[^\r\n]+$/.test(reportedVersion) ? reportedVersion : undefined);
     result.compatibility = classifyPiVersion(result.version);
     result.supported = result.compatibility !== 'unknown';
     if (!result.supported)

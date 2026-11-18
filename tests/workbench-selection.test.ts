@@ -473,6 +473,7 @@ test('actual main completion cannot unlock before its received state or a newer 
   p.f.flush();
   await p.entered.promise;
   await p.navigation.nativeCreate();
+  assert.equal(p.navigation.activeOperations, 0, 'native creation must finish its active operation');
   const c = p.store.state.selectedSessionId!;
   p.release.resolve();
   await creating;
@@ -481,6 +482,7 @@ test('actual main completion cannot unlock before its received state or a newer 
   assert.equal(p.f.current.selectionChanging, true, 'received state is not yet committed');
   p.store.session(c).draft = 'Preserve C';
   await p.navigation.nativeCreate();
+  assert.equal(p.navigation.activeOperations, 0, 'repeated native creation must not accumulate operations');
   const d = p.store.state.selectedSessionId!;
   assert.notEqual(d, c);
   await p.f.settle();
@@ -1291,6 +1293,52 @@ test('failed new chat releases the transition without connecting or changing sel
   assert.equal(f.current.selected?.id, 'A');
   assert.match(f.current.error, /创建被取消/);
   f.unmount();
+});
+
+test('failed draft save releases new-chat navigation and preserves the selected session', async (t) => {
+  const calls: string[] = [];
+  const f = harness((method) => {
+    calls.push(method);
+    return Promise.resolve([]);
+  });
+  t.after(() => f.unmount());
+  f.draft.flushDraft = async () => {
+    throw new Error('草稿保存失败');
+  };
+  f.render();
+  await f.current.createSession();
+  await f.settle();
+  assert.equal(f.current.selectionChanging, false);
+  assert.equal(f.current.sessionEnabled, true);
+  assert.equal(f.current.selected?.id, 'A');
+  assert.match(f.current.error, /草稿保存失败/);
+  assert.ok(!calls.includes('newSession'));
+});
+
+test('an obsolete draft-save failure cannot release a newer navigation request', async (t) => {
+  const saving = deferred(),
+    creating = deferred<types.Session>();
+  const f = harness((method) => (method === 'newSession' ? creating.promise : Promise.resolve([])));
+  t.after(() => f.unmount());
+  f.draft.flushDraft = () => saving.promise;
+  f.render();
+  const old = f.current.createSession();
+  f.flush();
+  f.draft.flushDraft = async () => {};
+  f.render();
+  const latest = f.current.createSession();
+  f.flush();
+  saving.reject(new Error('旧草稿保存失败'));
+  await old;
+  await f.settle();
+  assert.equal(f.current.selectionChanging, true);
+  assert.equal(f.current.sessionEnabled, false);
+  assert.equal(f.current.error, '');
+  creating.reject(new Error('当前会话创建失败'));
+  await latest;
+  await f.settle();
+  assert.equal(f.current.selectionChanging, false);
+  assert.match(f.current.error, /当前会话创建失败/);
 });
 
 test('a native-menu selection supersedes an in-flight renderer selection before its late success reply', async () => {

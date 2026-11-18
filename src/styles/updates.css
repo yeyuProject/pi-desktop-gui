@@ -6,6 +6,12 @@
   padding-block: 6px;
   font-variant-numeric: tabular-nums;
 }
+.sidebar-footer .pi-update-badge {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--accent);
+}
 .about-updates dl {
   display: grid;
   grid-template-columns: 90px 1fr;

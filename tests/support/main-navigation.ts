@@ -47,7 +47,10 @@ const { code } = transformSync(
   `const create = (store, service, publish, isReusableSession, showAppDialog, describeSystemError) => {
     const flushRendererDraft = async () => {};
     const appDialogs = { size: 0 }, updates = { state: { installing: false } };
+    const piUpdateActivity = undefined, publishPiUpdate = () => {};
     let closing = false, quitting = false, activeOperations = 0;
+    const operationWaiters = ${variable('operationWaiters').getText(source)};
+    ${declaration('finishOperation')}
     let stateRevision = 0;
     const stateSnapshot = ${variable('stateSnapshot').getText(source)};
     const window = { isDestroyed: () => false, webContents: { isDestroyed: () => false, send: (_channel, event) => publish(event) } };
@@ -63,6 +66,7 @@ const { code } = transformSync(
       nativeCreate: newSessionFromMenu,
       confirm: ${handler('navigationState')},
       appDialogs,
+      get activeOperations() { return activeOperations; },
     };
   };`,
   { loader: 'ts', format: 'cjs' },
@@ -74,7 +78,8 @@ export function createMainNavigation(store: Store, agents: SessionAgents, send: 
     agents,
     send,
     isReusableSession,
-    async () => ({ response: 0 }),
+    async (options: { message: string; detail?: string }) =>
+      assert.fail(`Unexpected navigation dialog: ${options.message} ${options.detail ?? ''}`),
     describeSystemError,
   ) as {
     create: (projectId?: string) => Promise<Session>;
@@ -82,5 +87,6 @@ export function createMainNavigation(store: Store, agents: SessionAgents, send: 
     nativeCreate: () => Promise<void>;
     confirm: () => StateSnapshot;
     appDialogs: { size: number };
+    readonly activeOperations: number;
   };
 }

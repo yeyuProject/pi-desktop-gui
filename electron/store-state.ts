@@ -70,6 +70,22 @@ export function parseState(value: unknown) {
     throw new Error('本地数据格式不受支持，请检查应用版本或从备份恢复。');
   const state = emptyState();
   if (typeof value.appVersion === 'string') state.appVersion = value.appVersion;
+  const update = value.piUpdate;
+  if (
+    object(update) &&
+    (update.status === 'available' || update.status === 'current' || update.status === 'error')
+  ) {
+    state.piUpdate = {
+      status: update.status,
+      current: typeof update.current === 'string' ? update.current : undefined,
+      latest: typeof update.latest === 'string' ? update.latest : undefined,
+      packageName: typeof update.packageName === 'string' ? update.packageName : undefined,
+      note: typeof update.note === 'string' ? update.note : undefined,
+      checkedAt: timestamp(update.checkedAt) ? update.checkedAt : undefined,
+      error: typeof update.error === 'string' ? update.error : undefined,
+      seenVersion: typeof update.seenVersion === 'string' ? update.seenVersion : undefined,
+    };
+  }
   let discardedProjects = 0,
     discardedSessions = 0,
     repairedSettings = 0;

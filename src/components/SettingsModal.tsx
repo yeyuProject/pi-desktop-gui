@@ -18,14 +18,14 @@ import {
   Users,
 } from 'lucide-react';
 import { platform } from '../lib/platform';
-import { readableError } from '../lib/format';
+import { readableError, relativeTime } from '../lib/format';
 import { useEffect, useState } from 'react';
 import { IconButton } from './IconButton';
 import { Modal } from './Modal';
 import { CopyButton } from './CopyButton';
 import { ErrorFeedback } from './ErrorFeedback';
 import { CodeBlock } from './conversation/Markdown';
-import { compatibilityLabels, PI_INSTALL_COMMAND, PI_SOURCE_URL } from '../../shared/pi-version';
+import { compatibilityLabels, PI_INSTALL_COMMAND, PI_SOURCE_URL, VERIFIED } from '../../shared/pi-version';
 import { PiCompatibilityNotice } from './PiCompatibilityNotice';
 const api = window.desktop;
 import type { Workbench } from '../hooks/useWorkbench';
@@ -58,6 +58,8 @@ export function SettingsModal(
     | 'state'
     | 'runtime'
     | 'environment'
+    | 'piUpdate'
+    | 'setNotice'
     | 'error'
     | 'setError'
     | 'settingsOpen'
@@ -127,6 +129,22 @@ export function SettingsModal(
     setModel,
     setThinking,
   } = props;
+  const { piUpdate } = props;
+  const piUpdating = piUpdate?.status === 'updating';
+  const piUpdateAvailable =
+    piUpdate?.status === 'available' || (piUpdate?.status === 'failed' && Boolean(piUpdate.latest));
+  const unseenPiVersion =
+    piUpdate?.status === 'available' && piUpdate.latest !== piUpdate.seenVersion
+      ? piUpdate.latest
+      : undefined;
+  const installCommand =
+    piUpdate?.status !== 'failed' && environment?.piUpdateRestriction === 'development'
+      ? 'npm install -D @earendil-works/pi-coding-agent@latest'
+      : PI_INSTALL_COMMAND;
+  useEffect(() => {
+    if (settingsOpen && settingsTab === 'environment' && unseenPiVersion)
+      void api.invoke('seePiUpdate', unseenPiVersion).catch((error) => setError(readableError(error)));
+  }, [settingsOpen, settingsTab, unseenPiVersion, setError]);
   const dirty = Boolean(
     settingsOpen &&
     prefs &&
@@ -216,13 +234,17 @@ export function SettingsModal(
                 <>
                   <div className="settings-heading">
                     <h3>本机运行环境</h3>
-                    <button disabled={pending} onClick={() => void action(detect)}>
+                    <button
+                      disabled={pending || piUpdating}
+                      title={piUpdating ? 'Pi 正在更新' : undefined}
+                      onClick={() => void action(detect)}
+                    >
                       <RefreshCw size={14} />
                       重新检测
                     </button>
                   </div>
                   <div className="environment-status">
-                    <div>
+                    <div className="pi-version-status">
                       <span>Pi 版本</span>
                       <strong>
                         {environment?.version || '未检测到'}
@@ -230,6 +252,41 @@ export function SettingsModal(
                           ` · ${compatibilityLabels[environment.compatibility]}`}
                       </strong>
                       {environment?.supported ? <CheckCircle2 size={16} /> : <AlertCircle size={16} />}
+                      {piUpdateAvailable && (
+                        <span className="pi-update-available">
+                          可更新到 {piUpdate.latest}
+                          {piUpdate.latest !== VERIFIED && <small>未经桌面端验证</small>}
+                        </span>
+                      )}
+                      {piUpdate?.status === 'current' && piUpdate.checkedAt !== undefined && (
+                        <span>已是最新 · {relativeTime(piUpdate.checkedAt)}检查</span>
+                      )}
+                      {piUpdate?.status === 'checking' && <span role="status">正在检查 Pi 更新…</span>}
+                      {piUpdating && (
+                        <span role="status">
+                          <LoaderCircle size={13} className="spin" /> 正在更新 Pi…
+                        </span>
+                      )}
+                      {piUpdate?.status === 'error' && <span role="status">检查失败：{piUpdate.error}</span>}
+                      {piUpdateAvailable && (
+                        <button
+                          disabled={Boolean(piUpdate.blockedReason) || pending}
+                          title={piUpdate.blockedReason}
+                          onClick={() =>
+                            void action(async () => {
+                              const version = await api.invoke('updatePi');
+                              if (version) props.setNotice(`Pi 已更新到 ${version}`);
+                            })
+                          }
+                        >
+                          更新 Pi
+                        </button>
+                      )}
+                      {environment?.version && !piUpdating && piUpdate?.status !== 'checking' && (
+                        <button onClick={() => void attempt(() => api.invoke('checkPiUpdate'))}>
+                          {piUpdate?.status === 'error' ? '重试' : '检查更新'}
+                        </button>
+                      )}
                     </div>
                     <div>
                       <span>Git</span>
@@ -240,6 +297,50 @@ export function SettingsModal(
                       <strong>{environment?.bash ? '已找到' : '未找到'}</strong>
                     </div>
                   </div>
+                  {piUpdating && piUpdate.error && (
+                    <div className="environment-note" role="alert">
+                      <p>{piUpdate.error}</p>
+                      {piUpdate.canRetryStop && (
+                        <button onClick={() => void attempt(() => api.invoke('retryPiUpdateStop'))}>
+                          重试停止
+                        </button>
+                      )}
+                    </div>
+                  )}
+                  {piUpdating && (
+                    <details className="pi-update-output">
+                      <summary>
+                        更新输出{piUpdate.output?.length ? `（${piUpdate.output.length} 行）` : ''}
+                      </summary>
+                      <pre>{piUpdate.output?.join('\n') || '正在等待 Pi 输出…'}</pre>
+                    </details>
+                  )}
+                  {piUpdating && (
+                    <pre className="pi-update-tail">{piUpdate.output?.slice(-6).join('\n')}</pre>
+                  )}
+                  {piUpdate?.status === 'failed' && (
+                    <div className="environment-note" role="status">
+                      <strong>更新失败</strong>
+                      <p>{piUpdate.error}</p>
+                      {Boolean(piUpdate.output?.length) && (
+                        <pre>{piUpdate.output?.slice(-20).join('\n')}</pre>
+                      )}
+                    </div>
+                  )}
+                  {((piUpdateAvailable && piUpdate.blockedReason) || piUpdate?.status === 'failed') && (
+                    <div className="environment-note">
+                      {piUpdate.blockedReason && <p>{piUpdate.blockedReason}</p>}
+                      <code>{installCommand}</code>
+                      <div className="button-row">
+                        <CopyButton title="复制命令" copy={() => api.invoke('copy', installCommand)} />
+                        {environment?.piUpdateRestriction === 'standalone' && (
+                          <button onClick={() => void api.invoke('openLink', 'https://pi.dev/docs/latest')}>
+                            查看官方安装说明
+                          </button>
+                        )}
+                      </div>
+                    </div>
+                  )}
                   {environment && <PiCompatibilityNotice environment={environment} />}
                   {environment?.errors.map((e) => (
                     <p className="environment-note" key={e}>
@@ -314,7 +415,11 @@ export function SettingsModal(
                 <>
                   <div className="settings-heading">
                     <h3>模型与凭据</h3>
-                    <button disabled={!sessionEnabled || pending || running} onClick={connect}>
+                    <button
+                      disabled={!sessionEnabled || pending || running}
+                      title={piUpdating ? 'Pi 正在更新' : undefined}
+                      onClick={connect}
+                    >
                       <Link2 size={14} />
                       连接 Pi
                     </button>

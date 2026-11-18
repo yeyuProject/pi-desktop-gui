@@ -141,6 +141,16 @@ export const RichText = memo(function RichText({
       ))}
       {streaming && parts.plain ? (
         <div className="streaming-markdown-text">{parts.tail}</div>
+      ) : parts.paragraphStart !== undefined ? (
+        <>
+          {parts.paragraphStart > parts.offset && (
+            <>
+              <MarkdownBlock text={text.slice(parts.offset, parts.paragraphStart)} />
+              {'\n'}
+            </>
+          )}
+          <p>{text.slice(parts.paragraphStart)}</p>
+        </>
       ) : (
         <MarkdownBlock text={parts.tail} />
       )}

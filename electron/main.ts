@@ -36,15 +36,18 @@ import {
   messageText,
   type ApiMap,
   type AppEvent,
+  type Environment,
+  type PiUpdateState,
   type Runtime,
   type Settings,
   type StateSnapshot,
 } from '../shared/types';
+import { VERIFIED, compatibilityMessage } from '../shared/pi-version';
 import { nativeThemeSource, windowTheme } from '../shared/window-theme';
 import { redact } from './agent';
 import { AppDialogRequests, type DialogOptions } from './app-dialogs';
 import { canonicalWritePath, isWithinDirectory } from './approval-paths';
-import { agentDirectory, detectEnvironment } from './environment';
+import { agentDirectory, detectEnvironment, resolvePi } from './environment';
 import { validateImages } from './images';
 import { createAgentHandlers, type AgentHandlerName } from './ipc/agent-handlers';
 import { createDraftHandlers, type DraftHandlerName } from './ipc/draft-handlers';
@@ -55,6 +58,13 @@ import { createWorkspaceHandlers, type WorkspaceHandlerName } from './ipc/worksp
 import { clearDesktopRecords } from './local-data';
 import { planMessageLink } from './message-link';
 import { isMac, loadLoginShellPath, openWithApp, pathKey, samePath, terminalOpen } from './platform';
+import {
+  checkPiUpdate,
+  comparePiVersions,
+  piUpdateBlockedReason,
+  piUpdateFailure,
+  runPiUpdate,
+} from './pi-update';
 import { SessionAgents } from './session-agents';
 import { SideChats } from './side-chats';
 import { readSignedUpdate } from './signed-update-provider';
@@ -80,6 +90,9 @@ interface SideFlight {
 let sideFlight: SideFlight | undefined;
 let workspaceCleanup: Promise<void> | undefined;
 let updates: UpdateService;
+let piUpdateActivity: PiUpdateState | undefined;
+let retryPiStop: (() => void) | undefined;
+const piUpdatingMessage = 'Pi 正在更新';
 let quitting = false;
 const draftWaiters = new Map<string, () => void>();
 async function flushRendererDraft() {
@@ -122,28 +135,58 @@ const developmentRoot = app.isPackaged ? undefined : app.getAppPath();
 const appUserModelId = app.isPackaged ? 'io.yeyuproject.pi-desktop' : 'io.yeyuproject.pi-desktop.dev';
 let stateRevision = 0;
 let environmentRevision = 0;
+let pendingEnvironmentProbes = 0;
 const environmentSettingsKey = (settings: Settings) =>
   JSON.stringify([settings.piPath, settings.nodePath, agentDirectory(settings)]);
 let environmentSnapshot: { key: string; value: Awaited<ReturnType<typeof detectEnvironment>> } | undefined;
+/**
+ * 1. 登记正在运行的环境检测，更新安装必须等它退出。
+ * 2. 只采用最后一次检测。期间更换入口就重新检测，入口或版本变化就清除旧的安装失败提示。
+ * 3. 用本机版本和上次查到的最新版本重新判断是否需要更新，再通知界面。
+ */
 async function refreshEnvironment(): Promise<Awaited<ReturnType<typeof detectEnvironment>>> {
   const revision = ++environmentRevision;
   const settings = store.state.settings;
   const key = environmentSettingsKey(settings);
-  const environment = await detectEnvironment(settings, developmentRoot).catch((error) => ({
-    piPath: '',
-    supported: false,
-    compatibility: 'unknown' as const,
-    agentDir: agentDirectory(settings),
-    authExists: false,
-    modelsExist: false,
-    errors: [(error as Error).message],
-  }));
+  // 1. 诊断预览和手动检测都会运行 Pi，安装前必须等两种探测都结束。
+  pendingEnvironmentProbes++;
+  publishPiUpdate();
+  const environment: Environment = await detectEnvironment(settings, developmentRoot)
+    .catch((error) => ({
+      piPath: '',
+      supported: false,
+      compatibility: 'unknown' as const,
+      agentDir: agentDirectory(settings),
+      authExists: false,
+      modelsExist: false,
+      errors: [(error as Error).message],
+    }))
+    .finally(() => pendingEnvironmentProbes--);
   if (revision === environmentRevision) {
-    // Layout/theme saves replace settings too; only Pi paths invalidate a probe.
+    // 2. 布局设置不影响 Pi；只有入口相关设置变化才需要重新探测。
     if (key !== environmentSettingsKey(store.state.settings)) return refreshEnvironment();
+    const previous = environmentSnapshot;
     environmentSnapshot = { key, value: environment };
+    // 3. 用户可以从终端更新 Pi，本机版本发生变化时无需等待下次联网检查。
+    const saved = store.state.piUpdate;
+    if (saved?.latest && environment.version && saved.current !== environment.version) {
+      store.state.piUpdate = {
+        ...saved,
+        current: environment.version,
+        status: (comparePiVersions(saved.latest, environment.version) ?? 1) > 0 ? 'available' : 'current',
+      };
+    }
+    if (
+      piUpdateActivity?.status === 'failed' &&
+      (previous?.key !== key ||
+        previous.value.piPath !== environment.piPath ||
+        piUpdateActivity.current !== environment.version ||
+        store.state.piUpdate?.status === 'current')
+    )
+      piUpdateActivity = undefined;
     send({ type: 'environment', environment });
   }
+  publishPiUpdate();
   return environment;
 }
 
@@ -160,6 +203,241 @@ const send = (
     window.webContents.send('desktop:event', value);
   if (event.type === 'state') void watchSelectedProject();
 };
+function piUpdateView(ownOperation = 0) {
+  const environment =
+    environmentSnapshot?.key === environmentSettingsKey(store.state.settings)
+      ? environmentSnapshot.value
+      : undefined;
+  const saved = store.state.piUpdate;
+  const update =
+    piUpdateActivity ?? (environment && saved?.current === environment.version ? saved : undefined);
+  if (!update) return { status: 'idle' } satisfies PiUpdateState;
+  if ((update.status === 'available' || update.status === 'failed') && update.latest) {
+    const reason = piUpdateBlockedReason(
+      service.hasPendingWork ||
+        Boolean(sideFlight) ||
+        pendingEnvironmentProbes > 0 ||
+        activeOperations > ownOperation,
+      updates.state.installing || closing || quitting || sessionEnding,
+      environment,
+      store.state.settings.updateProxy,
+    );
+    return {
+      ...update,
+      blockedReason: reason || (!store.storage.writable ? store.storage.problem : undefined),
+    };
+  }
+  return update;
+}
+let lastPiUpdate: PiUpdateState | undefined;
+function publishPiUpdate() {
+  const update = piUpdateView();
+  if (
+    lastPiUpdate === update ||
+    (lastPiUpdate &&
+      (Object.keys(update) as (keyof PiUpdateState)[]).every((key) => update[key] === lastPiUpdate?.[key]) &&
+      Object.keys(update).length === Object.keys(lastPiUpdate).length)
+  )
+    return;
+  if (update.status !== lastPiUpdate?.status) {
+    const newSessionItem = Menu.getApplicationMenu()?.getMenuItemById('new-session');
+    if (newSessionItem) newSessionItem.enabled = update.status !== 'updating';
+  }
+  lastPiUpdate = update;
+  send({ type: 'piUpdate', piUpdate: update });
+}
+
+/**
+ * 1. 确定当前安装的 Pi 版本，用桌面端更新代理查询最新版本。
+ * 2. 入口配置没变时，保存检查结果和时间，重启时沿用 24 小时间隔。
+ */
+async function requestPiUpdateCheck(automatic = false) {
+  if (
+    process.env.PI_OFFLINE ||
+    piUpdateActivity?.status === 'checking' ||
+    piUpdateActivity?.status === 'updating'
+  )
+    return;
+  if (automatic && Date.now() - (store.state.piUpdate?.checkedAt ?? 0) < 24 * 60 * 60_000) {
+    publishPiUpdate();
+    return;
+  }
+  const settings = store.state.settings;
+  const key = environmentSettingsKey(settings);
+  piUpdateActivity = { status: 'checking' };
+  publishPiUpdate();
+  try {
+    // 1. 以桌面端实际会启动的入口为准。
+    const environment =
+      environmentSnapshot?.key === key ? environmentSnapshot.value : await refreshEnvironment();
+    if (!environment.version) return;
+    const checkedAt = Date.now();
+    const result = await checkPiUpdate(environment.version, app.getVersion(), async (url, options) => {
+      const session = electronSession.fromPartition('pi-update');
+      await session.setProxy(updateProxy(settings.updateProxy));
+      await session.closeAllConnections();
+      return session.fetch(url, options);
+    }).then(
+      (release): PiUpdateState | undefined =>
+        release && {
+          status: release.newer ? 'available' : 'current',
+          current: release.current,
+          latest: release.latest,
+          packageName: release.packageName,
+          note: release.note,
+          checkedAt: release.checkedAt,
+        },
+      (error): PiUpdateState => ({
+        status: 'error',
+        current: environment.version,
+        checkedAt,
+        error: describeOperationError(error),
+      }),
+    );
+    // 2. 设置变更后舍弃旧入口的结果；检查失败也要保留已经看过的版本。
+    if (
+      !result ||
+      environmentSettingsKey(store.state.settings) !== key ||
+      environmentSnapshot?.value.version !== environment.version
+    )
+      return;
+    store.state.piUpdate = { ...result, seenVersion: store.state.piUpdate?.seenVersion };
+    if (store.storage.writable)
+      await store.save().catch((error) => console.error('Pi version check save:', error));
+  } finally {
+    piUpdateActivity = undefined;
+    publishPiUpdate();
+  }
+}
+
+/**
+ * 1. 让用户确认目标版本，再核对入口和任务状态，有变动就结束本次更新。
+ * 2. 暂停新任务和配置重载，断开空闲进程，再更新 Pi 并保留最近 200 行脱敏输出。
+ * 3. 无论更新结果怎样都重新检测入口，核实版本后恢复会话操作。
+ */
+async function installPiUpdate() {
+  const update = piUpdateView(1);
+  if ((update.status !== 'available' && update.status !== 'failed') || !update.current || !update.latest)
+    return;
+  if (update.blockedReason) throw new Error(update.blockedReason);
+  const { current, latest } = update;
+  const confirmed = await showAppDialog({
+    type: 'question',
+    message: `将 Pi 从 ${current} 更新到 ${latest}`,
+    detail: [
+      '所有空闲会话的 Pi 进程会先断开，下次发送消息时会自动重新连接。请自行关闭终端里打开的 Pi。',
+      latest !== VERIFIED ? compatibilityMessage(latest, 'unverified') : '',
+      update.note,
+    ]
+      .filter(Boolean)
+      .join('\n\n'),
+    buttons: ['取消', '更新'],
+    defaultId: 0,
+    cancelId: 0,
+  });
+  if (confirmed.response !== 1) return;
+  // 1. 等待用户确认期间后台任务和 Pi 入口都可能变化。
+  const settings = store.state.settings;
+  const { spec, entry } = await resolvePi(settings, developmentRoot);
+  const afterConfirmation = piUpdateView(1);
+  if (afterConfirmation.blockedReason) throw new Error(afterConfirmation.blockedReason);
+  if (
+    afterConfirmation.current !== current ||
+    afterConfirmation.latest !== latest ||
+    entry !== environmentSnapshot?.value.piPath
+  )
+    throw new Error('Pi 入口或版本信息已变化，请重新检测后再更新。');
+  const proxy = updateProxy(store.state.settings.updateProxy);
+
+  // 2. 在断开旧进程前先禁止启动新的 Pi，避免更新时占用安装文件。
+  const { blockedReason: _reason, output: _previousOutput, error: _previousError, ...target } = update;
+  const output: string[] = [];
+  piUpdateActivity = { ...target, status: 'updating', output };
+  publishPiUpdate();
+  service.suspendReload(true);
+  try {
+    const env = { ...process.env, PI_CODING_AGENT_DIR: agentDirectory(settings) };
+    if (proxy.mode === 'fixed_servers')
+      Object.assign(env, {
+        HTTP_PROXY: proxy.proxyRules,
+        http_proxy: proxy.proxyRules,
+        HTTPS_PROXY: proxy.proxyRules,
+        https_proxy: proxy.proxyRules,
+        ALL_PROXY: proxy.proxyRules,
+        all_proxy: proxy.proxyRules,
+      });
+    const result = await service
+      .disconnect()
+      .then(() =>
+        runPiUpdate(
+          spec,
+          env,
+          (line) => {
+            output.push(line);
+            if (output.length > 200) output.shift();
+            piUpdateActivity = { ...piUpdateActivity, status: 'updating', output: [...output] };
+            publishPiUpdate();
+          },
+          (cause, retry) => {
+            console.error(
+              'Pi update stop:',
+              redact(cause instanceof Error ? (cause.stack ?? cause.message) : String(cause)),
+            );
+            retryPiStop = retry;
+            piUpdateActivity = {
+              ...piUpdateActivity,
+              status: 'updating',
+              canRetryStop: Boolean(retry),
+              error: retry
+                ? 'Pi 更新超时，更新进程仍在运行。请重试停止，或在系统进程管理器中结束本次更新的进程。'
+                : 'Pi 更新超时，主进程已退出，仍在等待子进程关闭输出。请在系统进程管理器中结束本次更新的包管理器。',
+            };
+            publishPiUpdate();
+          },
+        ),
+      )
+      .then(
+        (code) => ({ code, error: '' }),
+        (error: unknown) => {
+          const detail = error instanceof Error ? (error.stack ?? error.message) : String(error);
+          service.runtime.diagnostic = [...service.runtime.diagnostic, redact(detail).slice(-4000)].slice(
+            -100,
+          );
+          return { code: null, error: describeOperationError(error) };
+        },
+      );
+
+    // 3. 包管理器退出成功后仍要检查桌面端实际使用的 Pi 是否更新。
+    retryPiStop = undefined;
+    if (piUpdateActivity?.error) {
+      piUpdateActivity = { ...piUpdateActivity, error: undefined, canRetryStop: false };
+      publishPiUpdate();
+    }
+    const detected = await refreshEnvironment();
+    const error = result.error || piUpdateFailure(result.code, current, latest, detected);
+    if (error) {
+      piUpdateActivity = {
+        ...target,
+        status: 'failed',
+        current: detected.version ?? current,
+        latest: store.state.piUpdate?.status === 'current' ? undefined : latest,
+        error,
+        output,
+      };
+      return;
+    }
+    store.state.piUpdate = { ...target, current: detected.version, status: 'current' };
+    if (store.storage.writable)
+      await store.save().catch((cause) => console.error('Pi update result save:', cause));
+    piUpdateActivity = undefined;
+    return detected.version;
+  } finally {
+    retryPiStop = undefined;
+    if (piUpdateActivity?.status === 'updating') piUpdateActivity = undefined;
+    service.suspendReload(false);
+    publishPiUpdate();
+  }
+}
 let appDialogsReady = false;
 let workbenchReady = false;
 let rendererResponsive = true;
@@ -451,20 +729,30 @@ function protectSessionOperation(method: string, args: unknown[]) {
   if (transient) return save();
 }
 async function newSession(projectId?: string) {
+  if (piUpdateActivity?.status === 'updating') throw new Error(piUpdatingMessage);
   const s = store.createPlaceholder(projectId, (id) => service.connected(id));
   await save();
   return s;
 }
 async function newSessionFromMenu() {
-  if (appDialogs.size || closing || quitting || updates.state.installing) return;
+  if (
+    appDialogs.size ||
+    closing ||
+    quitting ||
+    updates.state.installing ||
+    piUpdateActivity?.status === 'updating'
+  )
+    return;
   try {
     store.assertWritable();
     activeOperations++;
     try {
+      publishPiUpdate();
       await flushRendererDraft();
       await newSession();
     } finally {
       finishOperation();
+      publishPiUpdate();
     }
   } catch (error) {
     console.error('New session from menu failed:', error);
@@ -553,7 +841,8 @@ async function exportSession(id: string, format: 'html' | 'jsonl') {
   return chosen.filePath;
 }
 async function diagnostics() {
-  const environment = await detectEnvironment(store.state.settings, developmentRoot);
+  const environment =
+    piUpdateActivity?.status === 'updating' ? environmentSnapshot!.value : await refreshEnvironment();
   const agent = store.state.selectedSessionId ? service.get(store.state.selectedSessionId) : undefined;
   diagnosticPreview = redact(
     JSON.stringify(
@@ -720,6 +1009,14 @@ const handlers: Record<
     return session;
   },
   rendererReady: () => {
+    // 输入框可用后再启动 Pi 版本检测；重载页面会重新检测一次。
+    if (!workbenchReady && piUpdateActivity?.status !== 'updating')
+      void refreshEnvironment()
+        .then(() => {
+          publishPiUpdate();
+          return requestPiUpdateCheck(true);
+        })
+        .catch((error) => console.error('Pi version check:', error));
     workbenchReady = true;
     if (appDialogsReady) void acknowledgeUpdateHealth(app.getVersion()).catch(() => {});
   },
@@ -811,7 +1108,6 @@ const handlers: Record<
     );
   },
   bootstrap: async () => {
-    void refreshEnvironment().catch(() => {});
     service.resync();
     return {
       ...stateSnapshot(),
@@ -823,12 +1119,33 @@ const handlers: Record<
       dataDir: store.dir,
       storage: store.storage,
       update: updates.state,
+      piUpdate: piUpdateView(),
     };
   },
   navigationState: () => stateSnapshot(),
   checkUpdate: () => updates.check(),
   downloadUpdate: () => updates.download(),
   installUpdate: () => updates.install(),
+  checkPiUpdate: () => requestPiUpdateCheck(),
+  seePiUpdate: async (version) => {
+    text(version, 256);
+    const update = store.state.piUpdate;
+    if (update?.status !== 'available' || update.latest !== version || update.seenVersion === version) return;
+    store.state.piUpdate = { ...update, seenVersion: version };
+    if (piUpdateActivity?.latest === version)
+      piUpdateActivity = { ...piUpdateActivity, seenVersion: version };
+    publishPiUpdate();
+    if (store.storage.writable) await store.save();
+  },
+  updatePi: installPiUpdate,
+  retryPiUpdateStop: () => {
+    if (!retryPiStop || piUpdateActivity?.status !== 'updating') return;
+    const stop = retryPiStop;
+    retryPiStop = undefined;
+    piUpdateActivity = { ...piUpdateActivity, error: undefined, canRetryStop: false };
+    publishPiUpdate();
+    stop();
+  },
   exportSession,
   shareSession: async (id) => {
     text(id, 100);
@@ -1033,6 +1350,20 @@ async function createWindow() {
   window.on('close', (event) => {
     if (quitting) return;
     event.preventDefault();
+    if (piUpdateActivity?.status === 'updating') {
+      appQuitRequested = false;
+      if (!appDialogs.size)
+        void showAppDialog(
+          {
+            message: piUpdatingMessage,
+            detail: piUpdateActivity.error
+              ? piUpdateActivity.error + (retryPiStop ? ' 可在设置的运行环境页重试停止。' : '')
+              : '请等 Pi 更新结束后再退出 Pi Desktop。',
+          },
+          true,
+        );
+      return;
+    }
     if (updates.state.installing) return;
     if (appDialogs.size) {
       cancelAppDialogs();
@@ -1242,6 +1573,7 @@ else {
       await watchSelectedProject();
       service.on('runtimePatch', (patch) => {
         send({ type: 'runtimePatch', patch });
+        if (patch.status !== undefined || patch.dialogs !== undefined) publishPiUpdate();
       });
       service.on('attention', notifyAttention);
       service.on('runtimeRemoved', (sessionId) => {
@@ -1251,7 +1583,10 @@ else {
         send({ type: 'runtimeRemoved', sessionId });
       });
       service.on('state', (state) => send({ type: 'state', state }));
-      store.on('storage', (storage) => send({ type: 'storage', storage }));
+      store.on('storage', (storage) => {
+        send({ type: 'storage', storage });
+        publishPiUpdate();
+      });
       const installation = updateInstallation(process.platform, app.isPackaged, process.env);
       const updateEnabled = app.isPackaged && !process.env.PI_DESKTOP_DATA_DIR;
       const updateAttempts =
@@ -1319,7 +1654,10 @@ else {
           quitting = false;
         },
       });
-      updates.on('update', (update) => send({ type: 'update', update }));
+      updates.on('update', (update) => {
+        send({ type: 'update', update });
+        publishPiUpdate();
+      });
       powerMonitor.on('shutdown', () => {
         sessionEnding = true;
         updates.prepareForQuit(false);
@@ -1344,11 +1682,28 @@ else {
           if (updates.state.installing && method === 'saveView') return;
           const policy = invocationPolicy(method as keyof ApiMap, args, store.state.settings);
           if (updates.state.installing && !policy.duringUpdate) throw new Error('正在准备重启更新，请稍候');
+          if (
+            piUpdateActivity?.status === 'updating' &&
+            ((policy.operation === 'engine' && method !== 'selectSession') ||
+              policy.configuration ||
+              [
+                'addProject',
+                'newSession',
+                'importSession',
+                'sideChatSend',
+                'sideChatContinue',
+                'detect',
+              ].includes(method))
+          )
+            throw new Error(piUpdatingMessage);
           if (!store.storage.writable && policy.access === 'write') store.assertWritable();
           // Autosaves already scheduled before a dialog opened may still finish safely.
           if (appDialogs.size && !policy.duringDialog) throw new Error('请先完成当前确认');
           trackedOperation = policy.tracked;
-          if (trackedOperation) activeOperations++;
+          if (trackedOperation) {
+            activeOperations++;
+            publishPiUpdate();
+          }
           const invoke = () => {
             // Relocation commits must not race deletion, project removal or draft
             // replacement. Read-only navigation remains available throughout.
@@ -1410,6 +1765,7 @@ else {
           throw new Error(describeOperationError(e));
         } finally {
           if (trackedOperation) finishOperation();
+          if (trackedOperation || method === 'detect') publishPiUpdate();
         }
       });
       Menu.setApplicationMenu(
@@ -1444,6 +1800,7 @@ else {
             label: '文件',
             submenu: [
               {
+                id: 'new-session',
                 label: '新建会话',
                 accelerator: 'CmdOrCtrl+N',
                 registerAccelerator: false,

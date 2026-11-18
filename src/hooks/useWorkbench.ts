@@ -28,7 +28,6 @@ import { readableError } from '../lib/format';
 import { PI_SOURCE_URL } from '../../shared/pi-version';
 import { notice as setNotice, dismissNotice } from '../lib/notice-store';
 
-import { useLayer } from './useLayer';
 import { type MessageContext } from '../components/conversation/ChatMessage';
 const api = window.desktop;
 const noTools: ToolActivity[] = [];
@@ -61,6 +60,7 @@ export function useWorkbench() {
     anyRunning,
     environment,
     setEnvironment,
+    piUpdate,
     storage,
     updates,
   } = useRuntime(setError, setPrefs);
@@ -156,6 +156,7 @@ export function useWorkbench() {
   }
   const sessionEnabled =
     !selectionChanging &&
+    piUpdate?.status !== 'updating' &&
     storage.writable &&
     (!runtime.crash || runtime.crash.cleanup === 'confirmed') &&
     Boolean(selected && (!selected.projectId || project?.trusted));
@@ -164,7 +165,6 @@ export function useWorkbench() {
     ownRunning = ownRuntime && running;
   const modelLocked = !sessionEnabled || !runtime.models.length || (pending && !running);
   const draftState = useDraft({
-    state,
     stateRef,
     selected,
     project,
@@ -240,7 +240,6 @@ export function useWorkbench() {
   const transcript = useMemo(() => transcriptIndex.derive(messages), [transcriptIndex, messages]);
   const sentPrompts = transcript.prompts;
 
-  useLayer(inspectorPanel, inspector, () => setInspector(false), { kind: 'panel', trapFocus: compact });
   async function attempt<T>(fn: () => Promise<T>, sessionId = selected?.id ?? ''): Promise<T | undefined> {
     try {
       return await fn();
@@ -620,12 +619,27 @@ export function useWorkbench() {
       setPending(false, s.id);
     }
   }
+  /**
+   * 1. Pi 更新期间不能新建会话；平时先保存当前草稿，避免丢失输入。
+   * 2. 创建成功后确认主进程选中的会话；只有本次切换仍有效时才聚焦输入框。
+   * 3. 保存或创建失败时显示错误并结束本次切换；旧请求不能影响新的切换。
+   */
   async function createSession(projectId?: string) {
+    // 1. 草稿尚未保存时不能离开当前会话。
+    if (piUpdate?.status === 'updating') return;
     const request = beginSelection();
-    await flushDraft();
-    const session = await attempt(() => api.invoke('newSession', projectId));
-    const confirmed = await settleSelection(request);
-    if (session && confirmed && request === selectionRequest.current) focusComposer();
+    try {
+      await flushDraft();
+      await api.invoke('newSession', projectId);
+      // 2. 创建返回值不决定当前会话，以主进程确认的选择为准。
+      const confirmed = await settleSelection(request);
+      if (confirmed && request === selectionRequest.current) focusComposer();
+    } catch (error) {
+      // 3. 旧请求的失败不能覆盖新请求的错误或解除它的切换状态。
+      if (request !== selectionRequest.current) return;
+      setError(readableError(error));
+      await settleSelection(request);
+    }
   }
   function openSettings(tabName = 'environment') {
     setPrefs(stateRef.current?.settings);
@@ -911,6 +925,7 @@ export function useWorkbench() {
       askHunk,
       rerunCommand,
       updates,
+      piUpdate,
       state,
       storage,
       runtime,

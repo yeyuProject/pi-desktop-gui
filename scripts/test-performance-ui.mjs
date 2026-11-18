@@ -33,7 +33,13 @@ try {
   const launched = await launchApp({
     dataDir: fixture.dataDir,
     pageTimeout: 60000,
-    ...(process.env.PI_PERF_APP_ROOT ? { args: [process.env.PI_PERF_APP_ROOT] } : {}),
+    // Measure foreground interaction even when another desktop window covers the test window.
+    args: [
+      '--disable-background-timer-throttling',
+      '--disable-renderer-backgrounding',
+      '--disable-backgrounding-occluded-windows',
+      process.env.PI_PERF_APP_ROOT || process.cwd(),
+    ],
   });
   app = launched.app;
   const page = launched.page;
@@ -41,11 +47,12 @@ try {
   // Count actual component executions via React's DevTools commit hook, excluding memo bailouts.
   // Match the conversation's props because production function names are minified.
   await page.addInitScript(() => {
-    // bootstrap starts a fresh asynchronous environment probe on every document load.
+    // The first ready frame starts a fresh environment probe on every document load.
     // Its event legitimately re-renders App/Composer and must finish before timer measurements.
     globalThis.auditEnvironmentReady = false;
     window.desktop.onEvent((event) => {
       if (event.type === 'environment') globalThis.auditEnvironmentReady = true;
+      if (event.type === 'runtimePatch') globalThis.auditReceivedPatchAt = performance.now();
     });
     globalThis.auditConversationRenders = 0;
     globalThis.auditComposerRenders = 0;
@@ -119,6 +126,10 @@ try {
     globalThis.auditWorkspaceCalls = [];
     ipcMain.removeHandler('desktop:invoke');
     ipcMain.handle('desktop:invoke', async (event, method, args) => {
+      if (method === 'saveDraft' && globalThis.auditDraftSaves) {
+        globalThis.auditDraftSaves.push(performance.now());
+        globalThis.auditSavedDraft = args[1];
+      }
       if (method === 'readHistory' && globalThis.auditRuntime) return globalThis.auditRuntime.messages;
       if (method === 'getToolOutput' && globalThis.auditRuntime) {
         const message = globalThis.auditRuntime.messages.findLast(
@@ -207,6 +218,7 @@ try {
     });
     const durations = [];
     const scripting = [];
+    const commits = [];
     const cdp = await page.context().newCDPSession(page);
     await cdp.send('Performance.enable');
     const scriptDuration = async () =>
@@ -225,7 +237,8 @@ try {
             if (!document.querySelector('.thread')?.textContent?.includes(marker)) return;
             observer.disconnect();
             clearTimeout(timer);
-            requestAnimationFrame(() => resolve(performance.now() - start));
+            const commit = performance.now() - globalThis.auditReceivedPatchAt;
+            requestAnimationFrame(() => resolve({ frame: performance.now() - start, commit }));
           });
           observer.observe(document.querySelector('.thread'), {
             subtree: true,
@@ -254,7 +267,8 @@ try {
       const elapsed = await page.evaluate(() => globalThis.auditMeasurement);
       const scriptingMs = ((await scriptDuration()) - scriptingBefore) * 1000;
       if (i >= 5) {
-        durations.push(elapsed);
+        durations.push(elapsed.frame);
+        commits.push(elapsed.commit);
         scripting.push(scriptingMs);
       }
     }
@@ -279,6 +293,7 @@ try {
       ...spec,
       ...summary(durations),
       rendererScripting: summary(scripting),
+      receivedPatchToDom: summary(commits),
       rendererHeapAfterGcMiB: heap.usedSize / 1024 / 1024,
       dom,
       observation,
@@ -305,6 +320,65 @@ try {
     assert.equal(observation.renderedMessages, spec.patchLines ? 40 : spec.expand ? spec.messages : 80);
     const input = page.getByRole('textbox', { name: '任务输入' });
     await input.fill('');
+    if (spec.brackets) {
+      await input.focus();
+      await input.evaluate((element) => {
+        globalThis.auditPauseCounters = true;
+        globalThis.auditKeys = [];
+        element.addEventListener('keydown', () => {
+          const start = performance.now();
+          requestAnimationFrame(() => globalThis.auditKeys.push(performance.now() - start));
+        });
+      });
+      await app.evaluate(({ BrowserWindow }) => {
+        globalThis.auditDraftSaves = [];
+        globalThis.auditSavedDraft = '';
+        const r = globalThis.auditRuntime;
+        globalThis.auditTypingPatches = 0;
+        globalThis.auditTypingTimer = setInterval(() => {
+          r.messages.at(-1).content += ' 字';
+          globalThis.auditTypingPatches++;
+          BrowserWindow.getAllWindows()[0].webContents.send('desktop:event', {
+            type: 'runtimePatch',
+            patch: {
+              sessionId: r.sessionId,
+              messagesFrom: r.messages.length - 1,
+              messages: [r.messages.at(-1)],
+              messageCount: r.messages.length,
+              toolsFrom: 0,
+              tools: [],
+              toolCount: 0,
+            },
+          });
+        }, 40);
+      });
+      try {
+        await input.pressSequentially('x'.repeat(50), { delay: 20 });
+        await expect(input).toHaveValue('x'.repeat(50));
+        await page.waitForFunction(() => globalThis.auditKeys.length === 50);
+        await expect.poll(() => app.evaluate(() => globalThis.auditSavedDraft)).toBe('x'.repeat(50));
+        const { saves, patches } = await app.evaluate(() => ({
+          saves: globalThis.auditDraftSaves,
+          patches: globalThis.auditTypingPatches,
+        }));
+        assert.ok(patches > 0);
+        const peakSaves = Math.max(
+          ...saves.map((at) => saves.filter((other) => other >= at && other < at + 1000).length),
+        );
+        assert.ok(peakSaves <= 5);
+        result.streamingTyping = {
+          ...summary(await page.evaluate(() => globalThis.auditKeys)),
+          peakSaves,
+          patches,
+        };
+      } finally {
+        await app.evaluate(() => clearInterval(globalThis.auditTypingTimer));
+        await page.evaluate(() => {
+          globalThis.auditPauseCounters = false;
+        });
+      }
+      await input.fill('');
+    }
     if (spec.messages === 500 && spec.activeChars === 100 && !spec.expand) {
       const changeRuntime = async (fields) => {
         await app.evaluate(({ BrowserWindow }, fields) => {

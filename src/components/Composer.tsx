@@ -101,6 +101,7 @@ export type ComposerProps = Pick<
   | 'selected'
   | 'project'
   | 'sessionEnabled'
+  | 'piUpdate'
   | 'ownRuntime'
   | 'running'
   | 'modelLocked'
@@ -372,17 +373,20 @@ export function Composer(props: ComposerProps) {
       )[0],
     [attachmentSizes, draft],
   );
-  const sessionDisabledReason = selectionChanging
-    ? '正在切换会话，稍等一下'
-    : !storage.writable
-      ? '本地数据暂时无法保存，请先处理上方的存储提示'
-      : !selected
-        ? '请先新建或选择一个会话'
-        : runtime.crash && runtime.crash.cleanup !== 'confirmed'
-          ? '上次的命令可能还在运行，结束它们并重启应用后才能继续'
-          : !sessionEnabled
-            ? '这个项目还没启用，先点上方“启用项目”'
-            : '';
+  const sessionDisabledReason =
+    props.piUpdate?.status === 'updating'
+      ? 'Pi 正在更新'
+      : selectionChanging
+        ? '正在切换会话，稍等一下'
+        : !storage.writable
+          ? '本地数据暂时无法保存，请先处理上方的存储提示'
+          : !selected
+            ? '请先新建或选择一个会话'
+            : runtime.crash && runtime.crash.cleanup !== 'confirmed'
+              ? '上次的命令可能还在运行，结束它们并重启应用后才能继续'
+              : !sessionEnabled
+                ? '这个项目还没启用，先点上方“启用项目”'
+                : '';
   const sendDisabledReason =
     sessionDisabledReason ||
     (!localGoalCommand && !environment?.supported && !runtime.connected
@@ -452,6 +456,7 @@ export function Composer(props: ComposerProps) {
   const sendHint =
     ownRunning && sendLabel === '发送任务' ? (sendMode === 'steer' ? '立即补充' : '完成后执行') : sendLabel;
   const explainSend = () => {
+    if (props.piUpdate?.status === 'updating') return openSettings();
     if (selectionChanging) return;
     const target = !storage.writable
       ? document.querySelector<HTMLElement>('.storage-banner button')
@@ -676,6 +681,7 @@ export function Composer(props: ComposerProps) {
         <ErrorFeedback as="div" message={!answering && parameterError} />
         <textarea
           ref={input}
+          style={{ fieldSizing: 'content', maxHeight: inputMaxHeight + 'vh' }}
           aria-label="任务输入"
           placeholder={
             answering
