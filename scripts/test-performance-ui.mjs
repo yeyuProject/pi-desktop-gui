@@ -95,7 +95,12 @@ try {
           if (fiber.memoizedProps?.messageContext && fiber.memoizedProps?.messages && worked)
             globalThis.auditConversationRenders++;
           if (fiber.memoizedProps?.m?.role === 'user' && worked) globalThis.auditUserRenders++;
-          if (fiber.memoizedProps?.updateBadge && fiber.memoizedProps?.activities && worked)
+          // UI17 起 Sidebar 接收 sidebarActivities；对比旧版（PI_PERF_APP_ROOT）时仍是 activities。
+          if (
+            fiber.memoizedProps?.updateBadge &&
+            (fiber.memoizedProps.sidebarActivities || fiber.memoizedProps.activities) &&
+            worked
+          )
             globalThis.auditSidebarRenders++;
           if (
             worked &&
