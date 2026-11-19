@@ -34,6 +34,7 @@ export function useRuntime(
     () => runtimes.get(sessionId),
   );
   const activities = useSyncExternalStore(runtimes.subscribeActivities, runtimes.getActivities);
+  const sidebarActivities = useSyncExternalStore(runtimes.subscribeActivities, runtimes.getSidebarActivities);
   const receivedState = useRef<{ state?: AppState; revision: number }>({ revision: 0 });
   const receiveState = (state: AppState, revision: number) => {
     if (!Number.isSafeInteger(revision) || revision <= receivedState.current.revision) return;
@@ -89,6 +90,7 @@ export function useRuntime(
     receiveState,
     runtime,
     activities,
+    sidebarActivities,
     anyRunning,
     environment,
     setEnvironment,

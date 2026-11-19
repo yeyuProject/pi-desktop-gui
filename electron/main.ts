@@ -24,6 +24,7 @@ import { classifyModelError } from '../shared/errors';
 import { goalNotificationTitle } from '../shared/goal';
 import { InvalidRequestError, describeSystemError, describeOperationError } from '../shared/errors';
 import { isDraftQuote, splitMessageQuotes } from '../shared/message-content';
+import { sessionCreatedAtFromFile } from '../shared/sidebar-view';
 import {
   sideChatContext,
   sideChatPrompt,
@@ -195,13 +196,24 @@ const stateSnapshot = (state = store.state): StateSnapshot => ({
   state: structuredClone(store.visibleState(state)),
   revision: ++stateRevision,
 });
+const sendEvent = (event: AppEvent) => {
+  if (window && !window.isDestroyed() && !window.webContents.isDestroyed())
+    window.webContents.send('desktop:event', event);
+};
+const publishState = (state = store.state) => {
+  const snapshot = stateSnapshot(state);
+  sendEvent({ type: 'state', ...snapshot });
+  void watchSelectedProject();
+  return snapshot;
+};
 const send = (
   event: Exclude<AppEvent, { type: 'state' }> | { type: 'state'; state: StateSnapshot['state'] },
 ) => {
-  const value: AppEvent = event.type === 'state' ? { type: 'state', ...stateSnapshot(event.state) } : event;
-  if (window && !window.isDestroyed() && !window.webContents.isDestroyed())
-    window.webContents.send('desktop:event', value);
-  if (event.type === 'state') void watchSelectedProject();
+  if (event.type === 'state') {
+    publishState(event.state);
+    return;
+  }
+  sendEvent(event);
 };
 function piUpdateView(ownOperation = 0) {
   const environment =
@@ -779,6 +791,7 @@ async function adoptSessionFile(file: string, projectId?: string) {
   const s = store.createSession(p?.id);
   if (!p) s.cwd = cwd;
   s.file = file;
+  s.createdAt = sessionCreatedAtFromFile(file) ?? s.updatedAt;
   s.title =
     data.name ||
     messageText(data.messages.find((m) => m.role === 'user') ?? { content: '' })
@@ -1528,6 +1541,7 @@ else {
         text,
         strings,
         save,
+        publishState,
         send,
         showAppDialog,
         developmentRoot,

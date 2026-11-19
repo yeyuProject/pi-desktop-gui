@@ -2,6 +2,7 @@ import { BrowserWindow, dialog, shell } from 'electron';
 import { randomUUID } from 'node:crypto';
 import fs from 'node:fs/promises';
 import path from 'node:path';
+import { sidebarSectionName } from '../../shared/sidebar-view';
 import { aggregateUsage } from '../../shared/usage';
 import { listPiSessions, searchSessionContents } from '../history';
 import { removeSessionScratch } from '../local-data';
@@ -13,7 +14,7 @@ import type { HandlerContext, HandlerMap } from './handler-context';
 
 interface SessionHandlerContext extends Pick<
   HandlerContext,
-  'store' | 'service' | 'workspace' | 'text' | 'send' | 'save' | 'showAppDialog'
+  'store' | 'service' | 'workspace' | 'text' | 'send' | 'save' | 'publishState' | 'showAppDialog'
 > {
   window: BrowserWindow | undefined;
   sideChats: SideChats;
@@ -37,6 +38,10 @@ export type SessionHandlerName =
   | 'sessionMoveStatus'
   | 'previewSessionMove'
   | 'moveSession'
+  | 'createSection'
+  | 'renameSection'
+  | 'deleteSection'
+  | 'setSessionSection'
   | 'deleteSession'
   | 'pinSession'
   | 'cleanupEmptySessions'
@@ -44,12 +49,20 @@ export type SessionHandlerName =
   | 'piSessions'
   | 'openPiSession'
   | 'usageSummary';
+
+function requireSectionName(value: unknown) {
+  const name = sidebarSectionName(value);
+  if (!name) throw new Error('请填写 1 到 40 个字符的分区名称');
+  return name;
+}
+
 export function createSessionHandlers(context: SessionHandlerContext) {
   const {
     store,
     service,
     workspace,
     save,
+    publishState,
     send,
     showAppDialog,
     sideChats,
@@ -65,6 +78,32 @@ export function createSessionHandlers(context: SessionHandlerContext) {
   let searchController: AbortController | undefined;
   const handlers: HandlerMap<SessionHandlerName> = {
     ...createSessionMoveHandlers(context),
+    createSection: async (name: unknown, sessionId?: string) => {
+      if (sessionId !== undefined) {
+        text(sessionId, 100);
+        service.assertNoSessionMove(sessionId);
+      }
+      const section = await store.createSection(requireSectionName(name), sessionId);
+      publishState();
+      return section;
+    },
+    renameSection: async (id: string, name: unknown) => {
+      text(id, 100);
+      await store.renameSection(id, requireSectionName(name));
+      publishState();
+    },
+    deleteSection: async (id: string) => {
+      text(id, 100);
+      const result = await store.deleteSection(id);
+      publishState();
+      return result;
+    },
+    setSessionSection: async (sessionId: string, sectionId: string | null) => {
+      text(sessionId, 100);
+      if (sectionId !== null) text(sectionId, 100);
+      await store.setSessionSection(sessionId, sectionId);
+      publishState();
+    },
     addProject: async () => {
       const chosen = await dialog.showOpenDialog(context.window!, {
         title: '添加本地项目',

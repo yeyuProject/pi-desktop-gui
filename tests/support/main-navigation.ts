@@ -55,6 +55,8 @@ const { code } = transformSync(
     const stateSnapshot = ${variable('stateSnapshot').getText(source)};
     const window = { isDestroyed: () => false, webContents: { isDestroyed: () => false, send: (_channel, event) => publish(event) } };
     const watchSelectedProject = () => {};
+    const sendEvent = ${variable('sendEvent').getText(source)};
+    const publishState = ${variable('publishState').getText(source)};
     const send = ${variable('send').getText(source)};
     ${declaration('text')}
     const save = ${variable('save').getText(source)};

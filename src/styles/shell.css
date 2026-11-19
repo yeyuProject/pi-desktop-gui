@@ -95,6 +95,23 @@
   white-space: nowrap;
   font-weight: 600;
 }
+.sidebar-project-directory-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.sidebar-project-directory-row > svg {
+  flex-shrink: 0;
+}
+.sidebar-section-count {
+  color: var(--muted);
+  flex-shrink: 0;
+  font-size: calc(11px * var(--font-scale));
+}
+.sidebar-view-group .project-row > .session-drop-label,
+.sidebar-project-directory-row > .session-drop-label {
+  flex: 0 0 auto;
+}
 .project-actions {
   display: flex;
   flex-shrink: 0;
@@ -142,6 +159,12 @@
   white-space: nowrap;
   text-overflow: ellipsis;
   overflow: hidden;
+}
+.session-row > button:first-child > .sidebar-session-project {
+  max-width: 40%;
+  color: var(--muted);
+  font-size: 11px;
+  font-weight: 400;
 }
 /* The title gives way first; the pending badge keeps its full text. */
 .session-row > button:first-child > .project-waiting {

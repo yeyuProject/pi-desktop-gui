@@ -12,6 +12,7 @@ export interface HandlerContext {
   text: (value: unknown, max?: number) => asserts value is string;
   strings: (value: unknown) => asserts value is string[];
   save: () => Promise<void>;
+  publishState: () => StateSnapshot;
   send: (
     event: Exclude<AppEvent, { type: 'state' }> | { type: 'state'; state: StateSnapshot['state'] },
   ) => void;

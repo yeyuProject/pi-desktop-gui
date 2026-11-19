@@ -21,8 +21,10 @@ import {
   type Settings,
   type ContentBlock,
   type MessageAction,
+  type SidebarView,
 } from '../../shared/types';
 import { userMessageInput } from '../../shared/message-content';
+import { DEFAULT_SIDEBAR_VIEW } from '../../shared/sidebar-view';
 
 import { readableError } from '../lib/format';
 import { PI_SOURCE_URL } from '../../shared/pi-version';
@@ -57,6 +59,7 @@ export function useWorkbench() {
     receiveState,
     runtime,
     activities,
+    sidebarActivities,
     anyRunning,
     environment,
     setEnvironment,
@@ -85,8 +88,43 @@ export function useWorkbench() {
     [newContent, setNewContent] = useState(false);
   const [searchOpen, setSearchOpen] = useState(false),
     [searchQuery, setSearchQuery] = useState(''),
-    [rename, setRename] = useState<{ kind: 'project' | 'session'; id: string; name: string }>(),
+    [rename, setRename] = useState<
+      (
+        | { kind: 'project' | 'session' | 'section'; id: string; name: string }
+        | { kind: 'new-section'; sessionId?: string; name: string }
+      ) & { error?: string; saving?: boolean }
+    >(),
     [menuId, setMenuId] = useState('');
+  const [sidebarChanges, setSidebarChanges] = useState<Partial<SidebarView>[]>([]);
+  const sidebarSave = useRef(Promise.resolve());
+  const savedSidebarView = state?.settings.sidebarView ?? DEFAULT_SIDEBAR_VIEW;
+  const sidebarView = useMemo(
+    () => sidebarChanges.reduce<SidebarView>((view, change) => ({ ...view, ...change }), savedSidebarView),
+    [savedSidebarView, sidebarChanges],
+  );
+
+  /**
+   * 1. 先显示本次选择，排在已有保存请求后面。
+   * 2. 用最近一次成功保存的设置提交本次改动。
+   * 3. 取回新快照，或提示失败，再移除这次临时改动。
+   */
+  function changeSidebarView(change: Partial<SidebarView>) {
+    // 1. 连续点选时，后一次选择立即可见。
+    setSidebarChanges((current) => [...current, change]);
+    sidebarSave.current = sidebarSave.current.then(async () => {
+      // 2. 失败的改动不应被后续请求重新写入。
+      const saved = receivedState.current.state?.settings.sidebarView ?? DEFAULT_SIDEBAR_VIEW;
+      try {
+        const snapshot = await api.invoke('setSidebarView', { ...saved, ...change });
+        receiveState(snapshot.state, snapshot.revision);
+      } catch (error) {
+        setNotice('没能保存侧栏显示方式：' + readableError(error), { level: 'error' });
+      } finally {
+        // 3. 去掉已处理的第一项，后面等待保存的选择仍然显示。
+        setSidebarChanges((current) => current.slice(1));
+      }
+    });
+  }
   const notificationCursor = useRef<{ sessionId?: string; id: number }>({ id: 0 });
   /** Toasts raised by the shown session's runtime; they belong to that session and close on switch. */
   const runtimeNotices = useRef<number[]>([]);
@@ -987,6 +1025,9 @@ export function useWorkbench() {
       setModel,
       setThinking,
       sidebar,
+      sidebarView,
+      sidebarActivities,
+      changeSidebarView,
       setSearchOpen,
       setRename,
       menuId,

@@ -159,7 +159,9 @@ export default function App() {
       </Suspense>
       <Sidebar
         {...pick(model, [
-          'activities',
+          'sidebarActivities',
+          'sidebarView',
+          'changeSidebarView',
           'environment',
           'piUpdate',
           'setNotice',
@@ -466,6 +468,7 @@ export default function App() {
               'prompts',
               'onAuthenticated',
               'attempt',
+              'setNotice',
               'selectSession',
             ])}
             state={state}

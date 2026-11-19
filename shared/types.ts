@@ -50,6 +50,7 @@ export interface Session {
   historyNotice?: string;
   id: string;
   projectId?: string;
+  sectionId?: string;
   title: string;
   file?: string;
   draft: string;
@@ -61,6 +62,7 @@ export interface Session {
   stats?: { tokens?: number; cost?: number };
   sideUsage?: { tokens: number; cost: number; updatedAt: number };
   cwd?: string;
+  createdAt?: number;
   updatedAt: number;
   lastStatus: RunStatus;
   scrollTop?: number;
@@ -71,7 +73,24 @@ export interface Session {
   thinking?: string;
   approvalMode?: ApprovalMode;
 }
+export interface SidebarView {
+  groupBy: 'project' | 'time' | 'status' | 'none';
+  sortBy: 'updated' | 'created' | 'title';
+  pinnedGroup: boolean;
+  foldOlder: boolean;
+  teamMembers: boolean;
+}
+export interface SidebarSection {
+  id: string;
+  name: string;
+  createdAt: number;
+}
+export interface SessionMoveOptions {
+  requireConfirmation?: boolean;
+  sectionId?: string;
+}
 export interface Settings {
+  sidebarView?: SidebarView;
   team: TeamSettings;
   piPath: string;
   nodePath: string;
@@ -101,6 +120,7 @@ export interface AppState {
   appVersion?: string;
   projects: Project[];
   sessions: Session[];
+  sections?: SidebarSection[];
   settings: Settings;
   selectedProjectId?: string;
   selectedSessionId?: string;
@@ -526,7 +546,14 @@ export interface ApiMap {
   renameSession: { args: [string, string]; result: void };
   sessionMoveStatus: { args: [string]; result: { reason: string } };
   previewSessionMove: { args: [string, string | null]; result: { detail: string; token: string } };
-  moveSession: { args: [string, string | null, string?]; result: false | { warning?: string } };
+  moveSession: {
+    args: [sessionId: string, targetProjectId: string | null, token?: string, options?: SessionMoveOptions];
+    result: false | { warning?: string };
+  };
+  createSection: { args: [name: string, sessionId?: string]; result: SidebarSection };
+  renameSection: { args: [id: string, name: string]; result: void };
+  deleteSection: { args: [id: string]; result: { name: string; sessionCount: number } };
+  setSessionSection: { args: [sessionId: string, sectionId: string | null]; result: void };
   deleteSession: { args: [string]; result: false | { trashed: boolean } };
   pinSession: { args: [string, boolean]; result: void };
   searchSessions: { args: [string]; result: SessionMatch[] };
@@ -571,7 +598,8 @@ export interface ApiMap {
   readDraftImages: { args: [string]; result: ImageAttachment[] };
   detect: { args: []; result: Environment };
   choosePath: { args: ['pi' | 'node' | 'agent' | 'editor']; result: string | null };
-  saveSettings: { args: [Partial<Settings>]; result: void };
+  saveSettings: { args: [Omit<Partial<Settings>, 'sidebarView'>]; result: void };
+  setSidebarView: { args: [view: SidebarView]; result: StateSnapshot };
   connect: { args: [string]; result: void };
   readModels: { args: [string]; result: Model[] };
   recover: { args: [string, string?]; result: void };

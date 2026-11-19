@@ -5,6 +5,7 @@ import * as goalInput from '../shared/goal-input';
 import * as goal from '../shared/goal';
 import * as ask from '../shared/ask';
 import * as messageContent from '../shared/message-content';
+import * as sidebarView from '../shared/sidebar-view';
 import test, { type TestContext } from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
@@ -222,6 +223,7 @@ function harness(
     '../../shared/goal': goal,
     '../../shared/ask': ask,
     '../../shared/message-content': messageContent,
+    '../../shared/sidebar-view': sidebarView,
     '../lib/format': { readableError },
     '../lib/conversation-layout': { hideRecoveredErrors },
     '../lib/plan-transcript': { hidePlanTools },
