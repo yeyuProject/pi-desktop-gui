@@ -409,7 +409,7 @@ export function Sidebar(
     const top = below + height <= clientHeight - 8 ? below : anchor.top - height - 4;
     menu.style.left = `${Math.max(8, Math.min(anchor.right - width, clientWidth - width - 8))}px`;
     menu.style.top = `${Math.max(8, Math.min(top, clientHeight - height - 8))}px`;
-    if (sessionsById.has(menuId)) focusMenuItem(menu);
+    if (sessionsById.has(menuId) || menuId.startsWith('section:')) focusMenuItem(menu);
 
     const close = () => setMenuId('');
     const list = menu.closest('.project-list')!;
@@ -703,6 +703,11 @@ export function Sidebar(
       </>
     );
   const mainGroups = new Map(groups.groups.map((group) => [group.key, group]));
+  // 会话都显示在分区或置顶组时，原位置按空列表处理，仍给出新建入口。
+  const hasMainRows = (key: string) => {
+    const group = mainGroups.get(key);
+    return Boolean(group && (group.rows.length || group.olderRows.length));
+  };
   const collapsibleGroups = [
     ...groups.sections,
     ...(!projectMode && sidebarView.groupBy !== 'none' ? groups.groups : []),
@@ -749,7 +754,7 @@ export function Sidebar(
     const expanded = !collapsible || !collapsedGroups.has(group.key);
     const menuOpen = menuId === group.key;
     const sectionMenu = section && menuOpen && (
-      <div ref={menuRef} className="context-menu" role="menu">
+      <div ref={menuRef} className="context-menu" role="menu" onKeyDown={handleMenuKeyDown}>
         <button
           role="menuitem"
           onClick={() => {
@@ -843,7 +848,9 @@ export function Sidebar(
             </div>
             <div className="session-list standalone-sessions" aria-label="独立对话">
               {renderSessionList(mainGroups.get('project:standalone'))}
-              {!sessionsByProject.has(undefined) && <p className="sidebar-empty">随时开始，无需打开项目。</p>}
+              {!hasMainRows('project:standalone') && (
+                <p className="sidebar-empty">随时开始，无需打开项目。</p>
+              )}
             </div>
           </div>
         )}
@@ -970,7 +977,7 @@ export function Sidebar(
             {projectMode && expandedProjects.has(p.id) && (
               <div className="session-list" aria-label={`${p.name} 的会话`}>
                 {renderSessionList(mainGroups.get(`project:${p.id}`))}
-                {!sessionsByProject.has(p.id) && (
+                {!hasMainRows(`project:${p.id}`) && (
                   <button
                     className="sidebar-project-empty"
                     disabled={piUpdating}

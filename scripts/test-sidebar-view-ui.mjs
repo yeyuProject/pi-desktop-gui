@@ -404,6 +404,7 @@ try {
   const flat = group('none:all');
   await check(row(dated[4][1])).toBeVisible();
   await check(row(otherPin).locator('.sidebar-session-project')).toHaveText(other.name);
+  await check(row(otherPin).locator('.sidebar-session-project')).toBeVisible();
   await check(row(otherPin).locator('button').first()).toHaveAttribute(
     'title',
     `另一个项目置顶 · ${other.name}`,
@@ -450,7 +451,16 @@ try {
   const emptyText = '把会话拖到这里，或在会话菜单中选择“放入分区”';
   const section = await createSection('  Inbox  ');
   await check(group(section).getByText(emptyText)).toBeVisible();
-  await group(section).getByRole('button', { name: 'Inbox 分区操作' }).click();
+  // 分区菜单和会话菜单一样可以全程用键盘操作。
+  const sectionActions = group(section).getByRole('button', { name: 'Inbox 分区操作' });
+  await sectionActions.click();
+  await check(item(/重命名/)).toBeFocused();
+  await page.keyboard.press('ArrowDown');
+  await check(item(/删除分区/)).toBeFocused();
+  await page.keyboard.press('Escape');
+  await check(item(/删除分区/)).toHaveCount(0);
+  await check(sectionActions).toBeFocused();
+  await sectionActions.click();
   await item(/重命名/).click();
   await check(await nameSection('重命名分区', 'Sorted')).toBeHidden();
   await trigger().click();
@@ -691,6 +701,14 @@ try {
   await check.poll(async () => (await disk()).settings.sidebarView).toEqual(DEFAULT_SIDEBAR_VIEW);
   await check(dropTarget('standalone')).toContainText('对话');
   await inGroup(projectPin, section);
+  // 项目的会话都显示在分区里时，展开项目仍给出新建入口，而不是一片空白。
+  assert.deepEqual(
+    (await state()).sessions.filter((s) => s.projectId === other.id && !s.sectionId).map((s) => s.title),
+    [],
+  );
+  const otherRow = dropTarget(other.id).locator('.project-row');
+  if ((await otherRow.getAttribute('aria-expanded')) !== 'true') await otherRow.click();
+  await check(dropTarget(other.id).getByRole('button', { name: '新建项目会话' })).toBeVisible();
   await trigger().click();
   await check(item('恢复默认')).toBeDisabled();
   await page.keyboard.press('Escape');
@@ -732,6 +750,18 @@ try {
         });
       });
       assert.deepEqual(overflow, [], `Overflow at 180 px in ${uiStyle}/${theme}`);
+      // 标题优先于项目标签：标题被截断时，宽度不能比标签还窄。
+      const squeezed = await page.evaluate(() =>
+        [...document.querySelectorAll('#project-sidebar .sidebar-session-project')].flatMap((tag) => {
+          const title = tag.previousElementSibling;
+          return title.scrollWidth > title.clientWidth && title.clientWidth < tag.clientWidth
+            ? [title.textContent]
+            : [];
+        }),
+      );
+      assert.deepEqual(squeezed, [], `Titles squeezed by project names at 180 px in ${uiStyle}/${theme}`);
+      // 180 px 时只留标题，项目名仍在悬停提示里。
+      await check(row(otherPin).locator('.sidebar-session-project')).toBeHidden();
       await page.screenshot({ path: path.join(output, `${uiStyle}-${theme}.png`), animations: 'disabled' });
       await page.keyboard.press('Escape');
       await page.keyboard.press('Escape');
