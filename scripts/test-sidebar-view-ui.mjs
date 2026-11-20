@@ -223,6 +223,7 @@ async function measureSidebar() {
     await page.addInitScript(() => {
       let previous = new WeakSet();
       globalThis.sidebarRenderCount = 0;
+      globalThis.sidebarRenderedSession = undefined;
       globalThis.__REACT_DEVTOOLS_GLOBAL_HOOK__ = {
         supportsFiber: true,
         inject: () => 1,
@@ -236,8 +237,10 @@ async function measureSidebar() {
               fiber.flags & 1 &&
               fiber.memoizedProps?.updateBadge &&
               (fiber.memoizedProps.activities || fiber.memoizedProps.sidebarActivities)
-            )
+            ) {
               globalThis.sidebarRenderCount++;
+              globalThis.sidebarRenderedSession = fiber.memoizedProps.selected;
+            }
             if (fiber.child) visit(fiber.child);
             if (fiber.sibling) visit(fiber.sibling);
           }
@@ -257,6 +260,18 @@ async function measureSidebar() {
     const thread = page.locator('.thread');
     provider.stream(request, '流式开始。');
     await check(thread).toContainText('流式开始。');
+    // 首段文字可以先于发起任务时的写盘结果出现。等侧栏收到该次状态，再开始计数。
+    await check
+      .poll(async () => {
+        const session = await page.evaluate(() => globalThis.sidebarRenderedSession);
+        return (
+          session?.id === sessionId &&
+          session.lastStatus === 'running' &&
+          session.updatedAt > stamp &&
+          session.draft === ''
+        );
+      })
+      .toBe(true);
     const initial = await count();
     for (let i = 0; i < 12; i++) {
       const chunk = `第 ${i} 段。`;
