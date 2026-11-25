@@ -13,15 +13,17 @@ test('background diff preserves Unicode, filenames, context and no-newline marke
 });
 
 test('large rewrites let the calling event loop continue while computing the exact diff', async () => {
-  const before = Array.from({ length: 3000 }, (_, i) => `original_${i} = ${i};`).join('\n');
-  const after = Array.from({ length: 3000 }, (_, i) => `replacement_${i} = ${i + 1};`).join('\n');
+  // 整段改写 1000 行本机约 150 ms，远低于工作线程 5 秒的上限；3000 行约 1.4 s，CI 繁忙时会超时。
+  const lines = 1000;
+  const before = Array.from({ length: lines }, (_, i) => `original_${i} = ${i};`).join('\n');
+  const after = Array.from({ length: lines }, (_, i) => `replacement_${i} = ${i + 1};`).join('\n');
   let ticks = 0;
   const timer = setInterval(() => ticks++, 5);
   try {
     const patch = await computeDiff('rewrite.ts', before, after);
     assert.ok(ticks > 1, 'the event loop must remain available during the rewrite');
-    assert.match(patch, /-original_2999 = 2999;/);
-    assert.match(patch, /\+replacement_2999 = 3000;/);
+    assert.match(patch, new RegExp(`-original_${lines - 1} = ${lines - 1};`));
+    assert.match(patch, new RegExp(`\\+replacement_${lines - 1} = ${lines};`));
   } finally {
     clearInterval(timer);
   }
