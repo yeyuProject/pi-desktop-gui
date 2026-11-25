@@ -1,8 +1,25 @@
-.brand > .sidebar-brand-label {
+/* 只把标志和名称设为容器：菜单留在外面，固定定位仍按窗口计算。 */
+.brand > .sidebar-brand-title {
+  container-type: inline-size;
+  flex: 1 1 0;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: inherit;
+}
+
+.sidebar-brand-label {
   min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+/* 放不下完整名称时只留 π 标志，不显示“P…”。 */
+@container (max-width: calc(5.4em + 38px)) {
+  .sidebar-brand-label {
+    display: none;
+  }
 }
 
 .brand > .sidebar-brand-actions {

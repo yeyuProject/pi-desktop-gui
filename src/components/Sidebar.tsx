@@ -812,8 +812,10 @@ export function Sidebar(
       inert={inspector && compact}
     >
       <div className="brand">
-        <span className="brand-mark">π</span>
-        <div className="sidebar-brand-label">Pi Desktop</div>
+        <div className="sidebar-brand-title">
+          <span className="brand-mark">π</span>
+          <div className="sidebar-brand-label">Pi Desktop</div>
+        </div>
         <div className="sidebar-brand-actions">
           <SidebarViewMenu
             view={sidebarView}
@@ -831,11 +833,12 @@ export function Sidebar(
       <button
         className="new-session"
         disabled={piUpdating}
-        title={piUpdating ? 'Pi 正在更新' : undefined}
+        title={piUpdating ? 'Pi 正在更新' : `新建会话 ${shortcut('N')}`}
         onClick={() => void createSession()}
       >
         <Plus size={17} />
-        新建会话<kbd>{shortcut('N')}</kbd>
+        <span className="new-session-label">新建会话</span>
+        <kbd>{shortcut('N')}</kbd>
       </button>
       <div className="project-list">
         {groups.pinned && renderViewGroup(groups.pinned)}
@@ -867,26 +870,28 @@ export function Sidebar(
         {!projectMode && (
           <div data-drop-target="standalone" className="project-group">
             <div className="project-header">
-              <div className="project-row sidebar-project-directory-row">
-                <MessagesSquare size={16} />
-                <span>对话</span>
-                <span className="session-drop-label">移到这里</span>
-              </div>
-              <div className="project-actions">
-                <IconButton
-                  disabled={piUpdating}
-                  title={piUpdating ? 'Pi 正在更新' : '在对话中新建会话'}
-                  onClick={() => void createSession()}
-                >
-                  <Plus size={15} />
-                </IconButton>
-                <IconButton
-                  title="对话操作"
-                  expanded={menuId === 'standalone'}
-                  onClick={() => setMenuId(menuId === 'standalone' ? '' : 'standalone')}
-                >
-                  <MoreHorizontal size={15} />
-                </IconButton>
+              <div className="project-header-main">
+                <div className="project-row sidebar-project-directory-row">
+                  <MessagesSquare size={16} />
+                  <span>对话</span>
+                  <span className="session-drop-label">移到这里</span>
+                </div>
+                <div className="project-actions">
+                  <IconButton
+                    disabled={piUpdating}
+                    title={piUpdating ? 'Pi 正在更新' : '在对话中新建会话'}
+                    onClick={() => void createSession()}
+                  >
+                    <Plus size={15} />
+                  </IconButton>
+                  <IconButton
+                    title="对话操作"
+                    expanded={menuId === 'standalone'}
+                    onClick={() => setMenuId(menuId === 'standalone' ? '' : 'standalone')}
+                  >
+                    <MoreHorizontal size={15} />
+                  </IconButton>
+                </div>
               </div>
               {menuId === 'standalone' && (
                 <div ref={menuRef} className="context-menu" role="menu">
@@ -912,34 +917,36 @@ export function Sidebar(
             key={p.id}
           >
             <div className="project-header">
-              <ProjectRow
-                className={'project-row' + (projectMode ? '' : ' sidebar-project-directory-row')}
-                aria-expanded={projectMode ? expandedProjects.has(p.id) : undefined}
-                onClick={
-                  projectMode ? () => setExpandedProjects((current) => toggleKey(current, p.id)) : undefined
-                }
-              >
-                <FolderOpen size={16} />
-                <span title={p.path}>{p.name}</span>
-                <span className="session-drop-label">移到这里</span>
-                {projectMode && !expandedProjects.has(p.id) && projectStatus(p.id)}
-                {projectMode && <ChevronDown size={13} className="project-chevron" />}
-              </ProjectRow>
-              <div className="project-actions">
-                <IconButton
-                  disabled={piUpdating}
-                  title={piUpdating ? 'Pi 正在更新' : `在 ${p.name} 中新建会话`}
-                  onClick={() => void createSession(p.id)}
+              <div className="project-header-main">
+                <ProjectRow
+                  className={'project-row' + (projectMode ? '' : ' sidebar-project-directory-row')}
+                  aria-expanded={projectMode ? expandedProjects.has(p.id) : undefined}
+                  onClick={
+                    projectMode ? () => setExpandedProjects((current) => toggleKey(current, p.id)) : undefined
+                  }
                 >
-                  <Plus size={15} />
-                </IconButton>
-                <IconButton
-                  title={`${p.name} 项目操作`}
-                  expanded={menuId === p.id}
-                  onClick={() => setMenuId(menuId === p.id ? '' : p.id)}
-                >
-                  <MoreHorizontal size={15} />
-                </IconButton>
+                  <FolderOpen size={16} />
+                  <span title={p.path}>{p.name}</span>
+                  <span className="session-drop-label">移到这里</span>
+                  {projectMode && !expandedProjects.has(p.id) && projectStatus(p.id)}
+                  {projectMode && <ChevronDown size={13} className="project-chevron" />}
+                </ProjectRow>
+                <div className="project-actions">
+                  <IconButton
+                    disabled={piUpdating}
+                    title={piUpdating ? 'Pi 正在更新' : `在 ${p.name} 中新建会话`}
+                    onClick={() => void createSession(p.id)}
+                  >
+                    <Plus size={15} />
+                  </IconButton>
+                  <IconButton
+                    title={`${p.name} 项目操作`}
+                    expanded={menuId === p.id}
+                    onClick={() => setMenuId(menuId === p.id ? '' : p.id)}
+                  >
+                    <MoreHorizontal size={15} />
+                  </IconButton>
+                </div>
               </div>
               {menuId === p.id && (
                 <div ref={menuRef} className="context-menu">

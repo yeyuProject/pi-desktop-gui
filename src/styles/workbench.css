@@ -127,10 +127,10 @@ select:hover:not(:disabled) {
 .project-row > svg:first-child {
   color: var(--muted);
 }
-.project-group.selected > .project-header > .project-row > svg:first-child {
+.project-group.selected > .project-header .project-row > svg:first-child {
   color: var(--accent);
 }
-.project-group:not(.selected) > .project-header > .project-row > span {
+.project-group:not(.selected) > .project-header .project-row > span {
   font-weight: 500;
 }
 .project-group > .session-list {
