@@ -48,6 +48,8 @@ function turnScrollTop(container: HTMLElement, target: HTMLElement) {
   return Math.max(0, Math.min(container.scrollHeight - container.clientHeight, top + offset));
 }
 
+type JumpRequest = { index: number; target: 'message' | 'turn' | 'reply'; turn?: number };
+
 export function Conversation(
   props: Pick<
     Workbench,
@@ -126,15 +128,13 @@ export function Conversation(
     [query, setQuery] = useState(''),
     [matchIndex, setMatchIndex] = useState(0);
   const [activeTurn, setActiveTurn] = useState(1),
-    [jumpIndex, setJumpIndex] = useState<{ index: number; target: 'message' | 'turn' | 'reply' } | null>(
-      null,
-    );
+    [jumpRequest, setJumpRequest] = useState<JumpRequest | null>(null);
   const [turnJump, setTurnJump] = useState<{ index: number; target?: 'reply' } | null>(null);
   const [visibleTurns, setVisibleTurns] = useState<VisibleTurns>();
   const [outlineGeometry, setOutlineGeometry] = useState({ center: 0, height: 0 });
   const [replyJumpVisible, setReplyJumpVisible] = useState(false);
   const [quoteTarget, setQuoteTarget] = useState<DraftQuote>();
-  const requestedTurn = useRef<{ turn: number } | undefined>(undefined);
+  const requestedTurn = useRef<JumpRequest | undefined>(undefined);
   const [historyWindow, setHistoryWindow] = useState<{ sessionId?: string; start: number }>();
   const findInput = useRef<HTMLInputElement>(null);
   const threadContent = useRef<HTMLDivElement>(null);
@@ -263,12 +263,7 @@ export function Conversation(
     );
     // 2. 跳转动画仍要显示经过的轮次，但高亮留给用户点选的目标。
     if (visible?.[0] !== visibleTurns?.[0] || visible?.[1] !== visibleTurns?.[1]) setVisibleTurns(visible);
-    if (requestedTurn.current) {
-      const target = container.querySelector<HTMLElement>(`[data-turn="${requestedTurn.current.turn}"]`);
-      if (target && Math.abs(container.scrollTop - turnScrollTop(container, target)) <= 2)
-        requestedTurn.current = undefined;
-      return;
-    }
+    if (requestedTurn.current) return;
     if (active !== undefined && active !== activeTurn) setActiveTurn(active);
   };
   const refreshOutlineFromLayout = useEffectEvent(refreshOutline);
@@ -314,9 +309,12 @@ export function Conversation(
    * 2. 只加载目标所在的历史窗口，保持长会话的消息数量限制。
    * 3. 记下落点类型，等对应窗口渲染后滚动。
    */
-  const jump = (index: number, target: 'message' | 'turn' | 'reply' = 'message') => {
+  const jump = (index: number, target: JumpRequest['target'] = 'message') => {
     // 1. 主动跳转后由读者决定阅读位置。
-    requestedTurn.current = undefined;
+    const turn = target === 'turn' ? turnNumbers.get(index) : undefined;
+    const request = { index, target, turn };
+    requestedTurn.current = turn === undefined ? undefined : request;
+    if (turn !== undefined) setActiveTurn(turn);
     autoScroll.current = false;
     // 2. 跳到旧消息也不一次挂载全部历史。
     const window = messageWindow(messages.length, index);
@@ -325,16 +323,11 @@ export function Conversation(
     );
     setMessageLimit(messagePageSize);
     // 3. 正文、提问和搜索结果各有自己的落点。
-    setJumpIndex({ index, target });
+    setJumpRequest(request);
   };
   const jumpToTurn = (index: number) => {
     jump(index, 'turn');
     setTurnJump({ index });
-    const turn = turnNumbers.get(index);
-    if (turn) {
-      requestedTurn.current = { turn };
-      setActiveTurn(turn);
-    }
   };
   const outlineActions = useStableCallbacks(
     {
@@ -492,8 +485,9 @@ export function Conversation(
     };
   }, [quoteTarget, startIndex, endIndex, expanded]);
   useEffect(() => {
-    requestedTurn.current = undefined;
-  }, [turns.length]);
+    const request = requestedTurn.current;
+    if (request && turnNumbers.get(request.index) !== request.turn) requestedTurn.current = undefined;
+  }, [turnNumbers]);
   useEffect(() => {
     const navigate = (event: Event) => {
       const direction = (event as CustomEvent).detail;
@@ -541,7 +535,7 @@ export function Conversation(
     requestedTurn.current = undefined;
     setHistoryWindow(undefined);
     setQuoteTarget(undefined);
-    setJumpIndex(null);
+    setJumpRequest(null);
     autoScroll.current = true;
     followReleased.current = false;
     requestAnimationFrame(() => thread.current?.scrollTo({ top: thread.current.scrollHeight }));
@@ -565,7 +559,7 @@ export function Conversation(
     setFindOpen(false);
     setQuery('');
     setMatchIndex(0);
-    setJumpIndex(null);
+    setJumpRequest(null);
     setTurnJump(null);
     setActiveTurn(1);
     setVisibleTurns(undefined);
@@ -603,21 +597,31 @@ export function Conversation(
     );
     return () => cancelAnimationFrame(timer);
   }, [activeMatch]);
+  const finishTurnJump = useEffectEvent(
+    (request: JumpRequest, container: HTMLElement, target: HTMLElement) => {
+      if (requestedTurn.current !== request) return;
+      requestedTurn.current = undefined;
+      autoScroll.current = endIndex === messages.length && isFollowing(container, followReleased.current);
+      setNewContent(!autoScroll.current);
+      if (!container.contains(target) || Math.abs(container.scrollTop - turnScrollTop(container, target)) > 2)
+        refreshOutline(container);
+    },
+  );
   /**
    * 1. 等历史窗口渲染后定位消息；找到目标就清掉本次请求，后续新消息不重复跳转。
    * 2. 结论跳到正文前 12 px，焦点移回对话区，避免停在消失的按钮上。
    * 3. 跳轮次时保留点选的高亮，滚动结束后按实际位置刷新。连续跳转只处理最后一次。
    */
   useEffect(() => {
-    if (jumpIndex === null) return;
+    if (jumpRequest === null) return;
     const timer = requestAnimationFrame(async () => {
       // 1. 每次点击只执行一次跳转，不能让下一轮的新消息把视图拉回旧落点。
       const container = thread.current;
-      const target = messageElement(container, jumpIndex.index, jumpIndex.target === 'reply');
+      const target = messageElement(container, jumpRequest.index, jumpRequest.target === 'reply');
       if (!container || !target) return;
-      setJumpIndex(null);
+      setJumpRequest((pending) => (pending === jumpRequest ? null : pending));
       // 2. 保留少量顶部空隙，让读者能认出回复从哪里开始。
-      if (jumpIndex.target === 'reply') {
+      if (jumpRequest.target === 'reply') {
         container.scrollTo({
           top:
             container.scrollTop +
@@ -630,13 +634,10 @@ export function Conversation(
         return;
       }
       // 3. Electron 的 scrollTo 在滚动完成或被打断时结束。旧请求不能清掉新点选的轮次。
-      if (jumpIndex.target === 'turn') {
-        const request = requestedTurn.current;
+      if (jumpRequest.target === 'turn') {
+        if (requestedTurn.current !== jumpRequest) return;
         await container.scrollTo({ top: turnScrollTop(container, target), behavior: smoothBehavior() });
-        if (!request || requestedTurn.current !== request) return;
-        requestedTurn.current = undefined;
-        if (Math.abs(container.scrollTop - turnScrollTop(container, target)) > 2)
-          refreshOutlineFromLayout(container);
+        finishTurnJump(jumpRequest, container, target);
         return;
       }
       target.scrollIntoView({
@@ -645,7 +646,7 @@ export function Conversation(
       });
     });
     return () => cancelAnimationFrame(timer);
-  }, [jumpIndex, startIndex, endIndex, activeMatch]);
+  }, [jumpRequest, startIndex, endIndex, activeMatch]);
   useEffect(() => {
     if (!CSS.highlights) return;
     CSS.highlights.delete('session-find');
@@ -917,7 +918,8 @@ export function Conversation(
           const sameViewport =
             el.clientWidth === threadViewport.current.width &&
             el.clientHeight === threadViewport.current.height;
-          if (atBottom || sameViewport) autoScroll.current = atBottom;
+          // 跳转起步时还可能在底部容差内，避免尺寸变化把对话拉回去。
+          if (!requestedTurn.current && (atBottom || sameViewport)) autoScroll.current = atBottom;
           setNewContent(!autoScroll.current);
           if (selected) lastView.current = { id: selected.id, top: el.scrollTop };
           const top = el.getBoundingClientRect().top;

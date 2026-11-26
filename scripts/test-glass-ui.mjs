@@ -314,6 +314,10 @@ async function verifyGlassUI(screenshotsOnly) {
       if (process.platform !== 'darwin')
         assert.ok(sidebarLayers.some((layer) => layer.includes('.native-titlebar')));
       assert.ok(sidebarLayers.length <= 4, `${label} workspace: ${sidebarLayers.join(', ')}`);
+      const reply = page.getByText('第 24 项已核对。', { exact: true });
+      // The restored view can leave the reply mounted but clipped by the scroll container.
+      await reply.scrollIntoViewIfNeeded();
+      await expect(reply).toBeInViewport({ ratio: 1 });
       const contrast = await sampleContrast(page, {
         ...(process.platform === 'darwin' ? {} : { titlebar: page.locator('.native-titlebar-title') }),
         sidebar: page.locator('.sidebar-brand-label'),
@@ -321,7 +325,7 @@ async function verifyGlassUI(screenshotsOnly) {
         workspaceHeader: page.locator('.workspace-title h1'),
         workspaceBreadcrumb: page.locator('.workspace-title .breadcrumb'),
         composer: input,
-        reply: page.getByText('第 24 项已核对。', { exact: true }),
+        reply,
       });
       if (label === 'light' || label === 'dark') await capture(label);
       await trigger.click();

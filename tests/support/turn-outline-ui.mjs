@@ -231,9 +231,26 @@ export async function verifyTurnOutlineUI({ app, page, output }) {
 
   const input = page.getByRole('textbox', { name: '任务输入' });
   await input.fill('');
+  // A late layout change in the first frame must not resume following the bottom.
+  await thread.evaluate((element) => {
+    element.addEventListener(
+      'scroll',
+      () => {
+        element.firstElementChild.style.paddingBottom = '16px';
+      },
+      { once: true },
+    );
+  });
   await tick(6).click();
   const jumpedMessage = thread.locator('[data-turn="6"]');
   await expect(jumpedMessage).toHaveClass(/turn-jump-highlight/);
+  const distanceFromTurnSix = () =>
+    jumpedMessage.locator('.message.user').evaluate((element) => {
+      const thread = element.closest('.thread');
+      return Math.abs(element.getBoundingClientRect().top - thread.getBoundingClientRect().top);
+    });
+  await expect.poll(distanceFromTurnSix).toBeLessThanOrEqual(2);
+  await thread.evaluate((element) => element.firstElementChild.style.removeProperty('padding-bottom'));
   await expect
     .poll(() =>
       thread.evaluate((element) => {
@@ -279,6 +296,7 @@ export async function verifyTurnOutlineUI({ app, page, output }) {
   await input.press('Alt+ArrowUp');
   await expect(row(5)).toHaveAttribute('aria-current', 'step');
   await input.press('Alt+ArrowDown');
+  await expect.poll(distanceFromTurnSix).toBeLessThanOrEqual(2);
   await expect(row(6)).toHaveAttribute('aria-current', 'step');
   await input.fill('保留用户尚未发送的多行内容\n第二段');
   const intercepted = await input.evaluate((element) => {
