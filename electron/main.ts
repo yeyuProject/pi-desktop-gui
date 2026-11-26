@@ -24,6 +24,7 @@ import { classifyModelError } from '../shared/errors';
 import { goalNotificationTitle } from '../shared/goal';
 import { InvalidRequestError, describeSystemError, describeOperationError } from '../shared/errors';
 import { isDraftQuote, splitMessageQuotes } from '../shared/message-content';
+import type { MaterialEnvironment } from '../shared/material';
 import { sessionCreatedAtFromFile } from '../shared/sidebar-view';
 import {
   sideChatContext,
@@ -80,6 +81,7 @@ import { WorkspaceWatcher } from './workspace-watch';
 import { teamToolAction } from '../shared/team';
 
 let window: BrowserWindow | undefined, store: Store, service: SessionAgents, workspace: Workspace;
+let materialEnvironment: MaterialEnvironment = { gpuCompositing: false, onBattery: false };
 let sideChats: SideChats;
 interface SideFlight {
   sessionId: string;
@@ -200,6 +202,16 @@ const sendEvent = (event: AppEvent) => {
   if (window && !window.isDestroyed() && !window.webContents.isDestroyed())
     window.webContents.send('desktop:event', event);
 };
+function updateMaterialEnvironment(change: Partial<MaterialEnvironment>) {
+  const next = { ...materialEnvironment, ...change };
+  if (
+    next.gpuCompositing === materialEnvironment.gpuCompositing &&
+    next.onBattery === materialEnvironment.onBattery
+  )
+    return;
+  materialEnvironment = next;
+  sendEvent({ type: 'materialEnvironment', materialEnvironment });
+}
 const publishState = (state = store.state) => {
   const snapshot = stateSnapshot(state);
   sendEvent({ type: 'state', ...snapshot });
@@ -502,6 +514,7 @@ function updateWindowTheme() {
     nativeTheme.shouldUseDarkColors,
     store?.state.settings.theme,
     store?.state.settings.uiStyle,
+    store?.state.settings.material,
   );
   window.setBackgroundColor(background);
   if (!isMac) window.setTitleBarOverlay(overlay);
@@ -1125,6 +1138,7 @@ const handlers: Record<
     return {
       ...stateSnapshot(),
       runtime: service.runtime,
+      materialEnvironment,
       environment:
         environmentSnapshot?.key === environmentSettingsKey(store.state.settings)
           ? environmentSnapshot.value
@@ -1252,10 +1266,12 @@ async function createWindow() {
         ? path.join(process.resourcesPath, 'icon.ico')
         : path.join(app.getAppPath(), 'build', 'icon.ico')
       : path.join(app.getAppPath(), 'build', 'icon.png');
+  const settings = store.state.settings;
   const { background, ...titleBarOverlay } = windowTheme(
     nativeTheme.shouldUseDarkColors,
-    store?.state.settings.theme,
-    store?.state.settings.uiStyle,
+    settings.theme,
+    settings.uiStyle,
+    settings.material,
   );
   window = new BrowserWindow({
     width: saved.bounds?.width ?? 1440,
@@ -1485,6 +1501,9 @@ async function createWindow() {
 }
 if (!app.requestSingleInstanceLock()) app.quit();
 else {
+  app.on('gpu-info-update', () =>
+    updateMaterialEnvironment({ gpuCompositing: app.getGPUFeatureStatus().gpu_compositing === 'enabled' }),
+  );
   app.on('second-instance', () => {
     if (window) {
       if (window.isMinimized()) window.restore();
@@ -1495,6 +1514,12 @@ else {
   app
     .whenReady()
     .then(async () => {
+      updateMaterialEnvironment({
+        gpuCompositing: app.getGPUFeatureStatus().gpu_compositing === 'enabled',
+        onBattery: powerMonitor.isOnBatteryPower(),
+      });
+      powerMonitor.on('on-battery', () => updateMaterialEnvironment({ onBattery: true }));
+      powerMonitor.on('on-ac', () => updateMaterialEnvironment({ onBattery: false }));
       app.setAppUserModelId(appUserModelId);
       void loadLoginShellPath();
       store = new Store(app.getPath('userData'), app.getVersion());

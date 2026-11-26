@@ -1,0 +1,101 @@
+:root[data-style='classic'][data-material='glass'] {
+  background: var(--bg);
+  --glass-fill: color-mix(in srgb, var(--surface) 62%, transparent);
+  --glass-modal-fill: color-mix(in srgb, var(--surface) 88%, transparent);
+  --glass-highlight: #ffffffb3;
+  --glass-edge: #ffffff59;
+  --glass-gloss: linear-gradient(to bottom, #ffffff29, transparent 40%);
+  --glass-filter: blur(18px) saturate(160%);
+  --glass-composer-filter: blur(14px) saturate(160%);
+  --glass-inset: inset 0 1px 0 var(--glass-highlight), inset 0 0 0 1px var(--glass-edge);
+}
+
+:root[data-style='classic'][data-material='glass'][data-theme='dark'] {
+  --glass-fill: color-mix(in srgb, var(--surface) 55%, transparent);
+  --glass-modal-fill: var(--glass-fill);
+  --glass-highlight: #ffffff24;
+  --glass-edge: #ffffff14;
+  --glass-gloss: linear-gradient(to bottom, #ffffff14, transparent 40%);
+}
+
+@media (prefers-color-scheme: dark) {
+  :root[data-style='classic'][data-material='glass'][data-theme='system'] {
+    --glass-fill: color-mix(in srgb, var(--surface) 55%, transparent);
+    --glass-modal-fill: var(--glass-fill);
+    --glass-highlight: #ffffff24;
+    --glass-edge: #ffffff14;
+    --glass-gloss: linear-gradient(to bottom, #ffffff14, transparent 40%);
+  }
+}
+
+:root[data-style='classic'][data-material='glass'] body {
+  background: transparent;
+}
+
+:root[data-style='classic'][data-material='glass'] .app-backdrop {
+  display: block;
+  position: fixed;
+  inset: 0;
+  z-index: -2;
+  pointer-events: none;
+  contain: strict;
+  will-change: transform;
+  background:
+    radial-gradient(ellipse at 0 0, color-mix(in srgb, var(--accent) 14%, transparent), transparent 65%),
+    radial-gradient(
+      ellipse at 100% 100%,
+      color-mix(in srgb, hsl(from var(--accent) calc(h + 40) s l) 10%, transparent),
+      transparent 65%
+    ),
+    var(--bg);
+}
+
+/* 对话滚动和流式输出只重绘滚动区，避免静止的背景跟着失效。 */
+:root[data-style='classic'][data-material='glass'] .thread {
+  contain: paint;
+}
+
+/* 模糊放在伪元素上，侧栏的固定定位菜单仍以窗口为参照，输入框的浮层仍能采到对话背景。 */
+:root[data-style='classic'][data-material='glass']
+  :is(.sidebar, .native-titlebar, .workspace-header, .composer) {
+  position: relative;
+  background: transparent;
+}
+
+:root[data-style='classic'][data-material='glass'] :is(.sidebar, .native-titlebar, .workspace-header)::before,
+:root[data-style='classic'][data-material='glass'] .composer::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  z-index: -1;
+  pointer-events: none;
+  border-radius: inherit;
+  background: var(--glass-gloss), var(--glass-fill);
+  backdrop-filter: var(--glass-filter);
+  box-shadow: var(--glass-inset);
+}
+
+:root[data-style='classic'][data-material='glass'] .composer::after {
+  backdrop-filter: var(--glass-composer-filter);
+}
+
+:root[data-style='classic'][data-material='glass'] [data-glass-layer] {
+  background: var(--glass-gloss), var(--glass-fill);
+  backdrop-filter: var(--glass-filter);
+  box-shadow: var(--glass-inset), var(--shadow);
+}
+
+:root[data-style='classic'][data-material='glass'] .modal[data-glass-layer] {
+  background-color: var(--glass-modal-fill);
+}
+
+:root[data-style='classic'][data-material='glass'] .modal > :is(.modal-body, .settings-layout) {
+  background: var(--surface);
+}
+
+:root[data-style='classic'][data-material='glass'][data-resizing] {
+  --glass-fill: var(--surface);
+  --glass-modal-fill: var(--surface);
+  --glass-filter: none;
+  --glass-composer-filter: none;
+}

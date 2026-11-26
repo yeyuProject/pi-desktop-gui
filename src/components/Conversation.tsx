@@ -13,7 +13,7 @@ import type { ReactNode } from 'react';
 import { useCallback, useEffect, useEffectEvent, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { SessionSearch } from '../lib/session-search';
 import { messagePageSize, messageWindow, windowConversation } from '../lib/message-window';
-import { RuntimeToolPlacer, turnThinking } from '../lib/conversation-layout';
+import { RuntimeToolPlacer, turnThinking, turnViewport, type VisibleTurns } from '../lib/conversation-layout';
 import { ToolGroupCard } from './conversation/ToolGroupCard';
 import { TurnOutline } from './conversation/TurnOutline';
 import { RetryErrorGroup } from './conversation/RetryErrorGroup';
@@ -130,9 +130,11 @@ export function Conversation(
       null,
     );
   const [turnJump, setTurnJump] = useState<{ index: number; target?: 'reply' } | null>(null);
+  const [visibleTurns, setVisibleTurns] = useState<VisibleTurns>();
+  const [outlineGeometry, setOutlineGeometry] = useState({ center: 0, height: 0 });
   const [replyJumpVisible, setReplyJumpVisible] = useState(false);
   const [quoteTarget, setQuoteTarget] = useState<DraftQuote>();
-  const requestedTurn = useRef<number | undefined>(undefined);
+  const requestedTurn = useRef<{ turn: number } | undefined>(undefined);
   const [historyWindow, setHistoryWindow] = useState<{ sessionId?: string; start: number }>();
   const findInput = useRef<HTMLInputElement>(null);
   const threadContent = useRef<HTMLDivElement>(null);
@@ -232,6 +234,47 @@ export function Conversation(
     }
     return { turnNumbers, replyIndices };
   }, [turns]);
+  const leadingTurn = useMemo(
+    () => (turnNumbers.has(startIndex) ? undefined : turns.findLast((turn) => turn.index < startIndex)?.turn),
+    [turns, turnNumbers, startIndex],
+  );
+
+  /**
+   * 1. 用已挂载轮次的位置计算当前轮和可视范围。
+   * 2. 切换范围时更新刻度底色。跳转途中的滚动不能抢走当前轮。
+   */
+  const refreshOutline = (container: HTMLElement, viewportTop?: number) => {
+    if (turns.length < 3) return;
+    // 1. 历史窗口可以从一轮的回复中间开始，这部分也属于可视范围。
+    const top = viewportTop ?? container.getBoundingClientRect().top;
+    const height = container.clientHeight;
+    const center = container.offsetTop + height / 2;
+    if (outlineGeometry.center !== center || outlineGeometry.height !== height)
+      setOutlineGeometry({ center, height });
+    const { active, visible } = turnViewport(
+      Array.from(container.querySelectorAll<HTMLElement>('[data-turn]'), (node) => ({
+        turn: Number(node.dataset.turn),
+        top: node.getBoundingClientRect().top,
+      })),
+      top,
+      top + height,
+      leadingTurn,
+      endIndex === messages.length && isFollowing(container, true) ? turns.at(-1)?.turn : undefined,
+    );
+    // 2. 跳转动画仍要显示经过的轮次，但高亮留给用户点选的目标。
+    if (visible?.[0] !== visibleTurns?.[0] || visible?.[1] !== visibleTurns?.[1]) setVisibleTurns(visible);
+    if (requestedTurn.current) {
+      const target = container.querySelector<HTMLElement>(`[data-turn="${requestedTurn.current.turn}"]`);
+      if (target && Math.abs(container.scrollTop - turnScrollTop(container, target)) <= 2)
+        requestedTurn.current = undefined;
+      return;
+    }
+    if (active !== undefined && active !== activeTurn) setActiveTurn(active);
+  };
+  const refreshOutlineFromLayout = useEffectEvent(refreshOutline);
+  useLayoutEffect(() => {
+    if (thread.current) refreshOutlineFromLayout(thread.current);
+  }, [selected?.id, startIndex, endIndex, turns.length]);
   const visibleItems = useMemo(
     () => windowConversation(items, startIndex, endIndex),
     [items, startIndex, endIndex],
@@ -289,7 +332,7 @@ export function Conversation(
     setTurnJump({ index });
     const turn = turnNumbers.get(index);
     if (turn) {
-      requestedTurn.current = turn;
+      requestedTurn.current = { turn };
       setActiveTurn(turn);
     }
   };
@@ -457,7 +500,7 @@ export function Conversation(
       if ((direction !== -1 && direction !== 1) || !turns.length) return;
       const current = Math.max(
         0,
-        turns.findIndex((turn) => turn.turn === (requestedTurn.current ?? activeTurn)),
+        turns.findIndex((turn) => turn.turn === (requestedTurn.current?.turn ?? activeTurn)),
       );
       const next = Math.max(0, Math.min(turns.length - 1, current + direction));
       jumpToTurn(turns[next].index);
@@ -525,6 +568,7 @@ export function Conversation(
     setJumpIndex(null);
     setTurnJump(null);
     setActiveTurn(1);
+    setVisibleTurns(undefined);
     setQuoteTarget(undefined);
     requestedTurn.current = undefined;
     setHistoryWindow(undefined);
@@ -545,6 +589,7 @@ export function Conversation(
       }
       threadViewport.current = { width: container.clientWidth, height: container.clientHeight };
       resizeReplyJump();
+      refreshOutlineFromLayout(container);
     });
     observer.observe(container);
     observer.observe(content);
@@ -561,11 +606,11 @@ export function Conversation(
   /**
    * 1. 等历史窗口渲染后定位消息；找到目标就清掉本次请求，后续新消息不重复跳转。
    * 2. 结论跳到正文前 12 px，焦点移回对话区，避免停在消失的按钮上。
-   * 3. 轮次和搜索继续使用各自原有的落点。
+   * 3. 跳轮次时保留点选的高亮，滚动结束后按实际位置刷新。连续跳转只处理最后一次。
    */
   useEffect(() => {
     if (jumpIndex === null) return;
-    const timer = requestAnimationFrame(() => {
+    const timer = requestAnimationFrame(async () => {
       // 1. 每次点击只执行一次跳转，不能让下一轮的新消息把视图拉回旧落点。
       const container = thread.current;
       const target = messageElement(container, jumpIndex.index, jumpIndex.target === 'reply');
@@ -584,11 +629,14 @@ export function Conversation(
         container.focus({ preventScroll: true });
         return;
       }
-      // 3. 轮次目录仍然定位提问，搜索仍然定位匹配内容。
+      // 3. Electron 的 scrollTo 在滚动完成或被打断时结束。旧请求不能清掉新点选的轮次。
       if (jumpIndex.target === 'turn') {
-        const top = turnScrollTop(container, target);
-        if (Math.abs(container.scrollTop - top) <= 2) requestedTurn.current = undefined;
-        container.scrollTo({ top, behavior: smoothBehavior() });
+        const request = requestedTurn.current;
+        await container.scrollTo({ top: turnScrollTop(container, target), behavior: smoothBehavior() });
+        if (!request || requestedTurn.current !== request) return;
+        requestedTurn.current = undefined;
+        if (Math.abs(container.scrollTop - turnScrollTop(container, target)) > 2)
+          refreshOutlineFromLayout(container);
         return;
       }
       target.scrollIntoView({
@@ -843,9 +891,6 @@ export function Conversation(
         aria-label="对话内容"
         tabIndex={-1}
         ref={thread}
-        onScrollEnd={() => {
-          requestedTurn.current = undefined;
-        }}
         onWheel={(event) => {
           requestedTurn.current = undefined;
           followReleased.current = nextReleased(followReleased.current, wheelIntent(event));
@@ -877,17 +922,7 @@ export function Conversation(
           if (selected) lastView.current = { id: selected.id, top: el.scrollTop };
           const top = el.getBoundingClientRect().top;
           updateReplyJump(top);
-          if (requestedTurn.current !== undefined) {
-            const target = el.querySelector<HTMLElement>(`[data-turn="${requestedTurn.current}"]`);
-            if (target && Math.abs(el.scrollTop - turnScrollTop(el, target)) <= 2)
-              requestedTurn.current = undefined;
-            // Intermediate smooth-scroll positions must not replace the requested navigation target.
-            return;
-          }
-          const visible = [...el.querySelectorAll<HTMLElement>('[data-turn]')].findLast(
-            (node) => node.getBoundingClientRect().top <= top + 100,
-          );
-          if (visible) setActiveTurn(Number(visible.dataset.turn));
+          refreshOutline(el, top);
         }}
         onMouseLeave={() => {
           if (storage.writable && selected && thread.current)
@@ -1096,6 +1131,8 @@ export function Conversation(
           key={`outline:${selected?.id}`}
           turns={turns}
           active={activeTurn}
+          visibleTurns={visibleTurns}
+          geometry={outlineGeometry}
           running={ownRuntime && running}
           {...outlineActions}
           notice={props.setNotice}

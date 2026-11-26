@@ -1,5 +1,6 @@
 import { isTeamSettings } from '../../shared/team';
 import { parseSidebarView } from '../../shared/sidebar-view';
+import { isMaterial } from '../../shared/material';
 import { BrowserWindow, dialog, nativeTheme } from 'electron';
 import { nativeThemeSource, STYLE_META, styleTheme, THEMES, UI_STYLES } from '../../shared/window-theme';
 import { updateFeed, updateProxy } from '../update-network';
@@ -61,6 +62,14 @@ export function createSettingsHandlers(context: SettingsHandlerContext) {
         next.uiStyle = value.uiStyle;
       }
       next.theme = styleTheme(next.theme, next.uiStyle);
+      if (value.material !== undefined) {
+        if (!isMaterial(value.material)) throw new Error('请选择实色或玻璃材质。');
+        next.material = value.material;
+      }
+      if (value.solidOnBattery !== undefined) {
+        if (typeof value.solidOnBattery !== 'boolean') throw new Error('电池供电时的材质设置无效。');
+        next.solidOnBattery = value.solidOnBattery;
+      }
       for (const [key, min, max] of [
         ['fontScale', 1, 2],
         ['sidebarWidth', 180, 360],

@@ -8,6 +8,7 @@ import type { AttachmentInfo } from './attachments';
 import type { CheckpointSummary, CheckpointPreview } from './checkpoints';
 import type { AgentRulesFile } from './workspace';
 import type { Theme, UiStyle } from './window-theme';
+import type { Material, MaterialEnvironment } from './material';
 import type { PromptTemplateInput, PromptTemplateDocument } from './prompts';
 import type { LocalUsageSummary } from './usage';
 import type { PiCompatibility } from './pi-version';
@@ -101,6 +102,8 @@ export interface Settings {
   thinking: string;
   theme: Theme;
   uiStyle: UiStyle;
+  material?: Material;
+  solidOnBattery?: boolean;
   expandThinking: boolean;
   fontScale: number;
   sidebarWidth: number;
@@ -463,6 +466,7 @@ export type AppEvent =
   | { type: 'piUpdate'; piUpdate: PiUpdateState }
   | { type: 'runtime'; runtime: Runtime }
   | { type: 'environment'; environment: Environment }
+  | { type: 'materialEnvironment'; materialEnvironment: MaterialEnvironment }
   | { type: 'runtimeRemoved'; sessionId: string }
   | { type: 'runtimePatch'; patch: RuntimePatch };
 /** Apply a patch; arrays before the change point keep their identity so the UI can skip them. */
@@ -512,6 +516,7 @@ export function applyRuntimePatch(previous: Runtime, patch: RuntimePatch): Runti
 export interface Bootstrap extends StateSnapshot {
   runtime: Runtime;
   environment?: Environment;
+  materialEnvironment: MaterialEnvironment;
   dataDir: string;
   storage: StorageStatus;
   update: UpdateState;

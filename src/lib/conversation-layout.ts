@@ -223,6 +223,30 @@ function countChanges(tool: ToolActivity) {
   patchCounts.set(tool, counts);
   return counts;
 }
+export type VisibleTurns = readonly [first: number, last: number];
+
+/** 用轮次起点划分可视区，起点滚出屏幕后仍能标出这轮的回复。 */
+export function turnViewport(
+  starts: readonly { turn: number; top: number }[],
+  top: number,
+  bottom: number,
+  leadingTurn?: number,
+  bottomTurn?: number,
+) {
+  let first = leadingTurn;
+  let last = leadingTurn;
+  let active = leadingTurn;
+  for (const start of starts) {
+    if (start.top >= bottom) break;
+    if (first === undefined || start.top <= top) first = start.turn;
+    last = start.turn;
+    if (start.top <= top + 100) active = start.turn;
+  }
+  const visible: VisibleTurns | undefined =
+    first !== undefined && last !== undefined ? [first, last] : undefined;
+  return { active: bottomTurn ?? active ?? first, visible };
+}
+
 export function conversationTurns(
   messages: Message[],
   toolFor: (message: Message) => ToolActivity,

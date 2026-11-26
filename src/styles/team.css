@@ -9,7 +9,7 @@
 .team-card {
   border: 1px solid var(--line);
   background: var(--surface);
-  border-radius: 10px;
+  border-radius: var(--radius-md);
   margin: 10px 0;
   overflow: hidden;
   container-type: inline-size;
@@ -36,7 +36,7 @@
   margin: -4px -6px;
   padding: 4px 6px;
   border: 0;
-  border-radius: 6px;
+  border-radius: var(--radius-xs);
   background: transparent;
   text-align: left;
   white-space: normal;
@@ -144,7 +144,7 @@ button.team-card-title:hover {
 .team-strip,
 .team-banner {
   border: 1px solid var(--line);
-  border-radius: 8px;
+  border-radius: var(--radius-md);
   margin-bottom: 8px;
   font-size: 12px;
   overflow-wrap: anywhere;
@@ -181,7 +181,7 @@ button.team-card-title:hover {
   flex-shrink: 0;
   gap: 4px;
   padding: 5px 8px;
-  border-radius: 7px;
+  border-radius: var(--radius-pill);
   font-size: calc(12px * var(--font-scale));
   color: var(--muted);
   background: transparent;

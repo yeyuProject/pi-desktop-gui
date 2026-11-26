@@ -31,7 +31,7 @@
   color: var(--accent);
 }
 .toast {
-  border-radius: 10px;
+  border-radius: var(--radius-md);
   animation: rise var(--motion-base) var(--ease-out);
 }
 .search-results > button:hover,
@@ -108,7 +108,7 @@
   border: 1px solid color-mix(in srgb, var(--signal) 40%, var(--line));
   background: var(--signal-soft);
   color: var(--ink);
-  border-radius: 10px;
+  border-radius: var(--radius-md);
   font-size: calc(12px * var(--font-scale));
   flex-shrink: 0;
 }
@@ -140,7 +140,7 @@
   gap: 10px;
   padding: 2px 6px;
   margin-right: -6px;
-  border-radius: 6px;
+  border-radius: var(--radius-sm);
   font-variant-numeric: tabular-nums;
   flex-wrap: wrap;
   justify-content: flex-end;
@@ -153,7 +153,7 @@
 .context-meter .meter {
   width: 46px;
   height: 4px;
-  border-radius: 2px;
+  border-radius: var(--radius-pill);
   background: var(--hover);
   overflow: hidden;
 }
@@ -179,7 +179,7 @@
   gap: 8px;
   margin-top: 10px;
   padding: 6px 10px;
-  border-radius: 8px;
+  border-radius: var(--radius-md);
   background: var(--rail);
   color: var(--muted);
   font-size: calc(12px * var(--font-scale));
@@ -244,7 +244,7 @@
   padding: 2px;
   margin: -2px 0 10px;
   background: var(--rail);
-  border-radius: 8px;
+  border-radius: var(--radius-md);
   width: fit-content;
 }
 .scope-tabs button {
@@ -254,7 +254,7 @@
   font-size: calc(12px * var(--font-scale));
   color: var(--muted);
   background: transparent;
-  border-radius: 6px;
+  border-radius: var(--radius-sm);
 }
 .scope-tabs button[aria-selected='true'] {
   background: var(--surface);
@@ -266,7 +266,7 @@
   align-items: flex-start;
   gap: 10px;
   padding: 9px 10px;
-  border-radius: 8px;
+  border-radius: var(--radius-sm);
 }
 .search-results > button > svg:first-child {
   margin-top: 2px;
@@ -365,7 +365,7 @@
   margin-top: 10px;
   padding: 4px 8px;
   border: 1px solid color-mix(in srgb, var(--accent) 28%, var(--line));
-  border-radius: 6px;
+  border-radius: var(--radius-sm);
   background: var(--accent-soft);
   color: var(--accent);
   font-size: calc(12px * var(--font-scale));
@@ -402,7 +402,7 @@
   gap: 10px;
   min-height: 32px;
   padding: 6px 12px;
-  border-radius: 8px;
+  border-radius: var(--radius-sm);
 }
 .command-picker code {
   min-width: 0;
@@ -429,7 +429,7 @@
   font-size: calc(10.5px * var(--font-scale));
   color: var(--muted);
   border: 1px solid var(--line);
-  border-radius: 4px;
+  border-radius: var(--radius-xs);
   padding: 0 5px;
 }
 .command-picker > small code {
@@ -461,7 +461,7 @@
   padding: 2px;
   margin: 12px 0 4px;
   background: var(--rail);
-  border-radius: 8px;
+  border-radius: var(--radius-md);
 }
 .segmented button {
   border: 0;
@@ -471,7 +471,7 @@
   font-size: calc(12px * var(--font-scale));
   color: var(--muted);
   background: transparent;
-  border-radius: 6px;
+  border-radius: var(--radius-sm);
 }
 .segmented button[aria-checked='true'] {
   background: var(--surface);
@@ -508,7 +508,7 @@
   align-items: center;
   gap: 4px;
   padding: 0 6px;
-  border-radius: 5px;
+  border-radius: var(--radius-xs);
   background: var(--signal-soft);
   color: var(--signal);
   font-weight: 600;

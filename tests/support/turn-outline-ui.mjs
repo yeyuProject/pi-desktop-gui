@@ -22,6 +22,7 @@ function fixtureMessages() {
     '多行提问\n\n  需要合并   连续空白',
     '- 最后一项检查前的提问',
     '正在运行状态的最后一轮',
+    ...Array.from({ length: 12 }, (_, index) => `补充对话 ${index + 13}`),
   ];
   const messages = [];
   for (let index = 0; index < prompts.length; index++) {
@@ -70,7 +71,7 @@ export async function verifyTurnOutlineUI({ app, page, output }) {
   };
   await app.evaluate(({ ipcMain, BrowserWindow }, runtime) => {
     const window = BrowserWindow.getAllWindows()[0];
-    window.setSize(1440, 1100);
+    window.setContentSize(1280, 820);
     globalThis.outlineUiRuntime = runtime;
     // A connected real Pi can publish after rendererReady; keep this fixture's transcript deterministic.
     const send = window.webContents.send.bind(window.webContents);
@@ -99,30 +100,77 @@ export async function verifyTurnOutlineUI({ app, page, output }) {
   const outline = page.getByRole('navigation', { name: '对话轮次' });
   const rows = outline.locator('button[data-outline-index]');
   const row = (turn) => outline.locator(`[data-turn-number="${turn}"]`);
+  const rail = outline.locator('.turn-rail');
+  const tick = (turn) => rail.locator(`[data-rail-turn="${turn}"]`);
   const thread = page.locator('.thread');
   const outside = async () => {
     const rect = await thread.boundingBox();
     await page.mouse.move(rect.x + 30, rect.y + 30);
   };
   const tickPositions = () =>
-    rows.evaluateAll((elements) =>
+    rail.locator('.turn-tick').evaluateAll((elements) =>
       elements.map((element) => {
-        const rect = element.querySelector('.turn-tick').getBoundingClientRect();
-        return { turn: element.dataset.turnNumber, x: rect.x, y: rect.y, right: rect.right };
+        const rect = element.getBoundingClientRect();
+        return { turn: element.dataset.railTurn, x: rect.x, y: rect.y, right: rect.right };
       }),
     );
-  await expect(rows).toHaveCount(12);
+  const tickWidth = (turn) => tick(turn).evaluate((element) => getComputedStyle(element, '::before').width);
+  const tickHasColor = (turn, variable) =>
+    tick(turn).evaluate((element, variable) => {
+      const probe = document.createElement('span');
+      probe.style.color = `var(${variable})`;
+      element.append(probe);
+      const matches = getComputedStyle(element, '::before').backgroundColor === getComputedStyle(probe).color;
+      probe.remove();
+      return matches;
+    }, variable);
+  await expect(rows).toHaveCount(24);
+  await thread.evaluate((element) => {
+    element.scrollTop = element.scrollHeight;
+  });
   await outside();
   await expect(outline).not.toHaveClass(/expanded/);
-  const tick = row(12).locator('.turn-tick');
-  const target = await tick.boundingBox();
+  await expect.poll(async () => (await rail.boundingBox()).height).toBe(192);
+  const threadBox = await thread.boundingBox();
+  const railBox = await rail.boundingBox();
+  assert.ok(Math.abs(railBox.y + railBox.height / 2 - (threadBox.y + threadBox.height / 2)) <= 1);
+  assert.ok(Math.abs(threadBox.x + threadBox.width - (railBox.x + railBox.width) - 16) <= 0.5);
+  assert.equal(railBox.width, 28);
+  await page.mouse.move(threadBox.x + threadBox.width - 3, threadBox.y + threadBox.height / 2);
+  await page.waitForTimeout(500);
+  await expect(outline).not.toHaveClass(/expanded/);
+  await outside();
+  await expect(tick(24)).toHaveClass(/current/);
+  await expect.poll(() => tickWidth(24)).toBe('18px');
+  await expect.poll(() => tickHasColor(24, '--accent')).toBe(true);
+  const target = await tick(12).boundingBox();
   const before = await tickPositions();
+  for (let index = 1; index < before.length; index++)
+    assert.ok(Math.abs(before[index].y - before[index - 1].y - 8) <= 0.5);
   await page.mouse.move(target.x + target.width / 2, target.y + 1);
   await outside();
   await page.waitForTimeout(150);
   await expect(outline).not.toHaveClass(/expanded/);
-  await tick.hover();
+  await tick(12).hover();
   await expect(outline).toHaveClass(/expanded/);
+  await expect(row(12)).toHaveClass(/previewed/);
+  await expect.poll(() => tickWidth(12)).toBe('22px');
+  const panel = outline.locator('.turn-panel');
+  await expect
+    .poll(async () => {
+      const { x, width } = await panel.boundingBox();
+      return Math.abs(railBox.x - (x + width) - 8);
+    })
+    .toBeLessThanOrEqual(1);
+  const panelBox = await panel.boundingBox();
+  assert.ok(Math.abs(panelBox.y + panelBox.height / 2 - (railBox.y + railBox.height / 2)) <= 1);
+  for (const [turn, width] of [
+    [10, '12px'],
+    [11, '16px'],
+    [13, '16px'],
+    [14, '12px'],
+  ])
+    await expect.poll(() => tickWidth(turn)).toBe(width);
   const after = await tickPositions();
   assert.ok(Math.max(...after.map((item) => item.right)) - Math.min(...after.map((item) => item.right)) <= 1);
   for (const previous of before) {
@@ -138,12 +186,12 @@ export async function verifyTurnOutlineUI({ app, page, output }) {
   await outside();
   await page.waitForTimeout(120);
   await expect(outline).toHaveClass(/expanded/);
-  await tick.hover();
+  await tick(12).hover();
   await page.waitForTimeout(180);
   await expect(outline).toHaveClass(/expanded/);
   await outside();
   await expect(outline).not.toHaveClass(/expanded/);
-  await tick.hover();
+  await tick(12).hover();
   await expect(outline).toHaveClass(/expanded/);
 
   assert.equal((await row(1).locator('.turn-statistics').allTextContents()).join('').trim(), '');
@@ -153,6 +201,7 @@ export async function verifyTurnOutlineUI({ app, page, output }) {
   await expect(row(7).locator('.turn-added')).toHaveCount(0);
   await expect(row(5).locator('.turn-failed-label')).toHaveText('失败');
   for (const [selector, variable] of [
+    ['.turn-title-text', '--ink'],
     ['.turn-added', '--success'],
     ['.turn-removed', '--red'],
     ['.turn-failed-label', '--red'],
@@ -182,9 +231,25 @@ export async function verifyTurnOutlineUI({ app, page, output }) {
 
   const input = page.getByRole('textbox', { name: '任务输入' });
   await input.fill('');
-  await row(6).click();
+  await tick(6).click();
   const jumpedMessage = thread.locator('[data-turn="6"]');
   await expect(jumpedMessage).toHaveClass(/turn-jump-highlight/);
+  await expect
+    .poll(() =>
+      thread.evaluate((element) => {
+        const viewport = element.getBoundingClientRect();
+        const starts = [...element.querySelectorAll('[data-turn]')].map((node) => ({
+          turn: Number(node.dataset.turn),
+          top: node.getBoundingClientRect().top,
+        }));
+        const first = starts.findLast((start) => start.top <= viewport.top) ?? starts[0];
+        const last = starts.findLast((start) => start.top < viewport.top + element.clientHeight);
+        const marker = element.parentElement.querySelector('.turn-rail-viewport');
+        return [Number(marker.dataset.first) === first.turn, Number(marker.dataset.last) === last.turn];
+      }),
+    )
+    .toEqual([true, true]);
+  await row(6).locator('.turn-title').hover();
   await input.focus();
   await page.waitForTimeout(300);
   await expect(outline).toHaveClass(/expanded/);
@@ -233,7 +298,7 @@ export async function verifyTurnOutlineUI({ app, page, output }) {
 
   // Escape suppresses hover until the pointer leaves the outline, even if keyboard focus moves.
   await outside();
-  await row(6).locator('.turn-tick').hover();
+  await tick(6).hover();
   await expect(outline).toHaveClass(/expanded/);
   const modified = outline.getByRole('button', { name: '修改 2', exact: true });
   const failed = outline.getByRole('button', { name: '失败 2', exact: true });
@@ -256,7 +321,7 @@ export async function verifyTurnOutlineUI({ app, page, output }) {
   await page.keyboard.press('Enter');
   await expect(row(2)).toHaveAttribute('aria-current', 'step');
   await modified.click();
-  await expect(rows).toHaveCount(12);
+  await expect(rows).toHaveCount(24);
   await failed.click();
   assert.deepEqual(
     await rows.evaluateAll((elements) => elements.map((element) => element.dataset.turnNumber)),
@@ -266,7 +331,7 @@ export async function verifyTurnOutlineUI({ app, page, output }) {
   await page.keyboard.press('End');
   await expect(row(9)).toBeFocused();
   await failed.click();
-  await expect(rows).toHaveCount(12);
+  await expect(rows).toHaveCount(24);
 
   const contrast = {},
     screenshots = [];
@@ -283,9 +348,9 @@ export async function verifyTurnOutlineUI({ app, page, output }) {
     });
     await expect.poll(() => page.evaluate(() => document.documentElement.dataset.theme)).toBe(theme);
     await expect.poll(() => page.evaluate(() => document.documentElement.dataset.style)).toBe(uiStyle);
-    await row(2).locator('.turn-tick').hover();
+    await tick(2).hover();
     await expect(outline).toHaveClass(/expanded/);
-    await page.waitForTimeout(150);
+    await page.waitForTimeout(280);
     contrast[key] = await outline.evaluate((nav) => {
       const canvas = document.createElement('canvas');
       canvas.width = canvas.height = 1;
@@ -316,13 +381,6 @@ export async function verifyTurnOutlineUI({ app, page, output }) {
         let background = [255, 255, 255];
         for (const ancestor of ancestors) {
           background = over(color(getComputedStyle(ancestor).backgroundColor), background);
-          if (ancestor === nav) {
-            // The floating panel paints its surface in ::before, behind the row backgrounds.
-            const panel = getComputedStyle(nav, '::before');
-            const surface = color(panel.backgroundColor);
-            surface[3] *= Number(panel.opacity);
-            background = over(surface, background);
-          }
         }
         const foreground = over(color(getComputedStyle(element).color), background);
         const a = luminance(foreground),
@@ -355,32 +413,35 @@ export async function verifyTurnOutlineUI({ app, page, output }) {
       });
     }, status);
     if (status === 'running') {
-      await expect(row(12)).toHaveClass(/running/);
-      const colors = await row(12)
-        .locator('.turn-tick')
-        .evaluate((element) => {
-          const probe = document.createElement('i');
-          probe.style.backgroundColor = 'var(--warning)';
-          document.documentElement.append(probe);
-          const values = {
-            actual: getComputedStyle(element).backgroundColor,
-            expected: getComputedStyle(probe).backgroundColor,
-          };
-          probe.remove();
-          return values;
-        });
-      assert.equal(colors.actual, colors.expected);
+      await expect(row(24)).toHaveClass(/running/);
+      await expect.poll(() => tickHasColor(24, '--warning')).toBe(true);
+      const durations = () =>
+        outline.evaluate((nav) => [
+          getComputedStyle(nav.querySelector('.turn-panel')).transitionDuration,
+          getComputedStyle(nav.querySelector('.turn-rail-viewport')).transitionDuration,
+          getComputedStyle(nav.querySelector('.turn-tick'), '::before').transitionDuration,
+        ]);
+      assert.ok((await durations()).every((duration) => duration !== '0s'));
       await page.emulateMedia({ reducedMotion: 'reduce' });
       await expect
-        .poll(() =>
-          row(12)
-            .locator('.turn-tick')
-            .evaluate((element) => getComputedStyle(element).animationName),
-        )
+        .poll(() => tick(24).evaluate((element) => getComputedStyle(element, '::before').animationName))
         .toBe('none');
+      assert.deepEqual(await durations(), ['0s', '0s', '0s']);
       await page.emulateMedia({ reducedMotion: 'no-preference' });
-    } else await expect(row(12)).not.toHaveClass(/running/);
+    }
+    if (status === 'completed') await expect(row(24)).not.toHaveClass(/running/);
   }
+  // Interrupt the jump without a wheel, key or pointer event that would clear it for us.
+  await thread.evaluate((element) => {
+    element.addEventListener(
+      'scroll',
+      () => element.scrollTo({ top: element.scrollHeight, behavior: 'instant' }),
+      { once: true },
+    );
+  });
+  await row(1).click();
+  await expect(thread.locator('[data-turn="1"]')).toHaveClass(/turn-jump-highlight/);
+  await expect(row(24)).toHaveClass(/current/);
   // The final short turn cannot align to the top: its navigation request must still finish.
   await app.evaluate(({ BrowserWindow }) => {
     globalThis.outlineUiRuntime.messages.at(-1).content = '简短回复。';
@@ -392,31 +453,34 @@ export async function verifyTurnOutlineUI({ app, page, output }) {
   await row(1).focus();
   await row(1).click();
   await expect.poll(() => thread.evaluate((element) => element.scrollTop)).toBeLessThan(100);
-  await row(12).click();
+  await row(24).click();
   await expect
     .poll(() => thread.evaluate((element) => element.scrollHeight - element.clientHeight - element.scrollTop))
     .toBeLessThan(2);
+  await expect(tick(24)).toHaveClass(/current/);
   await app.evaluate(({ BrowserWindow }) => {
     globalThis.outlineUiRuntime.messages.push(
-      { role: 'user', content: '末尾跳转后继续提问', timestamp: 1700000001300 },
-      { role: 'assistant', content: '新轮次继续输出。\n\n'.repeat(50), timestamp: 1700000001301 },
+      { role: 'user', content: '末尾跳转后继续提问', timestamp: 1700000002400 },
+      { role: 'assistant', content: '新轮次继续输出。\n\n'.repeat(50), timestamp: 1700000002401 },
     );
     BrowserWindow.getAllWindows()[0].webContents.send('desktop:event', {
       type: 'runtime',
       runtime: globalThis.outlineUiRuntime,
     });
   });
-  await expect(row(13)).toHaveAttribute('aria-current', 'step');
+  await expect(row(25)).toHaveAttribute('aria-current', 'step');
   await app.evaluate(({ BrowserWindow }) => {
     const messages = globalThis.outlineUiRuntime.messages;
-    for (let turn = 14; turn <= 123; turn++)
+    for (let turn = 26; turn <= 123; turn++)
       messages.push({ role: 'user', content: `第 ${turn} 轮未回复`, timestamp: 1700000000000 + turn * 100 });
     BrowserWindow.getAllWindows()[0].webContents.send('desktop:event', {
       type: 'runtime',
       runtime: globalThis.outlineUiRuntime,
     });
   });
-  await outline.hover();
+  await tick(123).hover();
+  await expect(outline).toHaveClass(/expanded/);
+  assert.ok((await rail.locator('.turn-tick').count()) <= 80);
   await outline.locator('.turn-outline-list').evaluate((element) => {
     element.scrollTop = element.scrollHeight;
   });
@@ -430,10 +494,30 @@ export async function verifyTurnOutlineUI({ app, page, output }) {
     }));
   assert.equal(number.text, '#123');
   assert.ok(number.width >= number.scroll, 'three-digit turn numbers must not clip');
+  assert.ok(await rail.evaluate((element) => element.scrollHeight > element.clientHeight));
+  await row(123).focus();
+  await page.keyboard.press('Tab');
+  await expect(rail).not.toBeFocused();
+  // The 80-message window now begins on a user prompt. The preceding turn is off this page.
+  const firstMessage = thread.locator('[data-message-index]').first();
+  const firstTurn = await firstMessage.getAttribute('data-turn');
+  assert.ok(firstTurn && Number(firstTurn) > 1);
+  await thread.evaluate((element) => {
+    element.scrollTop = 0;
+  });
+  await expect(rail.locator('.turn-rail-viewport')).toHaveAttribute('data-first', firstTurn);
+  await app.evaluate(({ BrowserWindow }) => {
+    globalThis.outlineUiRuntime.messages = globalThis.outlineUiRuntime.messages.slice(-12);
+    BrowserWindow.getAllWindows()[0].webContents.send('desktop:event', {
+      type: 'runtime',
+      runtime: globalThis.outlineUiRuntime,
+    });
+  });
+  await expect(outline.locator('.turn-outline-summary')).toHaveText('12 轮');
   await outside();
   await input.focus();
   console.log(
-    'PASS UI6 fixed ticks, hover delays, cleaned titles, filtered keyboard navigation and all style text contrast',
+    'PASS UI18 rail spacing, hover zoom, visible range, reduced motion, keyboard navigation and text contrast',
   );
   return { contrast, screenshots };
 }
@@ -745,7 +829,7 @@ export async function verifyMessageContentUI({ app, page, output }) {
     return event.defaultPrevented;
   });
   assert.equal(intercepted, false, 'Ctrl+C keeps system text copying');
-  await row(4).locator('.turn-tick').hover();
+  await outline.locator('[data-rail-turn="4"]').hover();
   await expect(outline).toHaveClass(/expanded/);
   await row(4).hover();
   const missing = outline.getByRole('button', { name: '复制第 4 轮回复', exact: true });
@@ -855,6 +939,7 @@ export async function verifyMessageContentUI({ app, page, output }) {
   await expect.poll(async () => (await quotes()).at(-1).text).toBe('不应复制的思考');
   assert.equal((await quotes()).at(-1).messageTimestamp, 1800000000104);
   await choose(code);
+  await expect(selectionMenu).toBeVisible();
   await page.keyboard.press('Escape');
   await expect(selectionMenu).toHaveCount(0);
   await choose(tool.locator('.arguments'));

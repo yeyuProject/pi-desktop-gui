@@ -479,6 +479,7 @@ export default function App() {
                     'state',
                     'runtime',
                     'environment',
+                    'materialStatus',
                     'piUpdate',
                     'setNotice',
                     'error',

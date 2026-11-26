@@ -6,6 +6,7 @@ import * as goal from '../shared/goal';
 import * as ask from '../shared/ask';
 import * as messageContent from '../shared/message-content';
 import * as sidebarView from '../shared/sidebar-view';
+import * as material from '../shared/material';
 import test, { type TestContext } from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
@@ -206,6 +207,7 @@ function harness(
   });
   const dependencies: Record<string, unknown> = {
     '../lib/notice-store': { notice: noticeStore.notice, dismissNotice: noticeStore.dismiss },
+    '../lib/glass': { watchGlassLayers: noOp },
     react: hooks,
     './useRuntime': { useRuntime: () => view },
     './useTeamApprovals': {
@@ -224,6 +226,7 @@ function harness(
     '../../shared/ask': ask,
     '../../shared/message-content': messageContent,
     '../../shared/sidebar-view': sidebarView,
+    '../../shared/material': material,
     '../lib/format': { readableError },
     '../lib/conversation-layout': { hideRecoveredErrors },
     '../lib/plan-transcript': { hidePlanTools },
@@ -275,7 +278,10 @@ function harness(
     require,
     module,
     module.exports,
-    { desktop: { invoke: invokeApi, platform: 'linux' } },
+    {
+      desktop: { invoke: invokeApi, platform: 'linux' },
+      matchMedia: () => ({ matches: false, addEventListener: noOp, removeEventListener: noOp }),
+    },
     { getItem: () => null, setItem: noOp },
     { documentElement: { dataset: {}, style: { setProperty: noOp } }, activeElement: null },
     timeout,
