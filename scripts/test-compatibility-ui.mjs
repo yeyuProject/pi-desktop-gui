@@ -2,39 +2,42 @@ import { launchApp, closeApp } from '../tests/support/desktop-app.mjs';
 import assert from 'node:assert/strict';
 import fs from 'node:fs/promises';
 import os from 'node:os';
+import { once } from 'node:events';
 import path from 'node:path';
 import { Store } from '../electron/store.ts';
 import { PI_INSTALL_COMMAND, VERIFIED } from '../shared/pi-version.ts';
 
-const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'pi-compatibility-ui-'));
-const store = new Store(dir);
-await store.load();
-const session = store.createSession();
-Object.assign(store.state.settings, {
-  piPath: path.resolve('tests/support/versioned-pi.mjs'),
-  nodePath: process.execPath,
-  agentDir: dir,
-  onboardingDone: true,
-});
-await store.save();
-let app, page;
-const errors = [];
-try {
-  for (const [version, compatibility] of [
-    [VERIFIED, 'verified'],
-    ['1.1.1', 'unverified'],
-    ['1.2.0', 'unverified'],
-    ['2.0.0', 'unverified'],
-    ['no version', 'unknown'],
-  ]) {
+// Each version exercises a cold start, including first-run compatibility detection.
+async function verifyVersion(version, compatibility) {
+  const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'pi-compatibility-ui-'));
+  const dataDir = path.join(dir, 'desktop');
+  const agentDir = path.join(dir, 'agent');
+  let app, page;
+  const errors = [];
+  try {
+    await fs.mkdir(agentDir);
+    const store = new Store(dataDir);
+    await store.load();
+    const session = store.createSession();
+    Object.assign(store.state.settings, {
+      piPath: path.resolve('tests/support/versioned-pi.mjs'),
+      nodePath: process.execPath,
+      agentDir,
+      onboardingDone: true,
+    });
+    await store.save();
     const recognized = compatibility !== 'unknown';
-    await fs.writeFile(path.join(dir, 'fixture-version.txt'), version);
+    await fs.writeFile(path.join(agentDir, 'fixture-version.txt'), version);
     ({ app, page } = await launchApp({
       executablePath: process.env.PI_DESKTOP_EXE,
-      dataDir: dir,
+      dataDir,
       errors: errors,
     }));
 
+    const child = app.process();
+    child.once('exit', (code, signal) =>
+      console.log('Electron exit', { version, pid: child.pid, code, signal }),
+    );
     const input = page.getByRole('textbox', { name: '任务输入' });
     await input.waitFor();
     const notice = page.getByLabel('Pi 版本兼容性');
@@ -71,16 +74,30 @@ try {
     assert.match(diagnostic, new RegExp(`"piCompatibility": "${compatibility}"`));
     console.log(`PASS ${version} welcome/settings, sending policy and diagnostic compatibility`);
     await app.close();
-    app = undefined;
+    if (child.exitCode === null && child.signalCode === null)
+      await once(child, 'exit', { signal: AbortSignal.timeout(15000) });
+    assert.equal(child.exitCode, 0, `Electron exited with signal ${child.signalCode}`);
+    assert.deepEqual(errors, []);
+  } catch (error) {
+    console.error('Compatibility case failed', { version, errors });
+    if (page && !page.isClosed()) {
+      await fs.mkdir('test-results', { recursive: true });
+      await page.screenshot({ path: 'test-results/compatibility-ui-failure.png' }).catch(() => {});
+    }
+    throw error;
+  } finally {
+    try {
+      await closeApp(app);
+    } finally {
+      await fs.rm(dir, { recursive: true, force: true });
+    }
   }
-  assert.deepEqual(errors, []);
-} catch (error) {
-  if (page && !page.isClosed()) {
-    await fs.mkdir('test-results', { recursive: true });
-    await page.screenshot({ path: 'test-results/compatibility-ui-failure.png' });
-  }
-  throw error;
-} finally {
-  if (app) await closeApp(app);
-  await fs.rm(dir, { recursive: true, force: true });
 }
+for (const [version, compatibility] of [
+  [VERIFIED, 'verified'],
+  ['1.1.1', 'unverified'],
+  ['1.2.0', 'unverified'],
+  ['2.0.0', 'unverified'],
+  ['no version', 'unknown'],
+])
+  await verifyVersion(version, compatibility);
