@@ -157,6 +157,8 @@ export const TurnOutline = memo(function TurnOutline({
         event.key !== 'Escape' ||
         event.isComposing ||
         event.defaultPrevented ||
+        // 选区工具栏在冒泡阶段处理 Esc，目录在捕获阶段须让它先关闭。
+        document.querySelector('.selection-menu') ||
         (layer && (layer.kind !== 'panel' || layer.trap))
       )
         return;

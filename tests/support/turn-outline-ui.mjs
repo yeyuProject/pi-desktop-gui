@@ -978,6 +978,27 @@ export async function verifyMessageContentUI({ app, page, output }) {
   await expect(selectionMenu).toBeVisible();
   await page.keyboard.press('Escape');
   await expect(selectionMenu).toHaveCount(0);
+  // Esc 保留选中的代码。等真实滚动事件处理完，再检查旧选区有没有重新弹出菜单。
+  const selectedAfterScroll = await thread.evaluate(async (element) => {
+    const scrolled = new Promise((resolve) => element.addEventListener('scroll', resolve, { once: true }));
+    element.scrollTop += element.scrollTop > 0 ? -1 : 1;
+    await scrolled;
+    await new Promise((resolve) => requestAnimationFrame(resolve));
+    return getSelection().toString().trim();
+  });
+  expect(selectedAfterScroll).toBe('const quoted = 1;');
+  await expect(selectionMenu).toHaveCount(0);
+  // 指针留在刻度上保持目录展开，重新选中同一段代码后，两个 Esc 各关闭一处。
+  await row(2).focus();
+  await outline.locator('[data-rail-turn="2"]').hover();
+  await choose(code);
+  await expect(selectionMenu).toBeVisible();
+  await expect(outline).toHaveClass(/expanded/);
+  await page.keyboard.press('Escape');
+  await expect(selectionMenu).toHaveCount(0);
+  await expect(outline).toHaveClass(/expanded/);
+  await page.keyboard.press('Escape');
+  await expect(outline).not.toHaveClass(/expanded/);
   await choose(tool.locator('.arguments'));
   await expect(selectionMenu).toHaveCount(0);
   await thread.locator('[data-message-index="1"] .message-content').scrollIntoViewIfNeeded();
