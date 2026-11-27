@@ -305,7 +305,7 @@ export function Conversation(
   }, [updateReplyJump, selected?.id, turns]);
   const resizeReplyJump = useEffectEvent(updateReplyJump);
   /**
-   * 1. 停止跟随底部，避免阅读落点被新输出拉走。
+   * 1. 停止跟随底部。点选轮次时收紧底部容差，避免把停在底部附近当成读到了末尾。
    * 2. 只加载目标所在的历史窗口，保持长会话的消息数量限制。
    * 3. 记下落点类型，等对应窗口渲染后滚动。
    */
@@ -314,7 +314,10 @@ export function Conversation(
     const turn = target === 'turn' ? turnNumbers.get(index) : undefined;
     const request = { index, target, turn };
     requestedTurn.current = turn === undefined ? undefined : request;
-    if (turn !== undefined) setActiveTurn(turn);
+    if (turn !== undefined) {
+      setActiveTurn(turn);
+      followReleased.current = true;
+    }
     autoScroll.current = false;
     // 2. 跳到旧消息也不一次挂载全部历史。
     const window = messageWindow(messages.length, index);
@@ -597,14 +600,23 @@ export function Conversation(
     );
     return () => cancelAnimationFrame(timer);
   }, [activeMatch]);
+  /**
+   * 1. 连续点选轮次时，只结束最后一次跳转。
+   * 2. 到达目标且位于会话底部才恢复跟随。停偏时按实际位置更新当前轮。
+   */
   const finishTurnJump = useEffectEvent(
     (request: JumpRequest, container: HTMLElement, target: HTMLElement) => {
+      // 1. 被新跳转打断的旧请求不能清掉新目标。
       if (requestedTurn.current !== request) return;
       requestedTurn.current = undefined;
-      autoScroll.current = endIndex === messages.length && isFollowing(container, followReleased.current);
+      // 2. 滚动被打断也会结束，此时即使仍靠近底部也要保留阅读位置。
+      const arrived =
+        container.contains(target) && Math.abs(container.scrollTop - turnScrollTop(container, target)) <= 2;
+      autoScroll.current =
+        arrived && endIndex === messages.length && isFollowing(container, followReleased.current);
+      if (autoScroll.current) followReleased.current = false;
       setNewContent(!autoScroll.current);
-      if (!container.contains(target) || Math.abs(container.scrollTop - turnScrollTop(container, target)) > 2)
-        refreshOutline(container);
+      if (!arrived) refreshOutline(container);
     },
   );
   /**

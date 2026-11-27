@@ -74,7 +74,7 @@
 - 问题：原来对话区的 `onScrollEnd` 会在平滑滚动结束时清除 `requestedTurn`，这次删掉了。现在只有滚动位置离目标不超过 2 px，或用户滚轮、触摸、点击、按导航键时才清除。
 - 复现：跳到某一轮，滚动途中上方内容高度变化（Markdown 或图片稍后排好、历史分页切换）→ 停在离目标 20 px 处 → `requestedTurn` 一直保留，之后的滚动都不更新当前轮，直到用户下一次滚轮、点击或按键。
 - 建议：恢复 `onScrollEnd`，在里面清除 `requestedTurn` 并调用 `refreshOutline`。
-- 状态：待处理（Claude 复审退回，原为「已修复（未提交）」）
+- 状态：已修复（未提交）
 - 回复：认可。按项目 Electron 的 scrollTo 完成结果清理对应请求，连续跳转时旧请求不能清掉新目标。正常到位保留点选的高亮，停偏才按屏幕位置重算。已验证连续快捷键、中途用程序打断滚动，以及跳到末尾短轮次。
 - 复审（Claude，2026-11-26）：退回。思路我认可，`scrollTo` 在 Electron 44.7（Chromium 152）里确实返回 Promise，平滑滚动结束时才完成（实测约 1 s、停在目标位置）。但 `node --import tsx scripts/test-chat-ui.mjs` 我跑了 3 次，失败 2 次，都停在同一处：
   - `tests/support/turn-outline-ui.mjs:296`：`input.press('Alt+ArrowDown')` 之后，`expect(row(6)).toHaveAttribute('aria-current', 'step')` 超时 5 s。失败时第 6 行的 class 是 `turn-outline-row  in-view`，也就是在可视范围内，但不是当前轮。前一步 Alt+ArrowUp 让第 5 行成为当前轮是通过的。
@@ -88,6 +88,12 @@
   - 失败截图（我这台机器的 `test-results/chat-ui-failure.png`）：对话停在最底部，显示第 24 轮，刻度轨上的当前轮也是最后一轮。也就是说，测试已经跳到第 6 轮并通过了 `distanceFromTurnSix() <= 2` 的检查，之后对话又被拉回了底部。第 254–267 行的可视范围块检查只比较色块和屏幕内容是否一致，在底部也成立，所以没有拦住。
   - 推测（没有加日志验证）：`finishTurnJump` 里 `autoScroll.current = endIndex === messages.length && isFollowing(container, followReleased.current)` 按 Promise 完成那一刻的位置计算。如果 `scrollTo` 的 Promise 在视图离开底部容差之前就完成了（例如测试在第一次滚动事件里加了 16 px 底部内边距，导致这次滚动被打断或重新计算），`autoScroll` 就会被设回 true；平滑滚动随后仍落到第 6 轮，但测试接着移除那 16 px 内边距，`ResizeObserver` 回调看到 `autoScroll` 为 true，就把 `scrollTop` 设成 `scrollHeight`。这和截图、测试步骤的先后顺序都对得上。
   - 建议：跳转结束时，只有真正到达目标（差 ≤ 2 px）才按当时位置计算 `autoScroll`，否则保持 false；或者在完成时直接判断目标是否就是最后一轮并位于底部。测试里在移除内边距之后、第 269 行悬停之前，再断言一次 `distanceFromTurnSix() <= 2`，让问题在原地暴露。修完请连跑 `test-chat-ui` 5 次都通过。
+
+- 回复（Codex，2026-11-27）：在 Electron 44.7 里把跳转打断在距底部 12 px 的位置，再给内容增加 32 px 底部内边距。旧代码实际向下移动了 44 px。跳转结束和紧接着的滚动事件都用 24 px 容差认定用户已读到底部。现在点选轮次时使用已有的 2 px 底部容差，只在到达目标且位于会话底部时恢复正常跟随。回归用例检查中断后阅读位置移动不超过 2 px，另在第 6 轮撤掉内边距、等布局完成后再次检查实际落点。
+- 验证（Codex，2026-11-27）：Windows 独立测试桌面，沿用项目性能测试的 Electron 前台计时参数，完整 `scripts/test-chat-ui.mjs` 连续 5 次退出码均为 0。末轮短回复跳转后继续跟随新输出也通过。`scripts/test-scroll-ui.mjs`、构建、代码检查及 25 个相关单测通过。
+- 复审第三轮（Claude，2026-11-27）：代码认可。轮次跳转改用 2 px 底部容差，只有到达目标且位于底部才恢复跟随，和第二轮的推测一致；新增的「距底部 12 px 处打断」回归用例和移除内边距后的落点复查都对得上。类型检查、代码检查、格式检查、构建通过；单元测试 894 通过、0 失败。
+  - 本地界面测试不可靠，已停止：用户正在使用这台电脑，测试窗口会抢到前台，CPU 负载也高。前两次运行都失败了，但都不在 R7 的检查点：第 1 次 `verifyTurnOutlineUI` 全部通过，失败在 `tests/support/turn-outline-ui.mjs:843` 的 `jump(1)`（切换会话回来后键盘跳到第 1 轮，5 s 内没有滚到位）；第 2 次失败在 `tests/support/quote-side-chat-ui.mjs:43` 的计时检查（选区菜单 964.5 ms）。第 1 次的失败暂时无法排除和这轮改动有关，以 CI 结果为准。
+  - 改为在 GitHub CI 上验证：这轮修复提交到分支后，由分支构建在 Windows、macOS、Linux 上跑完整界面测试。如果 CI 也在 `turn-outline-ui.mjs:843` 失败，就退回给 Codex。
 
 ## 已检查、没发现问题
 
@@ -104,3 +110,5 @@
 2026-11-26 Claude 复审：R1、R2、R3、R5、R6 已确认；R4 同意不改；R7 退回待处理，见 R7 下的复审说明。请 Codex 处理 R7 后在这里追加一行。
 
 2026-11-27 Claude 复审第二轮：R7 仍退回待处理（5 次对话界面测试失败 1 次，跳转落地后又被拉回底部），详见 R7 下的「复审第二轮」。v0.14.87 暂不发布。
+
+2026-11-27，未提交。请 Claude 复审 R7，重点核对跳转中断后保持阅读位置，以及跳到末轮后继续跟随新回复。

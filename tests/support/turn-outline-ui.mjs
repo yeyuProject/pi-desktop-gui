@@ -250,7 +250,11 @@ export async function verifyTurnOutlineUI({ app, page, output }) {
       return Math.abs(element.getBoundingClientRect().top - thread.getBoundingClientRect().top);
     });
   await expect.poll(distanceFromTurnSix).toBeLessThanOrEqual(2);
-  await thread.evaluate((element) => element.firstElementChild.style.removeProperty('padding-bottom'));
+  await thread.evaluate(async (element) => {
+    element.firstElementChild.style.removeProperty('padding-bottom');
+    await new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve)));
+  });
+  expect(await distanceFromTurnSix()).toBeLessThanOrEqual(2);
   await expect
     .poll(() =>
       thread.evaluate((element) => {
@@ -453,13 +457,27 @@ export async function verifyTurnOutlineUI({ app, page, output }) {
   await thread.evaluate((element) => {
     element.addEventListener(
       'scroll',
-      () => element.scrollTo({ top: element.scrollHeight, behavior: 'instant' }),
+      () => element.scrollTo({ top: element.scrollHeight - element.clientHeight - 12, behavior: 'instant' }),
       { once: true },
     );
   });
   await row(1).click();
   await expect(thread.locator('[data-turn="1"]')).toHaveClass(/turn-jump-highlight/);
-  await expect(row(24)).toHaveClass(/current/);
+  await expect
+    .poll(() => thread.evaluate((element) => element.scrollHeight - element.clientHeight - element.scrollTop))
+    .toBe(12);
+  await expect(row(1)).not.toHaveAttribute('aria-current', 'step');
+  // 这里距底部只有 12 px。新内容撑高后仍应停在被打断的位置。
+  const interruptedOffset = await thread.evaluate(async (element) => {
+    const content = element.firstElementChild;
+    const before = element.scrollTop;
+    content.style.paddingBottom = '32px';
+    await new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve)));
+    const moved = element.scrollTop - before;
+    content.style.removeProperty('padding-bottom');
+    return moved;
+  });
+  expect(Math.abs(interruptedOffset)).toBeLessThanOrEqual(2);
   // The final short turn cannot align to the top: its navigation request must still finish.
   await app.evaluate(({ BrowserWindow }) => {
     globalThis.outlineUiRuntime.messages.at(-1).content = '简短回复。';
