@@ -41,7 +41,7 @@
   min-height: 26px;
   padding: 4px;
   border: 0;
-  border-radius: 6px;
+  border-radius: var(--radius-sm);
   background: transparent;
   color: var(--muted);
 }
@@ -93,7 +93,7 @@
   max-width: 88%;
   margin-left: auto;
   padding: 8px 12px;
-  border-radius: 12px 12px 4px 12px;
+  border-radius: var(--radius-md) var(--radius-md) var(--radius-xs) var(--radius-md);
   background: var(--bubble, var(--rail));
   line-height: 1.6;
 }
@@ -127,7 +127,7 @@
 }
 .side-message footer button {
   border: 0;
-  border-radius: 6px;
+  border-radius: var(--radius-sm);
   background: transparent;
   padding: 2px 6px;
   min-height: 22px;
@@ -141,7 +141,7 @@
 .side-chat-composer {
   margin: 0 12px 12px;
   border: 1px solid var(--line);
-  border-radius: 14px;
+  border-radius: var(--radius-lg);
   background: var(--surface);
   transition:
     border-color 160ms ease,
@@ -198,7 +198,7 @@
   min-height: 0;
   padding: 0;
   border: 0;
-  border-radius: 9px;
+  border-radius: var(--radius-sm);
   background: var(--primary);
   color: var(--on-primary);
 }
@@ -233,7 +233,7 @@
   display: block;
   font-size: 11px;
   background: var(--accent-soft);
-  border-radius: 7px;
+  border-radius: var(--radius-md);
   padding: 4px 6px 4px 8px;
   margin-bottom: 4px;
   overflow-wrap: anywhere;

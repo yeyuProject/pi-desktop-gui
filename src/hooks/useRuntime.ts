@@ -17,6 +17,7 @@ import {
 import { readableError } from '../lib/format';
 import { UpdateStore } from '../lib/update-store';
 import { RuntimeStore } from '../lib/runtime-store';
+import type { MaterialEnvironment } from '../../shared/material';
 const api = window.desktop;
 export function useRuntime(
   setError: (value: string) => void,
@@ -27,6 +28,7 @@ export function useRuntime(
     [piUpdate, setPiUpdate] = useState<PiUpdateState>(),
     [storage, setStorage] = useState<StorageStatus>({ writable: false });
   const [runtimes] = useState(() => new RuntimeStore());
+  const [materialEnvironment, setMaterialEnvironment] = useState<MaterialEnvironment>();
   const [updates] = useState(() => new UpdateStore());
   const sessionId = snapshot?.state.selectedSessionId;
   const runtime = useSyncExternalStore(
@@ -47,6 +49,7 @@ export function useRuntime(
     let alive = true;
     const unsubscribe = api.onEvent((event) => {
       if (!alive) return;
+      if (event.type === 'materialEnvironment') return setMaterialEnvironment(event.materialEnvironment);
       if (event.type === 'state') receiveState(event.state, event.revision);
       else if (event.type === 'storage') setStorage(event.storage);
       else if (event.type === 'update') updates.set(event.update);
@@ -69,6 +72,7 @@ export function useRuntime(
           if (!runtimes.has(v.runtime.sessionId)) runtimes.set(v.runtime);
         }
         setEnvironment((previous) => previous ?? v.environment);
+        setMaterialEnvironment((previous) => previous ?? v.materialEnvironment);
         setPiUpdate((previous) => previous ?? v.piUpdate);
         setPrefs((previous) => previous ?? receivedState.current.state?.settings ?? v.state.settings);
         setStorage(v.storage);
@@ -93,6 +97,7 @@ export function useRuntime(
     sidebarActivities,
     anyRunning,
     environment,
+    materialEnvironment,
     setEnvironment,
     piUpdate,
     storage,

@@ -29,7 +29,7 @@
   color: var(--on-primary);
   font-family: Georgia, serif;
   font-size: calc(23px * var(--font-scale));
-  border-radius: 8px;
+  border-radius: var(--radius-sm);
   display: inline-flex;
   align-items: center;
   justify-content: center;
@@ -290,12 +290,13 @@
   box-shadow: var(--shadow);
   border: 1px solid var(--line);
   padding: 5px;
-  border-radius: 9px;
+  border-radius: var(--radius-popover);
   z-index: 5;
 }
 .context-menu > button {
   width: 100%;
   border: 0;
+  border-radius: calc(var(--radius-popover) - 4px);
   justify-content: flex-start;
 }
 .workspace {
@@ -381,7 +382,7 @@
   gap: 6px;
   white-space: nowrap;
   color: var(--muted);
-  border-radius: 6px;
+  border-radius: var(--radius-xs);
   padding: 2px 0;
 }
 .status.error,
@@ -398,7 +399,7 @@
 .trust-banner {
   margin: 0 25px 12px;
   border: 1px solid var(--line);
-  border-radius: 9px;
+  border-radius: var(--radius-md);
   display: flex;
   gap: 10px;
   align-items: center;

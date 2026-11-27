@@ -2,6 +2,7 @@ import { DEFAULT_TEAM_SETTINGS, isTeamLink, isTeamSettings, teamMemberActive } f
 import { readGoalDraft } from '../shared/goal-input';
 import path from 'node:path';
 import { THEMES, UI_STYLES, styleTheme } from '../shared/window-theme';
+import { isMaterial } from '../shared/material';
 import { busy, type AppState, type Project, type Session, type Settings } from '../shared/types';
 import { isDraftQuote } from '../shared/message-content';
 import { parseSidebarView, sessionCreatedAtFromFile, sidebarSectionName } from '../shared/sidebar-view';
@@ -17,6 +18,8 @@ export const defaultSettings: Settings = {
   thinking: '',
   theme: 'system',
   uiStyle: 'classic',
+  material: 'solid',
+  solidOnBattery: true,
   expandThinking: false,
   fontScale: 1,
   sidebarWidth: 240,
@@ -234,9 +237,11 @@ export function parseState(value: unknown) {
           ? (THEMES as readonly unknown[]).includes(candidate)
           : key === 'uiStyle'
             ? (UI_STYLES as readonly unknown[]).includes(candidate)
-            : typeof defaultSettings[key] === 'number'
-              ? typeof candidate === 'number' && Number.isFinite(candidate) && candidate > 0
-              : typeof candidate === typeof defaultSettings[key];
+            : key === 'material'
+              ? isMaterial(candidate)
+              : typeof defaultSettings[key] === 'number'
+                ? typeof candidate === 'number' && Number.isFinite(candidate) && candidate > 0
+                : typeof candidate === typeof defaultSettings[key];
     if (valid) Object.assign(state.settings, { [key]: candidate });
     else repairedSettings++;
   }

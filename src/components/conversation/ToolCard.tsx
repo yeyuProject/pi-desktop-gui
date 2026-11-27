@@ -217,6 +217,23 @@ export function ToolCard({
               });
           }}
         >
+          {Boolean(tool.args.path) && (
+            <IconButton
+              title="查看文件"
+              className="tool-open-file"
+              onClick={() => openFile(String(tool.args.path))}
+            >
+              <FileText size={13} />
+            </IconButton>
+          )}
+          <div className="tool-actions">
+            <span role="status" className="tool-copy-status">
+              {copyState === 'error' ? '复制失败，请重试' : copyState === 'copied' ? '已复制' : ''}
+            </span>
+            <IconButton title="复制输出" onClick={() => void copyOutput()}>
+              {copyState === 'copied' ? <Check size={13} /> : <Copy size={13} />}
+            </IconButton>
+          </div>
           {match ? (
             <pre className="tool-search-content">
               <SearchHighlight text={match.text} query={match.query} activeStart={match.start} />
@@ -265,19 +282,6 @@ export function ToolCard({
               />
             </>
           )}
-          <div className="tool-actions">
-            {Boolean(tool.args.path) && (
-              <IconButton title="查看文件" onClick={() => openFile(String(tool.args.path))}>
-                <FileText size={13} />
-              </IconButton>
-            )}
-            <span role="status" className="tool-copy-status">
-              {copyState === 'error' ? '复制失败，请重试' : copyState === 'copied' ? '已复制' : ''}
-            </span>
-            <IconButton title="复制输出" onClick={() => void copyOutput()}>
-              {copyState === 'copied' ? <Check size={13} /> : <Copy size={13} />}
-            </IconButton>
-          </div>
         </div>
       )}
     </details>

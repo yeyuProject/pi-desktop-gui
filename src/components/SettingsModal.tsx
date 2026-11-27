@@ -32,6 +32,7 @@ import type { Workbench } from '../hooks/useWorkbench';
 import type { ReactNode } from 'react';
 import { useUnsavedChanges } from '../hooks/useUnsavedChanges';
 import { UI_STYLES, STYLE_META, styleTheme } from '../../shared/window-theme';
+import { supportsGlassTheme } from '../../shared/material';
 const draftKeys = [
   'team',
   'piPath',
@@ -40,6 +41,8 @@ const draftKeys = [
   'editorPath',
   'theme',
   'uiStyle',
+  'material',
+  'solidOnBattery',
   'expandThinking',
   'fontScale',
   'sidebarWidth',
@@ -58,6 +61,7 @@ export function SettingsModal(
     | 'state'
     | 'runtime'
     | 'environment'
+    | 'materialStatus'
     | 'piUpdate'
     | 'setNotice'
     | 'error'
@@ -130,6 +134,8 @@ export function SettingsModal(
     setThinking,
   } = props;
   const { piUpdate } = props;
+  const glassSupported = prefs !== undefined && supportsGlassTheme(prefs.theme);
+  const glassSelected = glassSupported && prefs?.material === 'glass';
   const piUpdating = piUpdate?.status === 'updating';
   const piUpdateAvailable =
     piUpdate?.status === 'available' || (piUpdate?.status === 'failed' && Boolean(piUpdate.latest));
@@ -178,6 +184,8 @@ export function SettingsModal(
   const appearanceKeys = [
     'theme',
     'uiStyle',
+    'material',
+    'solidOnBattery',
     'fontScale',
     'sidebarWidth',
     'inspectorWidth',
@@ -645,6 +653,49 @@ export function SettingsModal(
                       </button>
                     ))}
                   </div>
+                  {prefs.uiStyle === 'classic' && (
+                    <>
+                      <label className="field-label" id="material-label">
+                        材质
+                      </label>
+                      <div className="theme-options" role="group" aria-labelledby="material-label">
+                        <button
+                          data-material-option="solid"
+                          className={glassSelected ? '' : 'active'}
+                          aria-pressed={!glassSelected}
+                          onClick={() => appearance({ ...prefs, material: 'solid' })}
+                        >
+                          实色
+                        </button>
+                        <button
+                          data-material-option="glass"
+                          className={glassSelected ? 'active' : ''}
+                          aria-pressed={glassSelected}
+                          disabled={!glassSupported}
+                          title={glassSupported ? undefined : '这套主题只支持实色'}
+                          onClick={() => appearance({ ...prefs, material: 'glass' })}
+                        >
+                          玻璃
+                        </button>
+                      </div>
+                      {props.materialStatus && (
+                        <p className="settings-footer-note" data-material-status role="status">
+                          {props.materialStatus}
+                        </p>
+                      )}
+                      {glassSelected && (
+                        <label className="check-row">
+                          <input
+                            type="checkbox"
+                            data-material-battery
+                            checked={prefs.solidOnBattery !== false}
+                            onChange={(e) => appearance({ ...prefs, solidOnBattery: e.target.checked })}
+                          />
+                          <span>使用电池时改用实色</span>
+                        </label>
+                      )}
+                    </>
+                  )}
                   <label className="field-label">主题</label>
                   <div className="theme-options">
                     {(

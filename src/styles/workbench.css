@@ -52,7 +52,7 @@ select:hover:not(:disabled) {
 .brand-mark {
   width: 28px;
   height: 28px;
-  border-radius: 8px;
+  border-radius: var(--radius-sm);
   font-style: normal;
   font-size: calc(21px * var(--font-scale));
   padding: 0;
@@ -72,7 +72,7 @@ select:hover:not(:disabled) {
   font-size: calc(10px * var(--font-scale));
   border: 1px solid var(--line);
   border-bottom-width: 2px;
-  border-radius: 5px;
+  border-radius: var(--radius-xs);
   padding: 0 5px;
   color: var(--muted);
   background: var(--surface);
@@ -108,7 +108,7 @@ select:hover:not(:disabled) {
   top: 8px;
   bottom: 8px;
   width: 3px;
-  border-radius: 2px;
+  border-radius: var(--radius-pill);
   background: var(--accent);
 }
 .session-row.active > button:first-child {
@@ -153,10 +153,6 @@ select:hover:not(:disabled) {
 .sidebar-version {
   padding-top: 8px;
 }
-.context-menu {
-  border-radius: 10px;
-}
-
 .workspace-header {
   min-height: 56px;
   padding: 8px 20px;
@@ -173,7 +169,7 @@ select:hover:not(:disabled) {
   font-family: var(--font-mono);
   font-size: calc(10.5px * var(--font-scale));
   padding: 0 6px;
-  border-radius: 5px;
+  border-radius: var(--radius-pill);
   background: var(--rail);
   border: 1px solid var(--line);
 }
@@ -229,7 +225,7 @@ select:hover:not(:disabled) {
   text-align: left;
   background: var(--surface);
   border: 1px solid var(--line);
-  border-radius: 12px;
+  border-radius: var(--radius-sm);
   font-size: calc(13px * var(--font-scale));
   font-weight: 500;
 }
@@ -267,7 +263,6 @@ select:hover:not(:disabled) {
 .message.user .message-content {
   background: var(--accent-soft);
   color: var(--ink);
-  border-radius: 14px 14px 4px 14px;
 }
 .message-content {
   font-family: 'PingFang SC', 'Microsoft YaHei', 'Segoe UI', sans-serif;
@@ -282,9 +277,6 @@ select:hover:not(:disabled) {
 .message-content :not(pre) > code {
   border: 1px solid var(--line);
   padding: 1px 5px;
-}
-.code-block {
-  border-radius: 10px;
 }
 .code-copy:hover {
   background: var(--hover);
@@ -301,9 +293,10 @@ select:hover:not(:disabled) {
   border-radius: 0;
   background: transparent;
 }
-.tool-card:hover,
 .tool-card[open] {
-  background: transparent;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-md);
+  background: var(--code);
 }
 .tool-card + .tool-card::before,
 div:has(> .tool-card) + div:has(> .tool-card) > .tool-card::before,
@@ -320,7 +313,7 @@ div:has(> .tool-card) + .tool-card::before {
 .tool-card[open]::after {
   content: '';
   position: absolute;
-  left: -1px;
+  left: -2px;
   top: 21px;
   bottom: 10px;
   width: 1px;
@@ -337,6 +330,20 @@ div:has(> .tool-card) + .tool-card::before {
 }
 .tool-card summary:hover {
   background: var(--rail);
+}
+.tool-card[open] summary {
+  border-radius: 0;
+}
+.tool-card[open] summary:hover {
+  background: transparent;
+}
+.tool-card[open] summary::before {
+  left: -5px;
+}
+div:has(> .tool-card) + div:has(> .tool-card) > .tool-card[open]::before,
+div:has(> .tool-card) + .tool-card[open]::before,
+.tool-card + .tool-card[open]::before {
+  left: -2px;
 }
 .tool-card summary::before {
   content: '';
@@ -372,13 +379,6 @@ div:has(> .tool-card) + .tool-card::before {
 }
 .tool-description strong {
   color: var(--ink);
-}
-.tool-body {
-  margin: 4px 0 10px 18px;
-  border: 1px solid var(--line);
-  border-radius: 10px;
-  background: var(--code);
-  padding: 0 12px 8px;
 }
 .tool-card + .message,
 .message + .tool-card,

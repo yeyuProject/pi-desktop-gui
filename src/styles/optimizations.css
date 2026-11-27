@@ -6,7 +6,7 @@
 }
 .send-wrapper:focus-visible {
   outline: 2px solid var(--accent);
-  border-radius: 8px;
+  border-radius: var(--radius-pill);
 }
 .unread.completed {
   background: var(--accent);
@@ -41,7 +41,7 @@
   overflow: auto;
   background: var(--surface);
   border: 1px solid var(--line);
-  border-radius: 8px;
+  border-radius: var(--radius-popover);
   box-shadow: var(--shadow-soft);
   padding: 6px;
 }

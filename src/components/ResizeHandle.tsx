@@ -1,4 +1,5 @@
 import { useEffect, useRef, type PointerEvent } from 'react';
+import { pauseGlassForResize } from '../lib/glass';
 
 interface Props {
   label: string;
@@ -27,12 +28,20 @@ export function ResizeHandle({ label, variable, value, min, max, defaultValue, d
     preview(next);
     save(next);
   };
-  useEffect(() => () => document.body.classList.remove('resizing-columns'), []);
+  useEffect(
+    () => () => {
+      if (!drag.current) return;
+      document.body.classList.remove('resizing-columns');
+      pauseGlassForResize();
+    },
+    [],
+  );
   const finish = (event: PointerEvent<HTMLDivElement>, cancelled = false) => {
     const current = drag.current;
     if (!current) return;
     drag.current = null;
     document.body.classList.remove('resizing-columns');
+    pauseGlassForResize();
     if (event.currentTarget.hasPointerCapture(event.pointerId))
       event.currentTarget.releasePointerCapture(event.pointerId);
     if (cancelled) preview(current.start);
@@ -56,6 +65,7 @@ export function ResizeHandle({ label, variable, value, min, max, defaultValue, d
         event.currentTarget.setPointerCapture(event.pointerId);
         drag.current = { x: event.clientX, start: width.current, current: width.current };
         document.body.classList.add('resizing-columns');
+        pauseGlassForResize();
       }}
       onPointerMove={(event) => {
         if (!drag.current) return;

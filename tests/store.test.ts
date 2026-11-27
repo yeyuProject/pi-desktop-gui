@@ -99,6 +99,23 @@ test('UI style defaults, validation and background normalization survive reload'
   }
 });
 
+test('material settings preserve valid choices and repair invalid values on load', async (t) => {
+  const f = await fixture(t);
+  for (const [material, solidOnBattery, expectedMaterial, expectedOnBattery, repaired] of [
+    [undefined, undefined, 'solid', true, undefined],
+    ['glass', false, 'glass', false, undefined],
+    ['invalid', 'false', 'solid', true, 2],
+  ] as const) {
+    const data = { ...f.store.state, settings: { ...f.store.state.settings, material, solidOnBattery } };
+    await fs.writeFile(f.file('state.json'), JSON.stringify(data));
+    const restored = new Store(f.dir);
+    await restored.load();
+    assert.equal(restored.state.settings.material, expectedMaterial);
+    assert.equal(restored.state.settings.solidOnBattery, expectedOnBattery);
+    assert.equal(restored.storage.recovery?.repairedSettings, repaired);
+  }
+});
+
 test('invalid rows are discarded individually while healthy drafts and settings remain', async (t) => {
   const f = await fixture(t);
   const invalid = { ...f.session, id: undefined };

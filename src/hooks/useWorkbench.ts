@@ -25,6 +25,8 @@ import {
 } from '../../shared/types';
 import { userMessageInput } from '../../shared/message-content';
 import { DEFAULT_SIDEBAR_VIEW } from '../../shared/sidebar-view';
+import { supportsGlassTheme } from '../../shared/material';
+import { watchGlassLayers } from '../lib/glass';
 
 import { readableError } from '../lib/format';
 import { PI_SOURCE_URL } from '../../shared/pi-version';
@@ -62,6 +64,7 @@ export function useWorkbench() {
     sidebarActivities,
     anyRunning,
     environment,
+    materialEnvironment,
     setEnvironment,
     piUpdate,
     storage,
@@ -321,9 +324,32 @@ export function useWorkbench() {
     return () => observer.disconnect();
   }, [Boolean(state), inspector, inspectorSetting, sideChatSetting]);
 
+  const appearance = settingsOpen && prefs ? prefs : state?.settings;
+  const [reducedTransparency, setReducedTransparency] = useState(
+    () => window.matchMedia('(prefers-reduced-transparency: reduce)').matches,
+  );
   useEffect(() => {
-    if (!state) return;
-    const appearance = settingsOpen && prefs ? prefs : state.settings;
+    const query = window.matchMedia('(prefers-reduced-transparency: reduce)');
+    const onChange = () => setReducedTransparency(query.matches);
+    query.addEventListener('change', onChange);
+    return () => query.removeEventListener('change', onChange);
+  }, []);
+  const glassRequested =
+    appearance?.material === 'glass' &&
+    appearance.uiStyle === 'classic' &&
+    supportsGlassTheme(appearance.theme);
+  const materialStatus = !glassRequested
+    ? undefined
+    : !materialEnvironment?.gpuCompositing
+      ? '当前设备未启用显卡加速，已改用实色'
+      : reducedTransparency
+        ? '系统已开启降低透明度'
+        : materialEnvironment.onBattery && appearance.solidOnBattery !== false
+          ? '使用电池时已改用实色'
+          : undefined;
+  const glass = glassRequested && !materialStatus;
+  useEffect(() => {
+    if (!appearance) return;
     document.documentElement.dataset.theme = appearance.theme;
     document.documentElement.dataset.style = appearance.uiStyle;
     document.documentElement.dataset.platform = api.platform;
@@ -331,7 +357,15 @@ export function useWorkbench() {
     document.documentElement.style.setProperty('--sidebar-width', appearance.sidebarWidth + 'px');
     document.documentElement.style.setProperty('--inspector-width', appearance.inspectorWidth + 'px');
     document.documentElement.style.setProperty('--side-chat-width', (appearance.sideChatWidth ?? 360) + 'px');
-  }, [state?.settings, settingsOpen, prefs]);
+  }, [appearance]);
+  useEffect(() => {
+    if (!glass) {
+      delete document.documentElement.dataset.material;
+      return;
+    }
+    document.documentElement.dataset.material = 'glass';
+    return watchGlassLayers();
+  }, [glass]);
 
   useEffect(() => {
     document.title = runtime.title || 'Pi Desktop';
@@ -968,6 +1002,7 @@ export function useWorkbench() {
       storage,
       runtime,
       environment,
+      materialStatus,
       history,
       activities,
       pending,
