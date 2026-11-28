@@ -11,11 +11,8 @@ import { workbenchFixture } from '../tests/support/workbench-fixture.mjs';
 import { UI_STYLES, STYLE_META } from '../shared/window-theme.ts';
 
 const uiStyle = process.argv[process.argv.indexOf('--style') + 1];
-assert.ok(UI_STYLES.includes(uiStyle) && STYLE_META[uiStyle].basicThemesOnly, 'Use --style codex|claude');
-
-const baselineStyle = process.argv.includes('--record-codex') ? 'codex' : 'classic';
-const record = process.argv.includes('--record-' + baselineStyle);
-const baselineFile = path.resolve(`tests/fixtures/${baselineStyle}-style.json`);
+const record = process.argv.includes('--record-baseline');
+assert.ok(UI_STYLES.includes(uiStyle), 'Use --style classic|codex|claude');
 const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'pi-style-ui-'));
 const entry = path.join(dir, 'main.cjs');
 await fs.writeFile(
@@ -124,18 +121,26 @@ async function contrast(theme) {
 }
 async function noOverflow(label) {
   const composer = uiStyle === 'claude' ? ', .composer, .composer-toolbar > div' : '';
-  const values = await page
-    .locator('.thread, .message.user .message-content' + composer)
-    .evaluateAll((nodes) =>
-      nodes.map((node) => ({
-        selector: node.className,
-        width: node.clientWidth,
-        scroll: node.scrollWidth,
-      })),
-    );
-  assert.ok(values.length >= 2);
-  for (const value of values)
-    assert.ok(value.scroll <= value.width + 1, `${label}: ${JSON.stringify(value)}`);
+  let values;
+  // Resizing updates the responsive panels and toolbar through ResizeObserver.
+  await expect
+    .poll(
+      async () => {
+        values = await page
+          .locator('.thread, .message.user .message-content' + composer)
+          .evaluateAll((nodes) =>
+            nodes.map((node) => ({
+              selector: node.className,
+              width: node.clientWidth,
+              scroll: node.scrollWidth,
+            })),
+          );
+        assert.ok(values.length >= 2);
+        return values.filter((value) => value.scroll > value.width + 1);
+      },
+      { message: `${label}: horizontal overflow` },
+    )
+    .toEqual([]);
   report.overflow.push({ label, values });
 }
 async function screenshot(mode, name) {
@@ -293,6 +298,17 @@ const selectors = {
   tool: '.tool-card.done',
   goal: '.goal-card',
   user: '.message.user .message-content',
+  composer: '.composer',
+  code: '.code-block',
+  branch: '.breadcrumb .branch',
+  model: '.model-pill',
+  thinkingLevel: '.model-pill > em',
+  goalButton: '.goal-button',
+  permission: '.approval-pill',
+  inspectorTab: '.inspector-tabs > button:not(.icon-button)',
+  changeCount: '.inspector-tabs .count',
+  inlineCode: '.message.assistant .message-content :not(pre) > code',
+  toolbarIcon: '.composer-toolbar > div > .icon-button:not(.send-button)',
 };
 async function computed(selector) {
   const node = page.locator(selector).first();
@@ -300,10 +316,18 @@ async function computed(selector) {
   return node.evaluate((element) => {
     const style = getComputedStyle(element);
     return Object.fromEntries(
-      ['color', 'background-color', 'border-color', 'box-shadow', 'border-radius'].map((key) => [
-        key,
-        style.getPropertyValue(key),
-      ]),
+      [
+        'color',
+        'background-color',
+        'border-color',
+        'border-width',
+        'box-shadow',
+        'border-radius',
+        'padding',
+        'margin',
+        'font-size',
+        'line-height',
+      ].map((key) => [key, style.getPropertyValue(key)]),
     );
   });
 }
@@ -314,20 +338,115 @@ async function load(options) {
   await page.locator('aside').getByText('src/auth/validate.ts').click();
   await page.locator('.diff-row.added').first().waitFor();
 }
-async function collectBaseline(uiStyle) {
+async function collectBaseline(style) {
   const baseline = {};
   for (const theme of ['light', 'dark']) {
-    await load({ theme, uiStyle, goal: true });
+    await load({ theme, uiStyle: style, goal: true, stress: true });
     await page.getByRole('textbox', { name: '任务输入' }).fill('继续检查');
     await expect(page.locator('.send-button')).toBeEnabled();
     await page.mouse.move(1, 1);
     baseline[theme] = {};
     for (const [name, selector] of Object.entries(selectors))
       baseline[theme][name] = await computed(selector);
+    const shell = '.tool-card:has(summary code[title="npm test -- validate"])';
+    if (!record) {
+      await page.locator(shell + ' > summary').hover();
+      await expect(page.locator(shell)).toHaveCSS('background-color', 'rgba(0, 0, 0, 0)');
+    }
+    await page.locator(shell + ' > summary').click();
+    const body = page.locator(shell + ' > .tool-body');
+    await body.waitFor();
+    await page.mouse.move(1, 1);
+    baseline[theme].toolOpen = await computed(shell);
+    baseline[theme].toolSummary = await computed(shell + ' > summary');
+    baseline[theme].toolOutput = await computed(shell + ' > .tool-body');
+    baseline[theme].toolCopy = await computed(shell + ' .tool-actions .icon-button');
+    baseline[theme].toolRerun = await computed(shell + ' .tool-rerun button');
+    if (!record) {
+      const copy = body.getByRole('button', { name: '复制输出', exact: true });
+      const actions = body.locator('.tool-actions');
+      await expect(actions).toHaveCSS('opacity', '0');
+      await copy.focus();
+      await expect(actions).toHaveCSS('opacity', '1');
+      await copy.blur();
+      await body.hover();
+      await expect(actions).toHaveCSS('opacity', '1');
+      await expect(actions).toHaveCSS('position', 'absolute');
+      const [headingBox, outputBox, copyBox] = await Promise.all([
+        page.locator(shell + ' > summary').boundingBox(),
+        body.boundingBox(),
+        copy.boundingBox(),
+      ]);
+      assert.equal(headingBox.y + headingBox.height, outputBox.y, 'tool header meets its output');
+      assert.ok(
+        copyBox.y - outputBox.y <= 5 && outputBox.x + outputBox.width - copyBox.x - copyBox.width <= 5,
+      );
+      await expect(page.locator(shell + ' .tool-rerun button').first()).toHaveCSS('height', '22px');
+    }
+    await page.getByRole('button', { name: '选择模型', exact: true }).click();
+    baseline[theme].modelPopover = await computed('.model-picker');
+    await page.keyboard.press('Escape');
     await page.getByRole('button', { name: '设置', exact: true }).click();
     baseline[theme].primary = await computed('.modal .primary');
+    baseline[theme].modal = await computed('.modal');
+    baseline[theme].modalItem = await computed('.settings-layout > nav > button');
+    if (!record && style === 'classic') {
+      const navigation = await computed('.settings-layout > nav');
+      assert.ok(
+        Math.abs(
+          parseFloat(baseline[theme].modal['border-radius']) -
+            parseFloat(baseline[theme].modalItem['border-radius']) -
+            parseFloat(navigation.padding.split(' ').at(1)) -
+            parseFloat(baseline[theme].modal['border-width']),
+        ) <= 1,
+        'modal list rows follow the outside corner',
+      );
+      const toolbar = await computed('.composer-toolbar');
+      assert.equal(
+        parseFloat(baseline[theme].composer['border-radius']) -
+          parseFloat(baseline[theme].toolbarIcon['border-radius']),
+        parseFloat(toolbar.padding.split(' ').at(-1)),
+      );
+    }
   }
   return baseline;
+}
+
+async function checkRadiusBaseline(style) {
+  const baseline = await collectBaseline(style);
+  assert.deepEqual(baseline, JSON.parse(await fs.readFile(`tests/fixtures/${style}-style.json`, 'utf8')));
+  for (const samples of Object.values(baseline)) {
+    const radius = (name) => samples[name]['border-radius'];
+    assert.equal(samples.toolOpen['border-width'], '1px');
+    assert.equal(radius('toolOpen'), style === 'classic' ? '14px' : '12px');
+    assert.equal(samples.toolOpen['background-color'], samples.code['background-color']);
+    assert.equal(samples.toolSummary['border-width'], '0px');
+    assert.equal(samples.toolOutput['border-width'], '1px 0px 0px');
+    assert.equal(samples.toolOutput['border-color'].split(')')[0] + ')', samples.toolOpen['border-color']);
+    assert.equal(samples.toolOutput['background-color'], 'rgba(0, 0, 0, 0)');
+    assert.equal(radius('toolRerun'), '999px');
+    assert.equal(samples.toolRerun['font-size'], '11px');
+    assert.equal(samples.toolRerun['background-color'], 'rgba(0, 0, 0, 0)');
+    if (style === 'classic') {
+      assert.equal(radius('send'), '50%');
+      assert.equal(radius('user'), '22px 22px 6px');
+      continue;
+    }
+    assert.equal(radius('composer'), '20px');
+    assert.equal(radius('user'), '12px');
+    assert.equal(radius('code'), '12px');
+    if (style === 'claude') assert.equal(radius('send'), '8px');
+    const tiers = new Set(['0px', '50%', '4px', '8px', '12px', '20px', '999px']);
+    for (const name of Object.keys(samples)) {
+      assert.ok(
+        radius(name)
+          .split(' ')
+          .every((corner) => tiers.has(corner)),
+        `${style} ${name} uses a radius tier: ${radius(name)}`,
+      );
+    }
+  }
+  console.log(`PASS ${STYLE_META[style].label} light/dark computed styles and UI19 corners.`);
 }
 try {
   ({ app, page } = await launchApp({ args: [entry], colorScheme: null, pageTimeout: 15000, errors: errors }));
@@ -337,20 +456,16 @@ try {
   await page.addInitScript({
     content: `(${workbenchFixture.toString()})(JSON.parse(new URLSearchParams(location.search).get('fixture') || '{}'))`,
   });
-  const baseline = await collectBaseline(baselineStyle);
-  assert.deepEqual(errors, []);
   if (record) {
-    await fs.mkdir(path.dirname(baselineFile), { recursive: true });
-    await fs.writeFile(baselineFile, JSON.stringify(baseline, null, 2) + '\n');
-    console.log(`Recorded ${baselineStyle} light/dark computed styles from the unchanged renderer.`);
+    const baseline = await collectBaseline(uiStyle);
+    assert.deepEqual(errors, []);
+    console.log(JSON.stringify(baseline, null, 2));
   } else {
-    assert.deepEqual(baseline, JSON.parse(await fs.readFile(baselineFile, 'utf8')));
-    console.log('PASS classic light/dark computed styles remain identical.');
-    assert.deepEqual(
-      await collectBaseline('codex'),
-      JSON.parse(await fs.readFile('tests/fixtures/codex-style.json', 'utf8')),
-    );
-    console.log('PASS Codex light/dark computed styles remain identical.');
+    if (uiStyle === 'codex') await checkRadiusBaseline('classic');
+    await checkRadiusBaseline(uiStyle);
+    assert.deepEqual(errors, []);
+  }
+  if (!record && uiStyle !== 'classic') {
     for (const theme of ['light', 'dark']) {
       const mode = theme;
       await load({ theme, uiStyle, goal: true });

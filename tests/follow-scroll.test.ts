@@ -4,6 +4,7 @@ import {
   FOLLOW_SLACK,
   RELEASED_SLACK,
   isFollowing,
+  isReplyStartAboveViewport,
   keyIntent,
   nextReleased,
   wheelIntent,
@@ -15,6 +16,16 @@ const key = (key: string, extra: { shiftKey?: boolean; altKey?: boolean } = {}) 
   shiftKey: false,
   altKey: false,
   ...extra,
+});
+
+test('reply jump appears only when its start is more than 8 px above and its body is still visible', () => {
+  const viewport = { top: 100 };
+  for (const top of [100, 101, 92])
+    assert.equal(isReplyStartAboveViewport(viewport, { top, bottom: 900 }), false);
+  assert.equal(isReplyStartAboveViewport(viewport, { top: 91.9, bottom: 900 }), true);
+  assert.equal(isReplyStartAboveViewport(viewport, { top: -900, bottom: 100.1 }), true);
+  for (const bottom of [100, 99])
+    assert.equal(isReplyStartAboveViewport(viewport, { top: -900, bottom }), false);
 });
 
 test('a small upward nudge releases following that the 24 px slack would otherwise keep', () => {

@@ -1,0 +1,102 @@
+/* 只把标志和名称设为容器：菜单留在外面，固定定位仍按窗口计算。 */
+.brand > .sidebar-brand-title {
+  container-type: inline-size;
+  flex: 1 1 0;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: inherit;
+}
+
+.sidebar-brand-label {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* 放不下完整名称时只留 π 标志，不显示“P…”。 */
+@container (max-width: calc(5.4em + 38px)) {
+  .sidebar-brand-label {
+    display: none;
+  }
+}
+
+.brand > .sidebar-brand-actions {
+  display: flex;
+  align-items: center;
+  flex-shrink: 0;
+  gap: 2px;
+  margin-left: auto;
+}
+
+.sidebar-brand-actions > .icon-button {
+  margin-left: 0;
+}
+
+.sidebar-view-trigger {
+  position: relative;
+}
+
+.sidebar-view-dot {
+  position: absolute;
+  top: 3px;
+  right: 3px;
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--accent);
+  pointer-events: none;
+}
+
+.context-menu.sidebar-view-menu,
+.context-menu.sidebar-submenu {
+  width: min(220px, calc(100vw - 16px));
+  animation-name: fade-in;
+}
+
+.context-menu.sidebar-submenu {
+  z-index: 26;
+}
+
+.context-menu > button[aria-haspopup='menu'] > svg:last-child,
+.context-menu > button > .sidebar-menu-check {
+  flex: none;
+}
+
+.context-menu > button > .sidebar-menu-check {
+  margin-left: auto;
+  color: var(--accent);
+}
+
+.sidebar-menu-label,
+.sidebar-menu-value {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.sidebar-menu-label {
+  margin-right: auto;
+}
+
+.sidebar-menu-value {
+  color: var(--muted);
+}
+
+.context-menu.sidebar-submenu > button[aria-disabled='true'] {
+  opacity: 0.5;
+  cursor: default;
+  background: transparent;
+}
+
+:is(.sidebar-view-menu, .sidebar-submenu) > button:focus-visible {
+  background: var(--hover);
+  outline-offset: -2px;
+}
+
+.sidebar-menu-separator {
+  border-top: 1px solid var(--line);
+  margin: 4px;
+}

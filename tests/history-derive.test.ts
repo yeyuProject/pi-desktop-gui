@@ -48,6 +48,25 @@ test('cached grouping and turn summaries equal complete derivation through strea
     }
   }
 });
+test('streaming text keeps the same outline until a visible turn field changes', () => {
+  const cache = new ConversationDeriver();
+  const first = { role: 'user', content: 'question' };
+  const derive = (content: string, running: boolean, errorMessage?: string) =>
+    cache.derive(
+      [first, { role: 'assistant', content, errorMessage }],
+      [],
+      () => assert.fail('no tools'),
+      [],
+      running,
+    ).turns;
+  const before = derive('a', true);
+  assert.equal(derive('ab', true), before);
+  const done = derive('abc', false);
+  assert.notEqual(done, before);
+  assert.equal(done[0].replyIndex, 1);
+  assert.equal(before[0].replyIndex, undefined);
+  assert.equal(derive('abc', false, 'error')[0].failed, true);
+});
 test('cached complete turns equal full history through streaming, recovery, navigation and hidden tools', () => {
   const cache = new HistoryDeriver();
   let messages: Message[] = [

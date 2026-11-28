@@ -66,3 +66,27 @@ test('a very long unfinished block streams as text and preserves its complete so
   assert.equal(second.plain, true);
   assert.equal(second.blocks.join('') + second.tail, text + 'next token');
 });
+
+test('a literal streaming paragraph preserves Markdown context and yields to new syntax', () => {
+  const prefix = '**之前的回复**\n\n';
+  const first = streamingMarkdown(prefix + '一段普通文字');
+  assert.equal(first.paragraphStart, prefix.length);
+  const text = first.source + '，继续输出 A_2。\n下一行';
+  const next = streamingMarkdown(text, first);
+  assert.equal(next.paragraphStart, prefix.length);
+  assert.deepEqual(clean(parse(text)), clean([...parse(prefix), ...parse(text.slice(prefix.length))]));
+  for (const syntax of [
+    ' *强调*',
+    '\n1. list',
+    '\n---',
+    '\n\n| a | b |',
+    ' www.example.com',
+    '  \n换行',
+    '\n[id]: /link',
+  ]) {
+    assert.equal(streamingMarkdown(text + syntax, next).paragraphStart, undefined, syntax);
+  }
+  for (const enclosed of ['```\n\n一段普通文字', '> quote\n>\n> 一段普通文字', '- item\n\n  一段普通文字']) {
+    assert.equal(streamingMarkdown(enclosed).paragraphStart, undefined, enclosed);
+  }
+});

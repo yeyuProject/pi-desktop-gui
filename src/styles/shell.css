@@ -29,7 +29,7 @@
   color: var(--on-primary);
   font-family: Georgia, serif;
   font-size: calc(23px * var(--font-scale));
-  border-radius: 8px;
+  border-radius: var(--radius-sm);
   display: inline-flex;
   align-items: center;
   justify-content: center;
@@ -46,12 +46,25 @@
   min-height: 38px;
   padding: 8px 10px;
   font-size: calc(13px * var(--font-scale));
+  container-type: inline-size;
+}
+.new-session-label {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 .new-session kbd {
   margin-left: auto;
   font-size: calc(11px * var(--font-scale));
   color: var(--muted);
   white-space: nowrap;
+}
+/* 窄侧栏或大字号时先收起快捷键，按钮文字保持一行；快捷键仍在悬停提示里。 */
+@container (max-width: calc(7.2em + 50px)) {
+  .new-session kbd {
+    display: none;
+  }
 }
 .section-heading {
   display: flex;
@@ -95,6 +108,23 @@
   white-space: nowrap;
   font-weight: 600;
 }
+.sidebar-project-directory-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.sidebar-project-directory-row > svg {
+  flex-shrink: 0;
+}
+.sidebar-section-count {
+  color: var(--muted);
+  flex-shrink: 0;
+  font-size: calc(11px * var(--font-scale));
+}
+.sidebar-view-group .project-row > .session-drop-label,
+.sidebar-project-directory-row > .session-drop-label {
+  flex: 0 0 auto;
+}
 .project-actions {
   display: flex;
   flex-shrink: 0;
@@ -103,6 +133,47 @@
 }
 .project-actions .icon-button {
   color: var(--muted);
+}
+/* 只把行和按钮设为容器：项目菜单留在外面，固定定位仍按窗口计算。 */
+.project-header-main {
+  container-type: inline-size;
+  position: relative;
+  flex: 1 1 0;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+}
+/* 侧栏窄到项目名放不下时，按钮改为悬停才浮在行尾，项目名用满整行。 */
+@container (max-width: calc(68px + 10em)) {
+  .project-header-main > .project-actions {
+    position: absolute;
+    inset: 0 0 0 auto;
+    align-items: center;
+    padding-left: 14px;
+    border-radius: 0 var(--radius-control) var(--radius-control) 0;
+    background: linear-gradient(to right, transparent, var(--rail) 14px);
+    opacity: 0;
+    pointer-events: none;
+    transition: opacity var(--motion-fast) ease;
+  }
+  /* 键盘焦点和打开的菜单也保持显示；鼠标点过的行不留按钮。隐藏时点击落在行上。 */
+  .project-header-main:hover > .project-actions,
+  .project-header-main:has(:focus-visible) > .project-actions,
+  .project-header-main:has(> .project-actions [aria-expanded='true']) > .project-actions {
+    opacity: 1;
+  }
+  .project-header-main:hover > .project-actions > button,
+  .project-header-main:has(:focus-visible) > .project-actions > button,
+  .project-header-main:has(> .project-actions [aria-expanded='true']) > .project-actions > button {
+    pointer-events: auto;
+  }
+  .project-header-main:has(> button.project-row:hover) > .project-actions {
+    background: linear-gradient(to right, transparent, var(--hover) 14px);
+  }
+  /* 拖动会话时行尾显示“移到这里”，按钮不再盖住它。 */
+  .session-drop-target .project-header-main > .project-actions {
+    display: none;
+  }
 }
 .project-list > .section-heading:first-child {
   margin-top: 20px;
@@ -142,6 +213,22 @@
   white-space: nowrap;
   text-overflow: ellipsis;
   overflow: hidden;
+}
+/* 容器只设在按钮上，侧栏里固定定位的菜单仍按窗口定位。 */
+.session-row > button:first-child {
+  container-type: inline-size;
+}
+.session-row > button:first-child > .sidebar-session-project {
+  max-width: 40%;
+  color: var(--muted);
+  font-size: calc(11px * var(--font-scale));
+  font-weight: 400;
+}
+/* 行太窄时标题和项目名都看不清，只留标题；项目名仍在悬停提示里。 */
+@container (max-width: 10em) {
+  .session-row > button:first-child > .sidebar-session-project {
+    display: none;
+  }
 }
 /* The title gives way first; the pending badge keeps its full text. */
 .session-row > button:first-child > .project-waiting {
@@ -203,12 +290,13 @@
   box-shadow: var(--shadow);
   border: 1px solid var(--line);
   padding: 5px;
-  border-radius: 9px;
+  border-radius: var(--radius-popover);
   z-index: 5;
 }
 .context-menu > button {
   width: 100%;
   border: 0;
+  border-radius: calc(var(--radius-popover) - 4px);
   justify-content: flex-start;
 }
 .workspace {
@@ -294,7 +382,7 @@
   gap: 6px;
   white-space: nowrap;
   color: var(--muted);
-  border-radius: 6px;
+  border-radius: var(--radius-xs);
   padding: 2px 0;
 }
 .status.error,
@@ -311,7 +399,7 @@
 .trust-banner {
   margin: 0 25px 12px;
   border: 1px solid var(--line);
-  border-radius: 9px;
+  border-radius: var(--radius-md);
   display: flex;
   gap: 10px;
   align-items: center;

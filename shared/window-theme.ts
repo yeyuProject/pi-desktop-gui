@@ -1,3 +1,5 @@
+import { supportsGlassTheme, type Material } from './material';
+
 export const THEMES = ['light', 'dark', 'system', 'sepia', 'green', 'navy'] as const;
 export type Theme = (typeof THEMES)[number];
 export const UI_STYLES = ['classic', 'codex', 'claude'] as const;
@@ -48,11 +50,19 @@ export const stylePalettes: Partial<Record<UiStyle, { light: Palette; dark: Pale
   },
 };
 
-export function windowTheme(dark: boolean, theme: Theme = 'system', style: UiStyle = 'classic') {
+export function windowTheme(
+  dark: boolean,
+  theme: Theme = 'system',
+  style: UiStyle = 'classic',
+  material?: Material,
+) {
   const palette =
     stylePalettes[style]?.[dark ? 'dark' : 'light'] ??
     (theme === 'sepia' || theme === 'green' || theme === 'navy'
       ? palettes[theme]
       : palettes[dark ? 'dark' : 'light']);
-  return { ...palette, height: 36 };
+  // 窗口按钮下方露出网页标题栏，材质临时降级时也会跟随标题栏恢复实色。
+  const color =
+    material === 'glass' && style === 'classic' && supportsGlassTheme(theme) ? '#00000000' : palette.color;
+  return { ...palette, color, height: 36 };
 }

@@ -1,25 +1,35 @@
 import { isTeamSettings } from '../../shared/team';
+import { parseSidebarView } from '../../shared/sidebar-view';
+import { isMaterial } from '../../shared/material';
 import { BrowserWindow, dialog, nativeTheme } from 'electron';
 import { nativeThemeSource, STYLE_META, styleTheme, THEMES, UI_STYLES } from '../../shared/window-theme';
 import { updateFeed, updateProxy } from '../update-network';
 import { UpdateService } from '../updater';
 import type { HandlerContext, HandlerMap } from './handler-context';
 
-interface SettingsHandlerContext extends Pick<HandlerContext, 'store' | 'service' | 'text' | 'save'> {
+interface SettingsHandlerContext extends Pick<
+  HandlerContext,
+  'store' | 'service' | 'text' | 'save' | 'publishState'
+> {
   window: BrowserWindow | undefined;
   updates: UpdateService;
   refreshEnvironment: () => Promise<import('../../shared/types').Environment>;
   updateWindowTheme: () => void;
   chooseFile: (title: string, filters?: Electron.FileFilter[]) => Promise<string | null>;
 }
-export type SettingsHandlerName = 'saveSettings' | 'choosePath' | 'detect';
+export type SettingsHandlerName = 'saveSettings' | 'setSidebarView' | 'choosePath' | 'detect';
 export function createSettingsHandlers(context: SettingsHandlerContext) {
   const { store, service, save, refreshEnvironment, updateWindowTheme, chooseFile } = context;
   const text: HandlerContext['text'] = context.text;
 
   const handlers: HandlerMap<SettingsHandlerName> = {
+    setSidebarView: async (view: unknown) => {
+      await store.setSidebarView(parseSidebarView(view, true));
+      return context.publishState();
+    },
     saveSettings: async (value) => {
       if (!value || typeof value !== 'object' || Array.isArray(value)) throw new Error('设置格式无效');
+      // 设置页的草稿可能还带着旧的 sidebarView，显示方式只从单独的 IPC 写入。
       const next = { ...store.state.settings };
       if (value.team !== undefined) {
         if (!isTeamSettings(value.team)) throw new Error('团队设置无效。');
@@ -52,6 +62,14 @@ export function createSettingsHandlers(context: SettingsHandlerContext) {
         next.uiStyle = value.uiStyle;
       }
       next.theme = styleTheme(next.theme, next.uiStyle);
+      if (value.material !== undefined) {
+        if (!isMaterial(value.material)) throw new Error('请选择实色或玻璃材质。');
+        next.material = value.material;
+      }
+      if (value.solidOnBattery !== undefined) {
+        if (typeof value.solidOnBattery !== 'boolean') throw new Error('电池供电时的材质设置无效。');
+        next.solidOnBattery = value.solidOnBattery;
+      }
       for (const [key, min, max] of [
         ['fontScale', 1, 2],
         ['sidebarWidth', 180, 360],

@@ -3,9 +3,12 @@
   font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC', 'Microsoft YaHei', sans-serif;
   --font-display: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC', 'Microsoft YaHei', sans-serif;
   --font-mono: ui-monospace, 'SFMono-Regular', 'Cascadia Mono', Menlo, Consolas, 'Microsoft YaHei', monospace;
-  --radius-panel: 12px;
+  --radius-xs: 4px;
+  --radius-sm: 8px;
+  --radius-md: 12px;
+  --radius-popover: 12px;
+  --radius-lg: 20px;
   --content-width: 768px;
-  --radius-control: 8px;
   --font-reply: ui-serif, Georgia, 'Times New Roman', 'PingFang SC', 'Microsoft YaHei', serif;
 }
 
@@ -135,7 +138,7 @@
   content: none;
 }
 [data-style='claude'] .conversation .composer {
-  border-radius: 20px;
+  border-radius: var(--radius-lg);
   background: var(--surface);
   border-color: var(--line);
   box-shadow: var(--shadow-soft);
@@ -153,7 +156,7 @@
 }
 [data-style='claude'] .message.user .message-content {
   background: var(--bubble);
-  border-radius: 12px;
+  border-radius: var(--radius-md);
 }
 [data-style='claude'] .message.assistant .avatar {
   display: none;
@@ -175,10 +178,10 @@
   line-height: 1.7;
 }
 [data-style='claude'] .code-block {
-  border-radius: 12px;
+  border-radius: var(--radius-md);
 }
 [data-style='claude'] .send-button {
-  border-radius: 8px;
+  border-radius: var(--radius-sm);
 }
 [data-style='claude'] .message.assistant .message-content {
   font-family: var(--font-reply, inherit);

@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, type RefObject } from 'react';
+import { useCallback, useEffect, useRef, useState, type RefObject } from 'react';
 import type { Message } from '../../../shared/types';
 import type { DraftQuote } from '../../../shared/message-content';
 import { turnThinking, type TurnItem } from '../../lib/conversation-layout';
@@ -32,7 +32,18 @@ export function SelectionMenu({
   }>();
   const latest = useRef({ messages, turns, addQuote, notice, selection });
   latest.current = { messages, turns, addQuote, notice, selection };
+  const dismissed = useRef(false);
+  const dismiss = useCallback(() => {
+    dismissed.current = true;
+    setSelection(undefined);
+  }, []);
+  /**
+   * 1. 从可见的原文提取引用内容和菜单位置。
+   * 2. 鼠标或键盘重新选取文字时允许打开菜单，滚动时尊重用户的关闭操作。
+   * 3. 引用、侧边提问、点击别处或按 Esc 都会关闭菜单，保留原文选区。
+   */
   useEffect(() => {
+    // 1. 只有能定位到消息原文的选区才提供引用操作。
     const read = () => {
       if (document.activeElement?.matches('input,textarea,[contenteditable="true"]')) return;
       const selected = window.getSelection();
@@ -128,37 +139,44 @@ export function SelectionMenu({
         below: bounds.top - viewport.top < (menu.current?.offsetHeight ?? 36) + 6,
       };
     };
-    const update = () => setSelection(read());
+    // 2. Esc 后文字仍可复制。迟到的滚动事件只能更新尚未关闭的菜单。
+    const update = () => {
+      if (!dismissed.current) setSelection(read());
+    };
     const pointerUp = (event: PointerEvent) => {
       if (menu.current?.contains(event.target as Node)) return;
-      if (thread.current?.contains(event.target as Node)) update();
-      else setSelection(undefined);
+      if (!thread.current?.contains(event.target as Node)) return dismiss();
+      dismissed.current = false;
+      update();
     };
     const keyboardSelection = (event: KeyboardEvent) => {
-      if (['ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight', 'Home', 'End'].includes(event.key)) update();
+      if (!['ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight', 'Home', 'End'].includes(event.key)) return;
+      if (event.shiftKey) dismissed.current = false;
+      update();
     };
+    // 3. 关闭工具栏后，快捷键仍然可以直接读取浏览器中选中的文字。
     const quote = () => {
       const current = read() ?? latest.current.selection;
       if (!current) return;
       if (current.cross) latest.current.notice('选区跨过多条消息，只引用了第一条消息内的内容');
       latest.current.addQuote(current.quote);
-      setSelection(undefined);
+      dismiss();
     };
     const side = () => {
       const current = read();
       window.dispatchEvent(
         new CustomEvent('pi:side', { detail: current ? { quote: current.quote } : undefined }),
       );
-      setSelection(undefined);
+      dismiss();
     };
     const outside = (event: PointerEvent) => {
-      if (!menu.current?.contains(event.target as Node)) setSelection(undefined);
+      if (!menu.current?.contains(event.target as Node)) dismiss();
     };
     const escape = (event: KeyboardEvent) => {
       if (event.key === 'Escape' && latest.current.selection && !event.isComposing) {
         event.preventDefault();
         event.stopPropagation();
-        setSelection(undefined);
+        dismiss();
       }
     };
     document.addEventListener('pointerdown', outside);
@@ -177,7 +195,7 @@ export function SelectionMenu({
       window.removeEventListener('pi:quote-selection', quote);
       window.removeEventListener('pi:side-action', side);
     };
-  }, [thread]);
+  }, [thread, dismiss]);
   if (!selection) return null;
   return (
     <div
@@ -192,7 +210,7 @@ export function SelectionMenu({
         onClick={() => {
           if (selection.cross) notice('选区跨过多条消息，只引用了第一条消息内的内容');
           addQuote(selection.quote);
-          setSelection(undefined);
+          dismiss();
         }}
       >
         引用
@@ -200,7 +218,7 @@ export function SelectionMenu({
       <button
         onClick={() => {
           window.dispatchEvent(new CustomEvent('pi:side', { detail: { quote: selection.quote } }));
-          setSelection(undefined);
+          dismiss();
         }}
       >
         侧边提问

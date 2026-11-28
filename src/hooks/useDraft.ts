@@ -38,7 +38,6 @@ import {
 } from '../../shared/message-content';
 const api = window.desktop;
 interface DraftOptions {
-  state: AppState | undefined;
   stateRef: RefObject<AppState | undefined>;
   selected: Session | undefined;
   project: Project | undefined;
@@ -64,7 +63,6 @@ export interface HeldDraft {
   delivered?: boolean;
 }
 export function useDraft({
-  state,
   stateRef,
   selected,
   project,
@@ -578,21 +576,6 @@ export function useDraft({
     focusComposer();
   }
   composerDraft.current = { draft, attachments, images, snippets, quotes: draftQuotes };
-  useEffect(() => {
-    const textarea = input.current;
-    if (!textarea) return;
-    const resize = () => {
-      textarea.style.height = '0px';
-      textarea.style.height =
-        Math.min(textarea.scrollHeight, (window.innerHeight * inputMaxHeight) / 100) + 'px';
-      textarea.style.maxHeight = inputMaxHeight + 'vh';
-    };
-    resize();
-    const observer = new ResizeObserver(resize);
-    // Observe the container so wrapping changes also resize the input.
-    observer.observe(textarea.parentElement!);
-    return () => observer.disconnect();
-  }, [draft, draftGoal, inputMaxHeight, state?.settings.fontScale, Boolean(state)]);
   useEffect(() => {
     localStorage.setItem('pi.composerMaxHeight', String(inputMaxHeight));
   }, [inputMaxHeight]);

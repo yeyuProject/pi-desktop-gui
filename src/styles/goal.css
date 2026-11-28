@@ -1,7 +1,7 @@
 .goal-card {
   margin: 0 0 6px;
   border: 1px solid var(--line);
-  border-radius: 7px;
+  border-radius: var(--radius-md);
   background: var(--surface);
   min-width: 0;
 }
@@ -148,7 +148,7 @@
   padding: 7px 10px;
   margin: -1px -1px 5px;
   border: 1px solid color-mix(in srgb, var(--accent) 30%, var(--line));
-  border-radius: 8px 8px 0 0;
+  border-radius: var(--radius-md) var(--radius-md) 0 0;
   background: color-mix(in srgb, var(--accent) 12%, var(--surface));
   color: var(--text);
   font-size: 12px;
@@ -188,7 +188,7 @@
   width: min(300px, calc(100vw - 32px));
   padding: 16px;
   border: 1px solid var(--line);
-  border-radius: 12px;
+  border-radius: var(--radius-popover);
   background: var(--surface);
   color: var(--text);
   box-shadow: 0 8px 32px #0003;
@@ -212,7 +212,7 @@
   display: inline-flex;
   color: var(--muted);
   cursor: help;
-  border-radius: 4px;
+  border-radius: var(--radius-xs);
 }
 .goal-budget-fields {
   display: grid;
@@ -229,7 +229,7 @@
 }
 .goal-budget-estimate {
   padding: 10px 12px;
-  border-radius: 8px;
+  border-radius: var(--radius-md);
   background: var(--hover);
 }
 .goal-budget-used strong,

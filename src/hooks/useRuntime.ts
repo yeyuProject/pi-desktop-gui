@@ -1,16 +1,23 @@
 import {
   useCallback,
-  useEffect,
+  useLayoutEffect,
   useRef,
   useState,
   useSyncExternalStore,
   type Dispatch,
   type SetStateAction,
 } from 'react';
-import { type AppState, type Environment, type Settings, type StorageStatus } from '../../shared/types';
+import {
+  type AppState,
+  type Environment,
+  type PiUpdateState,
+  type Settings,
+  type StorageStatus,
+} from '../../shared/types';
 import { readableError } from '../lib/format';
 import { UpdateStore } from '../lib/update-store';
 import { RuntimeStore } from '../lib/runtime-store';
+import type { MaterialEnvironment } from '../../shared/material';
 const api = window.desktop;
 export function useRuntime(
   setError: (value: string) => void,
@@ -18,8 +25,10 @@ export function useRuntime(
 ) {
   const [snapshot, setSnapshot] = useState<{ state: AppState; revision: number }>(),
     [environment, setEnvironment] = useState<Environment>(),
+    [piUpdate, setPiUpdate] = useState<PiUpdateState>(),
     [storage, setStorage] = useState<StorageStatus>({ writable: false });
   const [runtimes] = useState(() => new RuntimeStore());
+  const [materialEnvironment, setMaterialEnvironment] = useState<MaterialEnvironment>();
   const [updates] = useState(() => new UpdateStore());
   const sessionId = snapshot?.state.selectedSessionId;
   const runtime = useSyncExternalStore(
@@ -27,6 +36,7 @@ export function useRuntime(
     () => runtimes.get(sessionId),
   );
   const activities = useSyncExternalStore(runtimes.subscribeActivities, runtimes.getActivities);
+  const sidebarActivities = useSyncExternalStore(runtimes.subscribeActivities, runtimes.getSidebarActivities);
   const receivedState = useRef<{ state?: AppState; revision: number }>({ revision: 0 });
   const receiveState = (state: AppState, revision: number) => {
     if (!Number.isSafeInteger(revision) || revision <= receivedState.current.revision) return;
@@ -34,13 +44,16 @@ export function useRuntime(
     receivedState.current = next;
     setSnapshot(next);
   };
-  useEffect(() => {
+  // 首次挂载就订阅并请求会话状态，主进程可以在准备页绘制时读取数据。
+  useLayoutEffect(() => {
     let alive = true;
     const unsubscribe = api.onEvent((event) => {
       if (!alive) return;
+      if (event.type === 'materialEnvironment') return setMaterialEnvironment(event.materialEnvironment);
       if (event.type === 'state') receiveState(event.state, event.revision);
       else if (event.type === 'storage') setStorage(event.storage);
       else if (event.type === 'update') updates.set(event.update);
+      else if (event.type === 'piUpdate') setPiUpdate(event.piUpdate);
       else if (event.type === 'environment') setEnvironment(event.environment);
       else if (event.type === 'runtimeRemoved') {
         runtimes.remove(event.sessionId);
@@ -59,6 +72,8 @@ export function useRuntime(
           if (!runtimes.has(v.runtime.sessionId)) runtimes.set(v.runtime);
         }
         setEnvironment((previous) => previous ?? v.environment);
+        setMaterialEnvironment((previous) => previous ?? v.materialEnvironment);
+        setPiUpdate((previous) => previous ?? v.piUpdate);
         setPrefs((previous) => previous ?? receivedState.current.state?.settings ?? v.state.settings);
         setStorage(v.storage);
         if (!updates.get()) updates.set(v.update);
@@ -79,9 +94,12 @@ export function useRuntime(
     receiveState,
     runtime,
     activities,
+    sidebarActivities,
     anyRunning,
     environment,
+    materialEnvironment,
     setEnvironment,
+    piUpdate,
     storage,
     updates,
   };

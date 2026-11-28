@@ -1,13 +1,13 @@
-import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
+import { lazy, Suspense, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { IconButton } from '../IconButton';
 import { ChevronDown, FileText, Check, AlertCircle, LoaderCircle, Copy, Terminal } from 'lucide-react';
 import { type ToolActivity } from '../../../shared/types';
-import { DiffView } from '../DiffView';
 import { AnsiOutput } from '../AnsiOutput';
 import { stripAnsi } from '../../lib/ansi';
 import type { SessionMatch } from '../../lib/session-search';
 import { SearchHighlight } from './SearchHighlight';
 const api = window.desktop;
+const DiffView = lazy(() => import('../DiffView').then((m) => ({ default: m.DiffView })));
 
 export const patchLines = (patch: string) => {
   const all = patch.split('\n');
@@ -217,17 +217,36 @@ export function ToolCard({
               });
           }}
         >
+          {Boolean(tool.args.path) && (
+            <IconButton
+              title="查看文件"
+              className="tool-open-file"
+              onClick={() => openFile(String(tool.args.path))}
+            >
+              <FileText size={13} />
+            </IconButton>
+          )}
+          <div className="tool-actions">
+            <span role="status" className="tool-copy-status">
+              {copyState === 'error' ? '复制失败，请重试' : copyState === 'copied' ? '已复制' : ''}
+            </span>
+            <IconButton title="复制输出" onClick={() => void copyOutput()}>
+              {copyState === 'copied' ? <Check size={13} /> : <Copy size={13} />}
+            </IconButton>
+          </div>
           {match ? (
             <pre className="tool-search-content">
               <SearchHighlight text={match.text} query={match.query} activeStart={match.start} />
             </pre>
           ) : tool.patch ? (
-            <DiffView
-              patch={tool.patch}
-              path={typeof tool.args.path === 'string' ? tool.args.path : undefined}
-              className="inline-diff"
-              onAskHunk={askHunk}
-            />
+            <Suspense fallback={null}>
+              <DiffView
+                patch={tool.patch}
+                path={typeof tool.args.path === 'string' ? tool.args.path : undefined}
+                className="inline-diff"
+                onAskHunk={askHunk}
+              />
+            </Suspense>
           ) : (
             <>
               {Object.keys(tool.args).length > 0 && (
@@ -263,19 +282,6 @@ export function ToolCard({
               />
             </>
           )}
-          <div className="tool-actions">
-            {Boolean(tool.args.path) && (
-              <IconButton title="查看文件" onClick={() => openFile(String(tool.args.path))}>
-                <FileText size={13} />
-              </IconButton>
-            )}
-            <span role="status" className="tool-copy-status">
-              {copyState === 'error' ? '复制失败，请重试' : copyState === 'copied' ? '已复制' : ''}
-            </span>
-            <IconButton title="复制输出" onClick={() => void copyOutput()}>
-              {copyState === 'copied' ? <Check size={13} /> : <Copy size={13} />}
-            </IconButton>
-          </div>
         </div>
       )}
     </details>

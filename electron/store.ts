@@ -12,6 +12,9 @@ import type {
   IndexRecovery,
   Message,
   Session,
+  SessionMoveOptions,
+  SidebarSection,
+  SidebarView,
   StorageStatus,
 } from '../shared/types';
 import { validateImages } from './images';
@@ -416,29 +419,174 @@ export class Store extends EventEmitter {
     }
     await this.replace('state.backup-1.json', contents);
   }
-  private stagedMove?: { id: string; patch: Pick<Session, 'projectId' | 'cwd' | 'file' | 'attachments'> };
+  private stagedWrite?: Promise<unknown>;
 
-  /** Persist relocation without exposing a half-committed session to readers or other saves. */
-  async commitSessionMove(id: string, patch: Pick<Session, 'projectId' | 'cwd' | 'file' | 'attachments'>) {
-    if (this.stagedMove) throw new Error('另一个会话正在保存移动结果，请稍后重试');
-    await this.flush();
-    if (this.stagedMove) throw new Error('另一个会话正在保存移动结果，请稍后重试');
-    const session = this.session(id);
-    this.stagedMove = { id, patch };
-    try {
-      await this.save(false, true);
-      Object.assign(session, patch);
-      if (!patch.projectId) delete session.projectId;
-      if (!patch.cwd) delete session.cwd;
-      if (this.state.selectedSessionId === id) this.state.selectedProjectId = patch.projectId;
-    } finally {
-      this.stagedMove = undefined;
-    }
+  /**
+   * 1. 等前一次写入完成，再按最新数据校验并准备快照。
+   * 2. 用同一个写入队列保存快照，成功后才把这次改动合入内存。
+   */
+  private commitIndexChange<T>(stage: () => { state: AppState; apply: () => T }) {
+    // 1. 分区和项目移动共用顺序，避免用已删除的分区或过时的会话归属提交。
+    const committed = (this.stagedWrite ?? this.writing)
+      .catch(() => {})
+      .then(async () => {
+        this.assertWritable();
+        const { state, apply } = stage();
+        // 2. 失败时保留上次保存的值，草稿重试会从当前内存重新取数据。
+        await this.writeState(false, state);
+        return apply();
+      });
+    this.stagedWrite = committed;
+    return committed.finally(() => {
+      if (this.stagedWrite === committed) this.stagedWrite = undefined;
+    });
   }
-  save(retry = false, committingMove = false): Promise<void> {
-    // Capture ordinary saves only after the relocation resolves: their snapshots must
-    // never overwrite a newly committed location or persist an uncommitted one.
-    if (this.stagedMove && !committingMove) return this.writing.catch(() => {}).then(() => this.save(retry));
+
+  /**
+   * 1. 提交时核对拖动起始分区，归属已变就要求重新确认。
+   * 2. 项目位置和分区归属一次写入，成功后只合入这几个字段。
+   */
+  commitSessionMove(
+    id: string,
+    patch: Pick<Session, 'projectId' | 'cwd' | 'file' | 'attachments'>,
+    source?: Pick<SessionMoveOptions, 'sectionId'>,
+  ) {
+    return this.commitIndexChange(() => {
+      // 1. 拖动期间分区可能已被删除或会话已被移入其他分区。
+      const session = this.session(id);
+      if (source && session.sectionId !== source.sectionId)
+        throw new Error('会话的分区已变化，请重新确认移动');
+      const location = source?.sectionId === undefined ? patch : { ...patch, sectionId: undefined };
+      const state = this.projectState(
+        {
+          ...this.state,
+          sessions: this.state.sessions.map((s) => (s === session ? { ...s, ...location } : s)),
+        },
+        false,
+        id,
+      );
+      return {
+        state,
+        apply: () => {
+          // 2. 草稿和选中项可在写盘时更新，保留这些更新和已经完成的删除。
+          if (!this.state.sessions.includes(session)) return;
+          Object.assign(session, location);
+          if (!patch.projectId) delete session.projectId;
+          if (!patch.cwd) delete session.cwd;
+          if (source?.sectionId !== undefined) delete session.sectionId;
+          if (this.state.selectedSessionId === id) this.state.selectedProjectId = patch.projectId;
+        },
+      };
+    });
+  }
+
+  setSidebarView(view: SidebarView) {
+    return this.commitIndexChange(() => {
+      const state = this.persistentState();
+      return {
+        state: { ...state, settings: { ...state.settings, sidebarView: view } },
+        apply: () => {
+          this.state.settings.sidebarView = view;
+        },
+      };
+    });
+  }
+
+  /**
+   * 1. 根据最新分区和会话准备改动，入组的空白会话一并写盘。
+   * 2. 保存成功后合入归属，只处理仍在索引里的会话。
+   */
+  private changeSections<T>(
+    change: (sections: SidebarSection[], assignments: Map<string, string | undefined>) => T,
+  ) {
+    return this.commitIndexChange(() => {
+      // 1. 在副本上计算改动，保存失败时会话位置和分区列表保持原样。
+      const sections = [...(this.state.sections ?? [])];
+      const assignments = new Map<string, string | undefined>();
+      const result = change(sections, assignments);
+      const state = this.projectState(
+        {
+          ...this.state,
+          sections,
+          sessions: this.state.sessions.map((s) =>
+            assignments.has(s.id) ? { ...s, sectionId: assignments.get(s.id) } : s,
+          ),
+        },
+        false,
+      );
+      return {
+        state,
+        apply: () => {
+          // 2. 已经归入分区的空白会话是用户保存的数据，后续保存不能再把它过滤掉。
+          this.state.sections = sections;
+          for (const session of this.state.sessions) {
+            if (!assignments.has(session.id)) continue;
+            const sectionId = assignments.get(session.id);
+            if (sectionId === undefined) {
+              delete session.sectionId;
+              continue;
+            }
+            session.sectionId = sectionId;
+            this.transientSessions.delete(session.id);
+          }
+          return result;
+        },
+      };
+    });
+  }
+  private sectionIndex(sections: SidebarSection[], id: string) {
+    const index = sections.findIndex((section) => section.id === id);
+    if (index === -1) throw new Error('分区不存在');
+    return index;
+  }
+  private assertSectionNameAvailable(sections: SidebarSection[], name: string, id?: string) {
+    if (sections.some((section) => section.id !== id && section.name.toLowerCase() === name.toLowerCase()))
+      throw new Error('已有同名分区');
+  }
+  private sectionSession(id: string) {
+    const session = this.session(id);
+    if (session.team) throw new Error('团队成员跟随负责人显示');
+    return session;
+  }
+  createSection(name: string, sessionId?: string) {
+    return this.changeSections((sections, assignments) => {
+      this.assertSectionNameAvailable(sections, name);
+      if (sections.length >= 20) throw new Error('最多可以建 20 个分区');
+      const section = { id: randomUUID(), name, createdAt: Date.now() };
+      if (sessionId !== undefined) assignments.set(this.sectionSession(sessionId).id, section.id);
+      sections.push(section);
+      return section;
+    });
+  }
+  renameSection(id: string, name: string) {
+    return this.changeSections((sections) => {
+      const index = this.sectionIndex(sections, id);
+      this.assertSectionNameAvailable(sections, name, id);
+      sections[index] = { ...sections[index], name };
+    });
+  }
+  deleteSection(id: string) {
+    return this.changeSections((sections, assignments) => {
+      const [section] = sections.splice(this.sectionIndex(sections, id), 1);
+      for (const session of this.state.sessions)
+        if (session.sectionId === id) assignments.set(session.id, undefined);
+      return { name: section.name, sessionCount: assignments.size };
+    });
+  }
+  setSessionSection(id: string, sectionId: string | null) {
+    return this.changeSections((sections, assignments) => {
+      const session = this.sectionSession(id);
+      if (sectionId !== null) this.sectionIndex(sections, sectionId);
+      assignments.set(session.id, sectionId ?? undefined);
+    });
+  }
+
+  save(retry = false): Promise<void> {
+    // 等位置或显示设置提交完再取快照，防止普通保存写回旧的值。
+    if (this.stagedWrite) return this.stagedWrite.catch(() => {}).then(() => this.save(retry));
+    return this.writeState(retry);
+  }
+  private writeState(retry: boolean, staged?: AppState): Promise<void> {
     const deferred = this.deferredSave;
     this.deferredSave = undefined;
     if (deferred) clearTimeout(deferred.timer);
@@ -446,23 +594,11 @@ export class Store extends EventEmitter {
     // Capture the projection now, before joining the existing atomic-write queue. Current
     // state and backups must describe the same acknowledged save, not later mutations.
     const images = new Map<string, string>();
-    const state = this.persistentState();
-    if (committingMove && this.stagedMove) {
-      const { id, patch } = this.stagedMove;
-      state.sessions = state.sessions.map((session) =>
-        session.id === id ? { ...session, ...patch } : session,
-      );
-      // Explicitly moving a placeholder makes its chosen location durable.
-      if (!state.sessions.some((session) => session.id === id))
-        state.sessions.push({ ...this.session(id), ...patch });
-      if (this.state.selectedSessionId === id) {
-        state.selectedSessionId = id;
-        state.selectedProjectId = patch.projectId;
-      }
-    }
+    const state = staged ?? this.persistentState();
     const contents = JSON.stringify({
       ...state,
       version: 2,
+      appVersion: this.state.appVersion,
       sessions: state.sessions.map((session) => ({
         ...session,
         images: session.images?.map((image) => {
@@ -492,10 +628,9 @@ export class Store extends EventEmitter {
         try {
           await this.backup(contents);
         } catch (error) {
-          // state.json has already committed. A backup failure cannot turn a
-          // successful relocation into a rollback that deletes its new history.
-          if (!committingMove) throw error;
-          console.error('session.move backup failed after commit', { id: this.stagedMove?.id }, error);
+          // 主索引已经写入，这次位置或显示设置要照常合入内存。
+          if (!staged) throw error;
+          console.error('state backup failed after commit', error);
         }
         // Release bodies only after durable image files exist. Late draft edits
         // keep their own identities and cannot be replaced by this older save.
@@ -529,7 +664,8 @@ export class Store extends EventEmitter {
     if (deferred) void this.writing.then(deferred.resolve, deferred.reject);
     return this.writing;
   }
-  flush() {
+  flush(): Promise<void> {
+    if (this.stagedWrite) return this.stagedWrite.catch(() => {}).then(() => this.flush());
     return this.deferredSave ? this.save() : this.writing;
   }
   isTransientSession(id: string) {
@@ -549,11 +685,13 @@ export class Store extends EventEmitter {
     this.promoteSessionData();
     return this.state.sessions.filter((session) => !this.transientSessions.has(session.id));
   }
-  private projectState(state: AppState, includeSelected: boolean): AppState {
+  private projectState(state: AppState, includeSelected: boolean, includeSessionId?: string): AppState {
     this.promoteSessionData();
     const sessions = state.sessions.filter(
       (session) =>
         !this.transientSessions.has(session.id) ||
+        session.sectionId !== undefined ||
+        session.id === includeSessionId ||
         (includeSelected && session.id === state.selectedSessionId),
     );
     const current = state.sessions.find((session) => session.id === state.selectedSessionId);
@@ -611,6 +749,7 @@ export class Store extends EventEmitter {
   }
   createSession(projectId?: string) {
     if (projectId !== undefined) this.project(projectId);
+    const now = Date.now();
     const session: Session = {
       id: randomUUID(),
       projectId,
@@ -620,7 +759,8 @@ export class Store extends EventEmitter {
         : {}),
       draft: '',
       attachments: [],
-      updatedAt: Date.now(),
+      createdAt: now,
+      updatedAt: now,
       lastStatus: 'idle',
     };
     this.state.sessions.unshift(session);

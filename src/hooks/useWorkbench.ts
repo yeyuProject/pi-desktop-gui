@@ -21,14 +21,17 @@ import {
   type Settings,
   type ContentBlock,
   type MessageAction,
+  type SidebarView,
 } from '../../shared/types';
 import { userMessageInput } from '../../shared/message-content';
+import { DEFAULT_SIDEBAR_VIEW } from '../../shared/sidebar-view';
+import { supportsGlassTheme } from '../../shared/material';
+import { watchGlassLayers } from '../lib/glass';
 
 import { readableError } from '../lib/format';
 import { PI_SOURCE_URL } from '../../shared/pi-version';
 import { notice as setNotice, dismissNotice } from '../lib/notice-store';
 
-import { useLayer } from './useLayer';
 import { type MessageContext } from '../components/conversation/ChatMessage';
 const api = window.desktop;
 const noTools: ToolActivity[] = [];
@@ -58,9 +61,12 @@ export function useWorkbench() {
     receiveState,
     runtime,
     activities,
+    sidebarActivities,
     anyRunning,
     environment,
+    materialEnvironment,
     setEnvironment,
+    piUpdate,
     storage,
     updates,
   } = useRuntime(setError, setPrefs);
@@ -85,8 +91,43 @@ export function useWorkbench() {
     [newContent, setNewContent] = useState(false);
   const [searchOpen, setSearchOpen] = useState(false),
     [searchQuery, setSearchQuery] = useState(''),
-    [rename, setRename] = useState<{ kind: 'project' | 'session'; id: string; name: string }>(),
+    [rename, setRename] = useState<
+      (
+        | { kind: 'project' | 'session' | 'section'; id: string; name: string }
+        | { kind: 'new-section'; sessionId?: string; name: string }
+      ) & { error?: string; saving?: boolean }
+    >(),
     [menuId, setMenuId] = useState('');
+  const [sidebarChanges, setSidebarChanges] = useState<Partial<SidebarView>[]>([]);
+  const sidebarSave = useRef(Promise.resolve());
+  const savedSidebarView = state?.settings.sidebarView ?? DEFAULT_SIDEBAR_VIEW;
+  const sidebarView = useMemo(
+    () => sidebarChanges.reduce<SidebarView>((view, change) => ({ ...view, ...change }), savedSidebarView),
+    [savedSidebarView, sidebarChanges],
+  );
+
+  /**
+   * 1. 先显示本次选择，排在已有保存请求后面。
+   * 2. 用最近一次成功保存的设置提交本次改动。
+   * 3. 取回新快照，或提示失败，再移除这次临时改动。
+   */
+  function changeSidebarView(change: Partial<SidebarView>) {
+    // 1. 连续点选时，后一次选择立即可见。
+    setSidebarChanges((current) => [...current, change]);
+    sidebarSave.current = sidebarSave.current.then(async () => {
+      // 2. 失败的改动不应被后续请求重新写入。
+      const saved = receivedState.current.state?.settings.sidebarView ?? DEFAULT_SIDEBAR_VIEW;
+      try {
+        const snapshot = await api.invoke('setSidebarView', { ...saved, ...change });
+        receiveState(snapshot.state, snapshot.revision);
+      } catch (error) {
+        setNotice('没能保存侧栏显示方式：' + readableError(error), { level: 'error' });
+      } finally {
+        // 3. 去掉已处理的第一项，后面等待保存的选择仍然显示。
+        setSidebarChanges((current) => current.slice(1));
+      }
+    });
+  }
   const notificationCursor = useRef<{ sessionId?: string; id: number }>({ id: 0 });
   /** Toasts raised by the shown session's runtime; they belong to that session and close on switch. */
   const runtimeNotices = useRef<number[]>([]);
@@ -156,6 +197,7 @@ export function useWorkbench() {
   }
   const sessionEnabled =
     !selectionChanging &&
+    piUpdate?.status !== 'updating' &&
     storage.writable &&
     (!runtime.crash || runtime.crash.cleanup === 'confirmed') &&
     Boolean(selected && (!selected.projectId || project?.trusted));
@@ -164,7 +206,6 @@ export function useWorkbench() {
     ownRunning = ownRuntime && running;
   const modelLocked = !sessionEnabled || !runtime.models.length || (pending && !running);
   const draftState = useDraft({
-    state,
     stateRef,
     selected,
     project,
@@ -240,7 +281,6 @@ export function useWorkbench() {
   const transcript = useMemo(() => transcriptIndex.derive(messages), [transcriptIndex, messages]);
   const sentPrompts = transcript.prompts;
 
-  useLayer(inspectorPanel, inspector, () => setInspector(false), { kind: 'panel', trapFocus: compact });
   async function attempt<T>(fn: () => Promise<T>, sessionId = selected?.id ?? ''): Promise<T | undefined> {
     try {
       return await fn();
@@ -284,9 +324,32 @@ export function useWorkbench() {
     return () => observer.disconnect();
   }, [Boolean(state), inspector, inspectorSetting, sideChatSetting]);
 
+  const appearance = settingsOpen && prefs ? prefs : state?.settings;
+  const [reducedTransparency, setReducedTransparency] = useState(
+    () => window.matchMedia('(prefers-reduced-transparency: reduce)').matches,
+  );
   useEffect(() => {
-    if (!state) return;
-    const appearance = settingsOpen && prefs ? prefs : state.settings;
+    const query = window.matchMedia('(prefers-reduced-transparency: reduce)');
+    const onChange = () => setReducedTransparency(query.matches);
+    query.addEventListener('change', onChange);
+    return () => query.removeEventListener('change', onChange);
+  }, []);
+  const glassRequested =
+    appearance?.material === 'glass' &&
+    appearance.uiStyle === 'classic' &&
+    supportsGlassTheme(appearance.theme);
+  const materialStatus = !glassRequested
+    ? undefined
+    : !materialEnvironment?.gpuCompositing
+      ? '当前设备未启用显卡加速，已改用实色'
+      : reducedTransparency
+        ? '系统已开启降低透明度'
+        : materialEnvironment.onBattery && appearance.solidOnBattery !== false
+          ? '使用电池时已改用实色'
+          : undefined;
+  const glass = glassRequested && !materialStatus;
+  useEffect(() => {
+    if (!appearance) return;
     document.documentElement.dataset.theme = appearance.theme;
     document.documentElement.dataset.style = appearance.uiStyle;
     document.documentElement.dataset.platform = api.platform;
@@ -294,7 +357,15 @@ export function useWorkbench() {
     document.documentElement.style.setProperty('--sidebar-width', appearance.sidebarWidth + 'px');
     document.documentElement.style.setProperty('--inspector-width', appearance.inspectorWidth + 'px');
     document.documentElement.style.setProperty('--side-chat-width', (appearance.sideChatWidth ?? 360) + 'px');
-  }, [state?.settings, settingsOpen, prefs]);
+  }, [appearance]);
+  useEffect(() => {
+    if (!glass) {
+      delete document.documentElement.dataset.material;
+      return;
+    }
+    document.documentElement.dataset.material = 'glass';
+    return watchGlassLayers();
+  }, [glass]);
 
   useEffect(() => {
     document.title = runtime.title || 'Pi Desktop';
@@ -620,12 +691,27 @@ export function useWorkbench() {
       setPending(false, s.id);
     }
   }
+  /**
+   * 1. Pi 更新期间不能新建会话；平时先保存当前草稿，避免丢失输入。
+   * 2. 创建成功后确认主进程选中的会话；只有本次切换仍有效时才聚焦输入框。
+   * 3. 保存或创建失败时显示错误并结束本次切换；旧请求不能影响新的切换。
+   */
   async function createSession(projectId?: string) {
+    // 1. 草稿尚未保存时不能离开当前会话。
+    if (piUpdate?.status === 'updating') return;
     const request = beginSelection();
-    await flushDraft();
-    const session = await attempt(() => api.invoke('newSession', projectId));
-    const confirmed = await settleSelection(request);
-    if (session && confirmed && request === selectionRequest.current) focusComposer();
+    try {
+      await flushDraft();
+      await api.invoke('newSession', projectId);
+      // 2. 创建返回值不决定当前会话，以主进程确认的选择为准。
+      const confirmed = await settleSelection(request);
+      if (confirmed && request === selectionRequest.current) focusComposer();
+    } catch (error) {
+      // 3. 旧请求的失败不能覆盖新请求的错误或解除它的切换状态。
+      if (request !== selectionRequest.current) return;
+      setError(readableError(error));
+      await settleSelection(request);
+    }
   }
   function openSettings(tabName = 'environment') {
     setPrefs(stateRef.current?.settings);
@@ -911,10 +997,12 @@ export function useWorkbench() {
       askHunk,
       rerunCommand,
       updates,
+      piUpdate,
       state,
       storage,
       runtime,
       environment,
+      materialStatus,
       history,
       activities,
       pending,
@@ -972,6 +1060,9 @@ export function useWorkbench() {
       setModel,
       setThinking,
       sidebar,
+      sidebarView,
+      sidebarActivities,
+      changeSidebarView,
       setSearchOpen,
       setRename,
       menuId,

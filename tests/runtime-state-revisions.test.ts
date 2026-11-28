@@ -52,7 +52,7 @@ function fixture(initialPrefs?: types.Settings) {
       if (!(index in slots)) slots[index] = { current: initial };
       return slots[index];
     },
-    useEffect(run: () => void | (() => void)) {
+    useLayoutEffect(run: () => void | (() => void)) {
       const index = cursor++;
       if (!(index in slots)) {
         slots[index] = true;

@@ -101,6 +101,7 @@ export type ComposerProps = Pick<
   | 'selected'
   | 'project'
   | 'sessionEnabled'
+  | 'piUpdate'
   | 'ownRuntime'
   | 'running'
   | 'modelLocked'
@@ -372,17 +373,20 @@ export function Composer(props: ComposerProps) {
       )[0],
     [attachmentSizes, draft],
   );
-  const sessionDisabledReason = selectionChanging
-    ? '正在切换会话，稍等一下'
-    : !storage.writable
-      ? '本地数据暂时无法保存，请先处理上方的存储提示'
-      : !selected
-        ? '请先新建或选择一个会话'
-        : runtime.crash && runtime.crash.cleanup !== 'confirmed'
-          ? '上次的命令可能还在运行，结束它们并重启应用后才能继续'
-          : !sessionEnabled
-            ? '这个项目还没启用，先点上方“启用项目”'
-            : '';
+  const sessionDisabledReason =
+    props.piUpdate?.status === 'updating'
+      ? 'Pi 正在更新'
+      : selectionChanging
+        ? '正在切换会话，稍等一下'
+        : !storage.writable
+          ? '本地数据暂时无法保存，请先处理上方的存储提示'
+          : !selected
+            ? '请先新建或选择一个会话'
+            : runtime.crash && runtime.crash.cleanup !== 'confirmed'
+              ? '上次的命令可能还在运行，结束它们并重启应用后才能继续'
+              : !sessionEnabled
+                ? '这个项目还没启用，先点上方“启用项目”'
+                : '';
   const sendDisabledReason =
     sessionDisabledReason ||
     (!localGoalCommand && !environment?.supported && !runtime.connected
@@ -423,6 +427,24 @@ export function Composer(props: ComposerProps) {
       container.style.removeProperty('--composer-offset');
     };
   }, []);
+  const toolbar = useRef<HTMLDivElement>(null);
+  const [toolbarSize, setToolbarSize] = useState('');
+  useLayoutEffect(() => {
+    // The toolbar keeps one row: when narrow it drops its labels, then the send hint.
+    // A class rather than a container query, which would trap its menus under 「回到最新」.
+    const element = toolbar.current;
+    if (!element) return;
+    const measure = () => {
+      const width =
+        element.clientWidth / (parseFloat(getComputedStyle(element).getPropertyValue('--font-scale')) || 1);
+      setToolbarSize(width <= 440 ? ' compact narrow' : width <= 660 ? ' compact' : '');
+    };
+    measure();
+    const observer = new ResizeObserver(measure);
+    observer.observe(element);
+    return () => observer.disconnect();
+  }, []);
+  const stopLabel = runtime.status === 'stopping' ? '停止中' : connecting ? '取消连接' : '停止任务';
   const sendLabel = answering
     ? '发送回答'
     : editingGoal
@@ -434,6 +456,7 @@ export function Composer(props: ComposerProps) {
   const sendHint =
     ownRunning && sendLabel === '发送任务' ? (sendMode === 'steer' ? '立即补充' : '完成后执行') : sendLabel;
   const explainSend = () => {
+    if (props.piUpdate?.status === 'updating') return openSettings();
     if (selectionChanging) return;
     const target = !storage.writable
       ? document.querySelector<HTMLElement>('.storage-banner button')
@@ -658,6 +681,7 @@ export function Composer(props: ComposerProps) {
         <ErrorFeedback as="div" message={!answering && parameterError} />
         <textarea
           ref={input}
+          style={{ fieldSizing: 'content', maxHeight: inputMaxHeight + 'vh' }}
           aria-label="任务输入"
           placeholder={
             answering
@@ -840,7 +864,7 @@ export function Composer(props: ComposerProps) {
             )}
           </div>
         )}
-        <div className="composer-toolbar">
+        <div className={'composer-toolbar' + toolbarSize} ref={toolbar}>
           <div>
             <IconButton
               title="添加图片"
@@ -878,11 +902,12 @@ export function Composer(props: ComposerProps) {
               onClick={() => void openGoal()}
             >
               <Target size={14} />
-              Goal
+              <span className="toolbar-label">Goal</span>
             </button>
             {!selected?.team && (
               <button
                 className="team-button"
+                aria-label="团队"
                 aria-pressed={!!selected?.teamEnabled}
                 disabled={!sessionEnabled || pending}
                 title={
@@ -902,7 +927,7 @@ export function Composer(props: ComposerProps) {
                 }
               >
                 <Users size={14} />
-                团队
+                <span className="toolbar-label">团队</span>
               </button>
             )}
             {goal?.status === 'completed' && (
@@ -1005,6 +1030,7 @@ export function Composer(props: ComposerProps) {
             {ownRunning && (
               <button
                 className={'stop-button' + (stopArmed ? ' armed' : '')}
+                aria-label={stopLabel}
                 title={
                   connecting
                     ? '取消本次连接（连按两次 Esc）'
@@ -1014,7 +1040,7 @@ export function Composer(props: ComposerProps) {
                 disabled={runtime.status === 'stopping'}
               >
                 <Square size={12} fill="currentColor" />
-                {runtime.status === 'stopping' ? '停止中' : connecting ? '取消连接' : '停止任务'}
+                <span className="toolbar-label">{stopLabel}</span>
               </button>
             )}
             <span

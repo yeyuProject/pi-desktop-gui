@@ -24,7 +24,7 @@
   overflow: auto;
   background: var(--surface);
   border: 1px solid var(--line);
-  border-radius: var(--radius-panel);
+  border-radius: var(--radius-lg);
   box-shadow: var(--shadow);
   display: flex;
   flex-direction: column;
@@ -111,7 +111,7 @@
   padding: 7px;
   background: var(--bg);
   border: 1px solid var(--line);
-  border-radius: 6px;
+  border-radius: var(--radius-sm);
 }
 .settings-layout {
   display: flex;
@@ -166,7 +166,7 @@
   display: flex;
   gap: 0;
   border: 1px solid var(--line);
-  border-radius: 9px;
+  border-radius: var(--radius-md);
   margin-bottom: 15px;
   background: var(--bg);
 }
@@ -195,11 +195,40 @@
 .environment-status svg {
   color: var(--accent);
 }
+.pi-version-status {
+  overflow-wrap: anywhere;
+}
+.pi-version-status .pi-update-available {
+  color: var(--accent);
+}
+.pi-update-available small {
+  display: block;
+  color: var(--muted);
+}
+.pi-update-output,
+.pi-update-tail {
+  margin: 8px 0;
+}
+.pi-update-output pre,
+.pi-update-tail,
+.environment-note pre {
+  max-height: 14em;
+  overflow: auto;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+.pi-update-output[open] + .pi-update-tail,
+.pi-update-tail:empty {
+  display: none;
+}
+.environment-note code {
+  overflow-wrap: anywhere;
+}
 .environment-note {
   font-size: calc(11px * var(--font-scale));
   color: var(--muted);
   background: var(--rail);
-  border-radius: 6px;
+  border-radius: var(--radius-md);
   line-height: 1.7;
   padding: 8px 11px;
   margin: 7px 0;
@@ -289,7 +318,7 @@
   padding: 12px;
   background: var(--accent-soft);
   color: var(--accent);
-  border-radius: 6px;
+  border-radius: var(--radius-md);
   font-size: calc(11px * var(--font-scale));
   margin-top: 15px;
   overflow-wrap: anywhere;
@@ -333,7 +362,7 @@ input[type='range'] {
 .diagnostic-preview {
   padding: 15px;
   border: 1px solid var(--line);
-  border-radius: 8px;
+  border-radius: var(--radius-md);
   background: var(--code);
   font-size: calc(11px * var(--font-scale));
   max-height: 260px;
@@ -364,7 +393,7 @@ input[type='range'] {
   display: flex;
   align-items: center;
   gap: 9px;
-  border-radius: 9px;
+  border-radius: var(--radius-md);
   box-shadow: var(--shadow);
   z-index: 60;
   font-size: calc(12px * var(--font-scale));
@@ -394,7 +423,7 @@ input[type='range'] {
   justify-content: flex-start;
   border: 0;
   padding: 12px 8px;
-  border-radius: 6px;
+  border-radius: var(--radius-sm);
 }
 .search-results > button > span {
   flex: 1;
@@ -452,16 +481,6 @@ kbd {
 }
 .message.user .message-actions {
   margin-left: 0;
-}
-.tool-card:hover,
-.tool-card[open] {
-  background: var(--code);
-}
-.tool-card[open] {
-  border-color: var(--line);
-}
-.tool-card.error {
-  border-color: color-mix(in srgb, var(--red) 30%, var(--line));
 }
 .tool-card + .message {
   margin-top: 28px;

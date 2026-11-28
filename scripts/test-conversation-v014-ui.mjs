@@ -1,5 +1,6 @@
 import { launchApp, closeApp } from '../tests/support/desktop-app.mjs';
 import assert from 'node:assert/strict';
+import { expect } from 'playwright/test';
 import fs from 'node:fs/promises';
 import path from 'node:path';
 import { emptyRuntime } from '../shared/types.ts';
@@ -8,6 +9,10 @@ import { createLocalProvider, prepareRealPiFixture } from '../tests/support/loca
 // All messages, images and commands are local fixtures. Command reruns are captured, never executed.
 const provider = await createLocalProvider();
 const fixture = await prepareRealPiFixture(provider.baseUrl, 'conversation-v014-ui');
+const otherSession = fixture.store.createSession(fixture.projectId);
+otherSession.title = 'UI16 短回复会话';
+fixture.store.selectSession(fixture.sessionId);
+await fixture.store.save();
 for (const name of ['alpha.ts', 'beta.ts', 'gamma.ts'])
   await fs.writeFile(path.join(fixture.projectDir, name), 'line1\nline2\nline3\nline4\nline5\n');
 const runtime = {
@@ -114,21 +119,30 @@ try {
   await app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows()[0].setSize(1440, 900));
 
   await page.getByRole('textbox', { name: '任务输入' }).waitFor();
-  await app.evaluate(({ ipcMain }, runtime) => {
-    globalThis.conversationCalls = [];
-    globalThis.conversationRuntime = runtime;
-    const handler = ipcMain._invokeHandlers.get('desktop:invoke');
-    ipcMain.removeHandler('desktop:invoke');
-    ipcMain.handle('desktop:invoke', async (event, method, args) => {
-      if (method === 'readHistory') return globalThis.conversationRuntime.messages;
-      if (['send', 'copy', 'copyImage', 'compact', 'branchSession'].includes(method)) {
-        globalThis.conversationCalls.push({ method, args });
-        return method === 'compact' ? { tokensBefore: 8000 } : undefined;
-      }
-      const result = await handler(event, method, args);
-      return method === 'bootstrap' ? { ...result, runtime: globalThis.conversationRuntime } : result;
-    });
-  }, runtime);
+  await app.evaluate(
+    ({ ipcMain }, { runtime, otherSessionId }) => {
+      globalThis.conversationCalls = [];
+      globalThis.conversationRuntime = runtime;
+      const handler = ipcMain._invokeHandlers.get('desktop:invoke');
+      ipcMain.removeHandler('desktop:invoke');
+      ipcMain.handle('desktop:invoke', async (event, method, args) => {
+        if (method === 'readHistory')
+          return args[0] === otherSessionId
+            ? [
+                { role: 'user', content: '短问题' },
+                { role: 'assistant', content: 'UI16 短回复' },
+              ]
+            : globalThis.conversationRuntime.messages;
+        if (['send', 'copy', 'copyImage', 'compact', 'branchSession'].includes(method)) {
+          globalThis.conversationCalls.push({ method, args });
+          return method === 'compact' ? { tokensBefore: 8000 } : undefined;
+        }
+        const result = await handler(event, method, args);
+        return method === 'bootstrap' ? { ...result, runtime: globalThis.conversationRuntime } : result;
+      });
+    },
+    { runtime, otherSessionId: otherSession.id },
+  );
   await page.reload();
   await page.bringToFront();
   const input = page.getByRole('textbox', { name: '任务输入' });
@@ -642,6 +656,320 @@ try {
   assert.equal(await page.locator('.tool-card').count(), 39);
   assert.deepEqual(errors, []);
   console.log('PASS large tool groups retain total counts and render only the current history page');
+
+  // UI16：用真实消息组件验证正文落点，思考块与工具卡不能被当成结论。
+  const finalReply = {
+    role: 'assistant',
+    content: [
+      { type: 'thinking', thinking: 'UI16 思考过程\n'.repeat(20) },
+      { type: 'text', text: 'UI16 最终回复\n\n' + '这是最终回复的正文。\n\n'.repeat(80) },
+    ],
+  };
+  const replyRuntime = {
+    ...runtime,
+    tools: runtime.tools.slice(0, 5),
+    messages: [
+      ...Array.from({ length: 988 }, (_, i) => ({
+        role: i % 2 ? 'assistant' : 'user',
+        content: `UI16 历史 ${i}`,
+      })),
+      ...runtime.messages.slice(500, -1),
+      finalReply,
+    ],
+  };
+  const replySelector = `[data-message-index="${replyRuntime.messages.length - 1}"] > article.message`;
+  const reply = page.locator(replySelector);
+  const thread = page.locator('.thread');
+  const conclusion = page.getByRole('button', { name: '跳到结论', exact: true });
+  const latest = page.getByRole('button', { name: '回到最新', exact: true });
+  await showRuntime({ ...replyRuntime, status: 'running' });
+  await page.reload();
+  await reply.waitFor();
+  await expect(conclusion).toHaveCount(0);
+  await thread.evaluate((el) => {
+    el.scrollTop = el.scrollHeight;
+  });
+  await expect
+    .poll(() => thread.evaluate((el) => el.scrollHeight - el.scrollTop - el.clientHeight))
+    .toBeLessThan(2);
+  await page.evaluate(
+    () => new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve))),
+  );
+  await expect(latest).toHaveCount(0);
+  await showRuntime(replyRuntime);
+  await expect(conclusion).toBeVisible({ timeout: 100 });
+  await expect
+    .poll(() => thread.evaluate((el) => el.scrollHeight - el.scrollTop - el.clientHeight))
+    .toBeLessThan(2);
+  await conclusion.focus();
+  await page.keyboard.press('Enter');
+  await expect(reply).toHaveClass(/turn-jump-highlight/);
+  await expect
+    .poll(() =>
+      reply.evaluate((el) =>
+        Math.abs(
+          el.getBoundingClientRect().top - document.querySelector('.thread').getBoundingClientRect().top - 12,
+        ),
+      ),
+    )
+    .toBeLessThanOrEqual(2);
+  await expect(thread).toBeFocused();
+  await expect(conclusion).toHaveCount(0);
+  await expect(latest).toBeVisible();
+  assert.equal(
+    await reply.evaluate(
+      (el) =>
+        el.previousElementSibling.querySelector('.thinking').getBoundingClientRect().bottom <=
+        document.querySelector('.thread').getBoundingClientRect().top + 1,
+    ),
+    true,
+  );
+  await expect(reply).not.toHaveClass(/turn-jump-highlight/, { timeout: 1500 });
+  console.log(
+    'PASS UI16 completion, 12 px body offset, thinking exclusion, keyboard focus and one-second highlight',
+  );
+
+  for (const width of [860, 1440]) {
+    await app.evaluate(
+      ({ BrowserWindow }, width) => BrowserWindow.getAllWindows()[0].setSize(width, 900),
+      width,
+    );
+    const normalHeight = await page.locator('.composer-wrap').evaluate((el) => el.clientHeight);
+    for (const grow of [false, true]) {
+      if (grow) await input.fill('输入框增高\n'.repeat(12));
+      await reply.evaluate((el) => {
+        const thread = document.querySelector('.thread');
+        thread.scrollTop += el.getBoundingClientRect().top - thread.getBoundingClientRect().top + 250;
+      });
+      await expect(conclusion).toBeVisible();
+      await expect(latest).toBeVisible();
+      const boxes = await page.evaluate(() => ({
+        buttons: [...document.querySelectorAll('.conversation-jumps button')].map((el) =>
+          el.getBoundingClientRect().toJSON(),
+        ),
+        composer: document.querySelector('.composer-wrap').getBoundingClientRect().toJSON(),
+      }));
+      assert.ok(boxes.buttons[0].right + 7 <= boxes.buttons[1].left);
+      assert.ok(
+        boxes.buttons.every(
+          (box) => box.bottom <= boxes.composer.top - 8 && box.left >= 0 && box.right <= width,
+        ),
+      );
+      if (grow) assert.ok(boxes.composer.height >= normalHeight + 60);
+      await page.screenshot({
+        path: path.join(output, `ui16-${width}-${grow ? 'tall' : 'normal'}.png`),
+        animations: 'disabled',
+      });
+    }
+    await input.fill('');
+  }
+  console.log('PASS UI16 floating buttons at 860/1440 px remain separate and above the growing composer');
+
+  for (const style of ['classic', 'codex', 'claude']) {
+    await page.evaluate((style) => {
+      document.documentElement.dataset.style = style;
+    }, style);
+    await expect(conclusion).toBeVisible();
+    const styles = await page.locator('.conversation-jumps button').evaluateAll((buttons) =>
+      buttons.map((button) => {
+        const css = getComputedStyle(button);
+        return [css.backgroundColor, css.fontSize, css.borderRadius];
+      }),
+    );
+    assert.deepEqual(styles[0], styles[1]);
+    await page.screenshot({ path: path.join(output, `ui16-${style}.png`), animations: 'disabled' });
+  }
+  await page.evaluate(() => {
+    document.documentElement.dataset.style = 'classic';
+  });
+
+  await page.emulateMedia({ reducedMotion: 'reduce' });
+  await expect(conclusion).toBeVisible();
+  assert.equal(await conclusion.evaluate((el) => getComputedStyle(el).animationName), 'none');
+  await conclusion.click();
+  await expect
+    .poll(() =>
+      reply.evaluate((el) =>
+        Math.abs(
+          el.getBoundingClientRect().top - document.querySelector('.thread').getBoundingClientRect().top - 12,
+        ),
+      ),
+    )
+    .toBeLessThanOrEqual(2);
+  assert.equal(await reply.evaluate((el) => getComputedStyle(el).animationName), 'none');
+  await latest.click();
+  await expect(conclusion).toBeVisible();
+  await conclusion.click();
+  await expect(reply).toHaveClass(/turn-jump-highlight/);
+  await expect(reply).not.toHaveClass(/turn-jump-highlight/, { timeout: 1500 });
+
+  await latest.click();
+  await expect(conclusion).toBeVisible();
+  await page.evaluate((sessionId) => {
+    window.ui16SessionFrames = [];
+    const observe = () => {
+      if (
+        document.querySelector('.session-row.active')?.dataset.sessionId === sessionId &&
+        document.querySelector('.thread').textContent.includes('UI16 短回复')
+      )
+        window.ui16SessionFrames.push(
+          document.querySelectorAll('button[title="滚到本轮最终回复的开头"]').length,
+        );
+      window.ui16SessionFrame = requestAnimationFrame(observe);
+    };
+    window.ui16SessionFrame = requestAnimationFrame(observe);
+  }, otherSession.id);
+  await page.locator(`[data-session-id="${otherSession.id}"]`).click();
+  await page.getByText('UI16 短回复', { exact: true }).waitFor();
+  await page.evaluate(
+    () => new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve))),
+  );
+  const sessionFrames = await page.evaluate(() => {
+    cancelAnimationFrame(window.ui16SessionFrame);
+    return window.ui16SessionFrames;
+  });
+  assert.ok(sessionFrames.length > 0 && sessionFrames.every((count) => count === 0));
+  await expect(conclusion).toHaveCount(0);
+  await page.locator(`[data-session-id="${fixture.sessionId}"]`).click();
+  await reply.waitFor();
+  await expect(conclusion).toBeVisible();
+  await conclusion.click();
+  await expect(conclusion).toHaveCount(0);
+  const savedTop = await thread.evaluate((el) => el.scrollTop);
+  await page.locator(`[data-session-id="${otherSession.id}"]`).click();
+  await page.getByText('UI16 短回复', { exact: true }).waitFor();
+  await waitSaved((session) => Math.abs(session.scrollTop - savedTop) < 2);
+  await page.locator(`[data-session-id="${fixture.sessionId}"]`).click();
+  await reply.waitFor();
+  // 旧版在活跃会话切回时也会回到底部；按钮必须以恢复后的实际位置判断。
+  await expect
+    .poll(async () => {
+      const above = await reply.evaluate((el) => {
+        const viewport = document.querySelector('.thread').getBoundingClientRect();
+        const bounds = el.getBoundingClientRect();
+        return bounds.top < viewport.top - 8 && bounds.bottom > viewport.top;
+      });
+      return (await conclusion.count()) === Number(above);
+    })
+    .toBe(true);
+  console.log('PASS UI16 reduced motion, repeated highlighting and per-session scroll restoration');
+
+  await input.press(modifier + '+f');
+  await page.getByRole('textbox', { name: '查找当前会话' }).fill('UI16 历史 1');
+  await page.locator('[data-message-index="1"]').waitFor();
+  await expect(reply).toHaveCount(0);
+  await expect(conclusion).toHaveCount(0);
+  await page.keyboard.press('Escape');
+  await latest.click();
+  await expect(conclusion).toBeVisible();
+  for (const status of ['completed', 'error', 'stopped']) {
+    await showRuntime({ ...replyRuntime, status, messages: replyRuntime.messages.slice(0, -1) });
+    await expect(reply).toHaveCount(0);
+    await expect(conclusion).toHaveCount(0);
+  }
+  await showRuntime({
+    ...replyRuntime,
+    messages: [...replyRuntime.messages.slice(0, -1), { role: 'assistant', content: '短结论' }],
+  });
+  await page.getByText('短结论', { exact: true }).waitFor();
+  await expect(conclusion).toHaveCount(0);
+  await showRuntime({
+    ...replyRuntime,
+    notices: Array.from({ length: 80 }, (_, i) => `回复后面的运行记录 ${i}`),
+  });
+  await reply.waitFor();
+  await page.locator('.runtime-notices > summary').click();
+  await thread.evaluate((el) => {
+    el.scrollTop = el.scrollHeight;
+  });
+  await expect
+    .poll(() =>
+      reply.evaluate(
+        (el) =>
+          el.getBoundingClientRect().bottom - document.querySelector('.thread').getBoundingClientRect().top,
+      ),
+    )
+    .toBeLessThanOrEqual(0);
+  await expect(conclusion).toHaveCount(0);
+  await showRuntime({
+    ...replyRuntime,
+    dialogs: [
+      {
+        id: 'ui16-approval',
+        method: 'select',
+        title: '需要确认',
+        approval: { toolName: 'bash', kind: 'shell', summary: 'echo UI16' },
+        options: ['允许一次', '拒绝'],
+      },
+    ],
+  });
+  await page.locator('.approval-card').waitFor();
+  await expect(conclusion).toHaveCount(0);
+  console.log(
+    'PASS UI16 history window, empty/stopped/error/short replies, fully passed reply and pending approval',
+  );
+
+  await page.emulateMedia({ reducedMotion: 'no-preference' });
+  await showRuntime(replyRuntime);
+  await page.reload();
+  await reply.waitFor();
+  await thread.evaluate((el) => {
+    el.scrollTop = el.scrollHeight;
+  });
+  await expect(conclusion).toBeVisible();
+  await conclusion.click();
+  await expect(conclusion).toHaveCount(0);
+  // 保留真实滚动，记录旧结论请求；尺寸监听随后拉回底部时也不能漏报。
+  await thread.evaluate((el) => {
+    window.ui16ReplyScrolls = [];
+    const scrollTo = el.scrollTo.bind(el);
+    el.scrollTo = (options) => {
+      window.ui16ReplyScrolls.push({ top: options.top, bottom: el.scrollHeight - el.clientHeight });
+      scrollTo(options);
+    };
+  });
+  const sentBefore = await app.evaluate(
+    () => globalThis.conversationCalls.filter((call) => call.method === 'send').length,
+  );
+  await input.fill('UI16 跳转后继续下一轮');
+  await page.getByRole('button', { name: '发送任务', exact: true }).click();
+  await expect
+    .poll(() =>
+      app.evaluate(() => globalThis.conversationCalls.filter((call) => call.method === 'send').length),
+    )
+    .toBe(sentBefore + 1);
+  for (let step = 1; step <= 3; step++) {
+    await showRuntime({
+      ...replyRuntime,
+      status: 'running',
+      messages: [
+        ...replyRuntime.messages,
+        { role: 'user', content: 'UI16 跳转后继续下一轮' },
+        ...Array.from({ length: step }, (_, i) => ({
+          role: 'assistant',
+          content: `UI16 新一轮 ${i}\n\n` + '新输出\n\n'.repeat(20),
+        })),
+      ],
+    });
+    await page.locator(`[data-message-index="${replyRuntime.messages.length + step}"]`).waitFor();
+    await page.evaluate(async () => {
+      for (let frame = 0; frame < 6; frame++) await new Promise(requestAnimationFrame);
+    });
+    assert.ok(
+      await thread.evaluate((el) => el.scrollHeight - el.scrollTop - el.clientHeight < 2),
+      `new output ${step} must remain at the bottom after a reply jump`,
+    );
+    assert.ok(
+      await page.evaluate(() =>
+        window.ui16ReplyScrolls.every((request) => request.top >= request.bottom - 2),
+      ),
+      'new output must not request another scroll to the previous answer',
+    );
+    await expect(conclusion).toHaveCount(0);
+  }
+  console.log('PASS UI16 sending after a reply jump follows every new output instead of the previous answer');
+  await page.emulateMedia({ reducedMotion: 'no-preference' });
+  assert.deepEqual(errors, []);
 } catch (error) {
   if (page && !page.isClosed()) {
     await page.screenshot({ path: path.join(output, 'failed.png'), animations: 'disabled' });

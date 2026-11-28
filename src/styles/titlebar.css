@@ -40,7 +40,7 @@
   padding: 2px 10px;
   border: 0;
   background: transparent;
-  border-radius: 4px;
+  border-radius: var(--radius-xs);
 }
 .native-titlebar button:hover,
 .native-titlebar button[aria-expanded='true'] {

@@ -27,7 +27,7 @@ import { DiffView } from './DiffView';
 import { AnsiOutput } from './AnsiOutput';
 import { stripAnsi } from '../../shared/ansi';
 import type { AgentRulesFile } from '../../shared/workspace';
-import '../styles/workspace-v014.css';
+import { useLayer } from '../hooks/useLayer';
 const api = window.desktop;
 import type { Workbench } from '../hooks/useWorkbench';
 import { busy, type AppState } from '../../shared/types';
@@ -117,6 +117,7 @@ export function Inspector(
     rerunCommand,
     saveInspectorSplit,
   } = props;
+  useLayer(inspectorPanel, inspector, () => setInspector(false), { kind: 'panel', trapFocus: compact });
   const [fileMenu, setFileMenu] = useState<FileMenuTarget>();
   useEffect(() => setFileMenu(undefined), [project?.id, inspector]);
   const [maximized, setMaximized] = useState(false),

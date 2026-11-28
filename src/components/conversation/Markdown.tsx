@@ -157,6 +157,8 @@ export const RichText = memo(function RichText({
 }) {
   const previous = useRef<MarkdownParts | undefined>(undefined);
   const Block = terms ? TermMarkdownBlock : MarkdownBlock;
+  // 流式输出的尾部仍在变化，等输出结束后再认词。
+  const Tail = streaming ? MarkdownBlock : Block;
   if (!streaming && !previous.current) return <Block text={text} />;
   const parts =
     previous.current?.source === text ? previous.current : streamingMarkdown(text, previous.current);
@@ -168,11 +170,18 @@ export const RichText = memo(function RichText({
       ))}
       {streaming && parts.plain ? (
         <div className="streaming-markdown-text">{parts.tail}</div>
-      ) : streaming ? (
-        // 还在输出的部分每来一个字都会变，不认词，免得反复请求。
-        <MarkdownBlock text={parts.tail} />
+      ) : Tail === MarkdownBlock && parts.paragraphStart !== undefined ? (
+        <>
+          {parts.paragraphStart > parts.offset && (
+            <>
+              <MarkdownBlock text={text.slice(parts.offset, parts.paragraphStart)} />
+              {'\n'}
+            </>
+          )}
+          <p>{text.slice(parts.paragraphStart)}</p>
+        </>
       ) : (
-        <Block text={parts.tail} />
+        <Tail text={parts.tail} />
       )}
     </>
   );

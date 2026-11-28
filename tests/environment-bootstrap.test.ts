@@ -13,6 +13,8 @@ assert.ok(start >= 0 && end > start);
 const { code } = transformSync(
   `const create = (store, detectEnvironment, send) => {
   const developmentRoot = 'fixture';
+  let piUpdateActivity;
+  const publishPiUpdate = () => {};
   const agentDirectory = (settings) => settings.agentDir;
   ${source.slice(start, end)}
   return { refresh: refreshEnvironment, snapshot: () => environmentSnapshot };

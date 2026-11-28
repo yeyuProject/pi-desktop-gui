@@ -8,6 +8,7 @@ import {
   conversationTurns,
   hideRecoveredErrors,
   turnTitle,
+  turnViewport,
 } from '../src/lib/conversation-layout';
 import { SessionSearch } from '../src/lib/session-search';
 import { parseArgumentHint, parsePromptArguments, formatPromptArguments } from '../src/lib/prompt-arguments';
@@ -30,6 +31,36 @@ import {
   truncateQuote,
   type DraftQuote,
 } from '../shared/message-content';
+
+test('turn viewport includes replies whose starting prompt has scrolled past the viewport', () => {
+  const starts = [
+    { turn: 3, top: -250 },
+    { turn: 4, top: 80 },
+    { turn: 5, top: 280 },
+    { turn: 6, top: 340 },
+  ];
+  assert.deepEqual(turnViewport(starts, 0, 340), { active: 4, visible: [3, 5] });
+  assert.deepEqual(turnViewport(starts, 0, 360, undefined, 6), { active: 6, visible: [3, 6] });
+  assert.deepEqual(turnViewport(starts.slice(1), 0, 360, 3), { active: 4, visible: [3, 6] });
+});
+
+test('turn viewport handles all prompts fitting and an empty conversation', () => {
+  assert.deepEqual(
+    turnViewport(
+      [
+        { turn: 1, top: 20 },
+        { turn: 2, top: 240 },
+      ],
+      0,
+      440,
+    ),
+    {
+      active: 1,
+      visible: [1, 2],
+    },
+  );
+  assert.deepEqual(turnViewport([], 0, 440), { active: undefined, visible: undefined });
+});
 
 test('conversation quotes round-trip their exact source, text order and native skill invocation', () => {
   const first: DraftQuote = {

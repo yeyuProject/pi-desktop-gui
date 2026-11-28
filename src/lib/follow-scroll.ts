@@ -39,3 +39,10 @@ export function isFollowing(
     (released ? RELEASED_SLACK : FOLLOW_SLACK)
   );
 }
+
+export function isReplyStartAboveViewport(
+  viewport: Pick<DOMRect, 'top'>,
+  reply: Pick<DOMRect, 'top' | 'bottom'>,
+) {
+  return reply.top < viewport.top - 8 && reply.bottom > viewport.top;
+}

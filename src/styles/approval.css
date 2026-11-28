@@ -10,7 +10,7 @@
   margin: 4px 0 18px;
   padding: 12px 14px;
   border: 1px solid color-mix(in srgb, var(--signal) 35%, var(--line));
-  border-radius: 12px;
+  border-radius: var(--radius-md);
   background: color-mix(in srgb, var(--signal-soft) 55%, var(--surface));
   display: grid;
   gap: 8px;
@@ -94,7 +94,7 @@
   margin: 0 2px;
   border: 1px solid var(--line-strong);
   border-bottom-width: 2px;
-  border-radius: 5px;
+  border-radius: var(--radius-xs);
   background: var(--surface);
   font-family: var(--font-mono);
   font-size: 0.86em;
@@ -176,7 +176,7 @@
   background: transparent;
   gap: 5px;
   padding: 5px 8px;
-  border-radius: 7px;
+  border-radius: var(--radius-md);
   font-size: calc(12px * var(--font-scale));
   color: var(--muted);
 }
@@ -198,7 +198,7 @@
   width: 300px;
   background: var(--surface);
   border: 1px solid var(--line);
-  border-radius: 12px;
+  border-radius: var(--radius-popover);
   box-shadow: var(--shadow);
   padding: 5px;
   animation: rise var(--motion-fast) var(--ease-out);
@@ -206,6 +206,7 @@
 .approval-menu button {
   width: 100%;
   border: 0;
+  border-radius: calc(var(--radius-popover) - 4px);
   background: transparent;
   justify-content: flex-start;
   align-items: flex-start;
@@ -238,7 +239,7 @@
   margin: 10px 0 20px 10px;
   border: 1px solid color-mix(in srgb, var(--signal) 45%, var(--line));
   border-left: 3px solid var(--signal);
-  border-radius: 10px;
+  border-radius: var(--radius-md);
   background: var(--surface);
   box-shadow: var(--shadow-soft);
   overflow: hidden;

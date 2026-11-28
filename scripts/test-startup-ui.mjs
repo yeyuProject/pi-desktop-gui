@@ -7,11 +7,13 @@ import { createLocalProvider, prepareRealPiFixture } from '../tests/support/loca
 
 const provider = await createLocalProvider();
 const fixture = await prepareRealPiFixture(provider.baseUrl, 'startup-comparison');
-const roots = [process.env.PI_STARTUP_BASELINE, path.resolve('.')].filter(Boolean);
+const roots = [process.env.PI_STARTUP_BASELINE, process.env.PI_STARTUP_CANDIDATE || path.resolve('.')].filter(
+  Boolean,
+);
 const samples = [];
 try {
-  for (let round = 0; round < 6; round++)
-    for (const root of roots) {
+  for (let round = 0; round < 21; round++)
+    for (const root of round % 2 ? roots.toReversed() : roots) {
       const app = await electron.launch({
         args: [root],
         env: desktopTestEnv({ PI_OFFLINE: '1', PI_DESKTOP_DATA_DIR: fixture.dataDir }),
@@ -26,6 +28,7 @@ try {
           const handler = ipcMain._invokeHandlers.get('desktop:invoke');
           ipcMain.removeHandler('desktop:invoke');
           ipcMain.handle('desktop:invoke', (event, method, args) => {
+            if (method === 'bootstrap') globalThis.startupBootstrapMs = performance.now();
             if (method === 'rendererReady') globalThis.startupRendererReadyMs = performance.now();
             return handler(event, method, args);
           });
@@ -39,7 +42,14 @@ try {
           await new Promise((resolve) => setTimeout(resolve, 10));
         }
         assert.ok(milliseconds, 'rendererReady must be observed rather than inferred from the input');
-        samples.push({ root, round, milliseconds });
+        const bootstrapMs = await app.evaluate(() => globalThis.startupBootstrapMs);
+        samples.push({
+          root,
+          round,
+          milliseconds,
+          bootstrapMs,
+          bootstrapToReadyMs: milliseconds - bootstrapMs,
+        });
       } finally {
         await app.close();
       }
@@ -52,8 +62,8 @@ try {
     return {
       root,
       samples: times.length,
-      medianMs: times[Math.floor(times.length / 2)],
-      p95Ms: times.at(-1),
+      medianMs: (times[Math.floor((times.length - 1) / 2)] + times[Math.floor(times.length / 2)]) / 2,
+      p95Ms: times[Math.ceil(times.length * 0.95) - 1],
     };
   });
   const result = {

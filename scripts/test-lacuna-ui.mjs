@@ -108,6 +108,33 @@ const graph = {
 // 模拟主进程的认词：最长的叫法优先，跳过反引号里的代码（真实规则在 lacuna 里，这里只要给出确定的结果）。
 const install = ({ messages, nodes, graph }) => {
   const original = window.desktop.invoke;
+  const query = new URLSearchParams(location.search);
+  const streaming = query.has('stream');
+  if (streaming) {
+    messages.at(-1).content = '**前一段**\n\n接下来解释 VAE。';
+    const listeners = new Set();
+    window.desktop.onEvent = (listener) => {
+      listeners.add(listener);
+      return () => listeners.delete(listener);
+    };
+    window.finishLacunaReply = () => {
+      for (const listener of listeners) {
+        listener({
+          type: 'runtimePatch',
+          patch: {
+            sessionId: 's1',
+            status: 'completed',
+            messagesFrom: messages.length,
+            messages: [],
+            messageCount: messages.length,
+            toolsFrom: 0,
+            tools: [],
+            toolCount: 0,
+          },
+        });
+      }
+    };
+  }
   // 和真实的 lacuna 一样，选题不参与认词。
   const names = Object.values(nodes)
     .filter((node) => node.type !== 'topic')
@@ -155,9 +182,9 @@ const install = ({ messages, nodes, graph }) => {
     if (method === 'send') window.lacunaSent = [...(window.lacunaSent ?? []), args[1]];
     if (method === 'bootstrap') {
       const value = await original(method, ...args);
-      const query = new URLSearchParams(location.search);
       value.runtime.tools = [];
       value.runtime.messages = messages;
+      if (streaming) value.runtime.status = 'running';
       value.state.settings.uiStyle = query.get('style');
       value.state.settings.theme = query.get('theme');
       value.state.settings.lacunaTerms = query.get('terms') !== 'off';
@@ -346,6 +373,15 @@ try {
     await toggle.click();
   }
 
+  // 纯文字段落流式输出时走快速渲染，结束后其中的术语仍应标出。
+  await page.goto(`${server.url}?style=classic&theme=light&stream`);
+  const streamed = page.locator('.message.assistant').last().locator('.message-content');
+  await expect(streamed.locator('strong')).toHaveText('前一段');
+  await expect(streamed.locator('p').last()).toHaveText('接下来解释 VAE。');
+  await expect(streamed.locator('.lacuna-term')).toHaveCount(0);
+  await page.evaluate(() => window.finishLacunaReply());
+  await expect(streamed.locator('.lacuna-term')).toHaveText(['VAE']);
+
   // 关掉设置后不认词，选区菜单里也没有“这是什么意思”。
   await page.goto(`${server.url}?style=classic&theme=light&terms=off`);
   const reply = page.locator('.message.assistant').last();
@@ -360,7 +396,7 @@ try {
 
   assert.deepEqual(errors, []);
   console.log(
-    'PASS lacuna terms: underline, hover, nested cards, ask from card and conversation, knowledge graph, session switch, drawer, setting off',
+    'PASS lacuna terms: underline, hover, nested cards, ask from card and conversation, knowledge graph, session switch, drawer, streaming, setting off',
   );
 } finally {
   await closeApp(app);

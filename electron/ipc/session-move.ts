@@ -3,6 +3,7 @@ import path from 'node:path';
 import { randomUUID } from 'node:crypto';
 import { shell } from 'electron';
 import { describeOperationError as readableError } from '../../shared/errors';
+import type { SessionMoveOptions } from '../../shared/types';
 import type { HandlerContext } from './handler-context';
 
 type Context = Pick<HandlerContext, 'store' | 'service' | 'workspace' | 'send' | 'showAppDialog' | 'text'> & {
@@ -124,14 +125,32 @@ export function createSessionMoveHandlers(context: Context) {
       previews.set(token, { id, target, signature: info.signature });
       return { token, detail: info.detail };
     },
-    moveSession: async (id: string, target: string | null, token?: string) => {
+    /**
+     * 1. 检查目标及起始分区，按来源使用菜单令牌或弹出拖动确认。
+     * 2. 复制历史并复查，再释放原 Pi 连接。
+     * 3. 一次提交新位置和分区变更，成功后清理旧文件和检查点。
+     */
+    moveSession: async (id: string, target: string | null, token?: string, options?: SessionMoveOptions) => {
+      if (options !== undefined) {
+        if (
+          !options ||
+          typeof options !== 'object' ||
+          Array.isArray(options) ||
+          (options.requireConfirmation !== undefined && typeof options.requireConfirmation !== 'boolean')
+        )
+          throw new Error('移动选项无效，请重新拖动');
+        if (options.sectionId !== undefined) context.text(options.sectionId, 100);
+      }
       if (moving.has(id)) throw new Error('这个会话正在移动，请稍后重试');
       moving.add(id);
       let copy: string | undefined;
       let committed = false;
       let unlock: (() => void) | undefined;
       try {
+        // 1. 分区可能在拖动时已变更，旧起点不能授权清除归属。
         let info = await inspect(id, target);
+        if (options && info.session.sectionId !== options.sectionId)
+          throw new Error('会话的分区已变化，请重新确认移动');
         if (token) {
           const preview = previews.get(token);
           previews.delete(token);
@@ -142,7 +161,12 @@ export function createSessionMoveHandlers(context: Context) {
             preview.signature !== info.signature
           )
             throw new Error('会话状态已变化，请重新选择目标并确认移动');
-        } else if (info.session.file) {
+        }
+        if (
+          (!token && info.session.file) ||
+          options?.requireConfirmation ||
+          options?.sectionId !== undefined
+        ) {
           const result = await showAppDialog({
             type: 'warning',
             message: `把「${info.session.title}」移到「${info.project?.name ?? '对话'}」？`,
@@ -153,9 +177,14 @@ export function createSessionMoveHandlers(context: Context) {
           });
           if (result.response !== 1) return false;
           const fresh = await inspect(id, target);
-          if (fresh.signature !== info.signature) throw new Error('会话状态已变化，请重新确认移动');
+          if (
+            fresh.signature !== info.signature ||
+            (options && fresh.session.sectionId !== options.sectionId)
+          )
+            throw new Error('会话状态已变化，请重新确认移动');
           info = fresh;
         }
+        // 2. 先生成新位置的历史，原文件保留到索引确认落盘。
         if (!info.project) await fs.mkdir(info.cwd, { recursive: true });
         const oldFile = info.session.file;
         if (oldFile) {
@@ -165,18 +194,22 @@ export function createSessionMoveHandlers(context: Context) {
           copy = result.file;
           await fs.access(result.file);
         }
-        // Recheck after the bridge read; no task may be silently stopped by a move.
         const fresh = await inspect(id, target);
-        if (fresh.signature !== info.signature) throw new Error('会话状态已变化，请重新确认移动');
+        if (fresh.signature !== info.signature || (options && fresh.session.sectionId !== options.sectionId))
+          throw new Error('会话状态已变化，请重新确认移动');
         unlock = service.lockSessionMove(id);
         await service.release(id);
-        const session = store.session(id);
-        await store.commitSessionMove(id, {
-          projectId: target ?? undefined,
-          cwd: target === null ? info.cwd : undefined,
-          file: copy ?? session.file,
-          attachments: info.attachments,
-        });
+        // 3. Store 在开始写入时再核对归属，删除分区等已排队的改动也会生效。
+        await store.commitSessionMove(
+          id,
+          {
+            projectId: target ?? undefined,
+            cwd: target === null ? info.cwd : undefined,
+            file: copy ?? fresh.session.file,
+            attachments: info.attachments,
+          },
+          options,
+        );
         committed = true;
         const warnings: string[] = [];
         try {

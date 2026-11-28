@@ -2,6 +2,7 @@ import { PiFeatures, QuickSwitch } from '../lib/lazy-dialogs';
 import { Modal } from './Modal';
 import { ExtensionPrompt } from './ExtensionPrompt';
 import { ShortcutsHelp } from './ShortcutsHelp';
+import { readableError } from '../lib/format';
 const api = window.desktop;
 import type { Workbench } from '../hooks/useWorkbench';
 import type { AppState } from '../../shared/types';
@@ -27,6 +28,7 @@ export function WorkbenchDialogs(
     | 'prompts'
     | 'onAuthenticated'
     | 'attempt'
+    | 'setNotice'
     | 'selectSession'
   > & { state: AppState; settings: ReactNode },
 ) {
@@ -70,12 +72,40 @@ export function WorkbenchDialogs(
       {shortcutsOpen && <ShortcutsHelp close={() => setShortcutsOpen(false)} />}
       {rename && (
         <Modal
-          title={rename.kind === 'project' ? '重命名项目' : '重命名会话'}
-          close={() => setRename(undefined)}
+          title={
+            {
+              project: '重命名项目',
+              session: '重命名会话',
+              section: '重命名分区',
+              'new-section': '新建分区',
+            }[rename.kind]
+          }
+          close={() => {
+            if (!rename.saving) setRename(undefined);
+          }}
         >
           <form
-            onSubmit={(e) => {
+            onSubmit={async (e) => {
               e.preventDefault();
+              if (rename.saving) return;
+              if (rename.kind === 'new-section' || rename.kind === 'section') {
+                setRename({ ...rename, saving: true, error: undefined });
+                try {
+                  if (rename.kind === 'section') await api.invoke('renameSection', rename.id, rename.name);
+                  if (rename.kind === 'new-section') {
+                    const section = await api.invoke('createSection', rename.name, rename.sessionId);
+                    if (
+                      state.settings.sidebarView?.pinnedGroup &&
+                      state.sessions.find((session) => session.id === rename.sessionId)?.pinned
+                    )
+                      props.setNotice(`已放进分区“${section.name}”，置顶期间显示在置顶组`);
+                  }
+                  setRename(undefined);
+                } catch (error) {
+                  setRename({ ...rename, saving: false, error: readableError(error) });
+                }
+                return;
+              }
               void attempt(async () => {
                 await api.invoke(
                   rename.kind === 'project' ? 'renameProject' : 'renameSession',
@@ -90,17 +120,19 @@ export function WorkbenchDialogs(
               <input
                 className="input"
                 aria-label="新名称"
-                maxLength={120}
+                maxLength={rename.kind === 'section' || rename.kind === 'new-section' ? undefined : 120}
                 value={rename.name}
-                onChange={(e) => setRename({ ...rename, name: e.target.value })}
+                disabled={rename.saving}
+                onChange={(e) => setRename({ ...rename, name: e.target.value, error: undefined })}
               />
+              {rename.error && <p role="alert">{rename.error}</p>}
             </div>
             <footer>
-              <button type="button" onClick={() => setRename(undefined)}>
+              <button type="button" disabled={rename.saving} onClick={() => setRename(undefined)}>
                 取消
               </button>
-              <button className="primary" type="submit">
-                保存
+              <button className="primary" type="submit" disabled={rename.saving}>
+                {rename.kind === 'new-section' ? '创建' : '保存'}
               </button>
             </footer>
           </form>

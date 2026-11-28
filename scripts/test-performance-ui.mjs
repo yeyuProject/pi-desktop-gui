@@ -6,6 +6,12 @@ import { performance } from 'node:perf_hooks';
 import { emptyRuntime } from '../shared/types.ts';
 import { Workspace } from '../electron/workspace.ts';
 import { createLocalProvider, prepareRealPiFixture } from '../tests/support/local-provider.ts';
+
+if (process.argv.includes('--glass')) {
+  await benchmarkGlass();
+  process.exit(process.exitCode ?? 0);
+}
+
 const provider = await createLocalProvider();
 const fixture = await prepareRealPiFixture(provider.baseUrl, 'performance-regression-ui');
 await new Workspace(fixture.dataDir).captureCheckpoint(
@@ -33,7 +39,13 @@ try {
   const launched = await launchApp({
     dataDir: fixture.dataDir,
     pageTimeout: 60000,
-    ...(process.env.PI_PERF_APP_ROOT ? { args: [process.env.PI_PERF_APP_ROOT] } : {}),
+    // Measure foreground interaction even when another desktop window covers the test window.
+    args: [
+      '--disable-background-timer-throttling',
+      '--disable-renderer-backgrounding',
+      '--disable-backgrounding-occluded-windows',
+      process.env.PI_PERF_APP_ROOT || process.cwd(),
+    ],
   });
   app = launched.app;
   const page = launched.page;
@@ -41,11 +53,12 @@ try {
   // Count actual component executions via React's DevTools commit hook, excluding memo bailouts.
   // Match the conversation's props because production function names are minified.
   await page.addInitScript(() => {
-    // bootstrap starts a fresh asynchronous environment probe on every document load.
+    // The first ready frame starts a fresh environment probe on every document load.
     // Its event legitimately re-renders App/Composer and must finish before timer measurements.
     globalThis.auditEnvironmentReady = false;
     window.desktop.onEvent((event) => {
       if (event.type === 'environment') globalThis.auditEnvironmentReady = true;
+      if (event.type === 'runtimePatch') globalThis.auditReceivedPatchAt = performance.now();
     });
     globalThis.auditConversationRenders = 0;
     globalThis.auditComposerRenders = 0;
@@ -88,7 +101,12 @@ try {
           if (fiber.memoizedProps?.messageContext && fiber.memoizedProps?.messages && worked)
             globalThis.auditConversationRenders++;
           if (fiber.memoizedProps?.m?.role === 'user' && worked) globalThis.auditUserRenders++;
-          if (fiber.memoizedProps?.updateBadge && fiber.memoizedProps?.activities && worked)
+          // UI17 起 Sidebar 接收 sidebarActivities；对比旧版（PI_PERF_APP_ROOT）时仍是 activities。
+          if (
+            fiber.memoizedProps?.updateBadge &&
+            (fiber.memoizedProps.sidebarActivities || fiber.memoizedProps.activities) &&
+            worked
+          )
             globalThis.auditSidebarRenders++;
           if (
             worked &&
@@ -119,6 +137,10 @@ try {
     globalThis.auditWorkspaceCalls = [];
     ipcMain.removeHandler('desktop:invoke');
     ipcMain.handle('desktop:invoke', async (event, method, args) => {
+      if (method === 'saveDraft' && globalThis.auditDraftSaves) {
+        globalThis.auditDraftSaves.push(performance.now());
+        globalThis.auditSavedDraft = args[1];
+      }
       if (method === 'readHistory' && globalThis.auditRuntime) return globalThis.auditRuntime.messages;
       if (method === 'getToolOutput' && globalThis.auditRuntime) {
         const message = globalThis.auditRuntime.messages.findLast(
@@ -207,6 +229,7 @@ try {
     });
     const durations = [];
     const scripting = [];
+    const commits = [];
     const cdp = await page.context().newCDPSession(page);
     await cdp.send('Performance.enable');
     const scriptDuration = async () =>
@@ -225,7 +248,8 @@ try {
             if (!document.querySelector('.thread')?.textContent?.includes(marker)) return;
             observer.disconnect();
             clearTimeout(timer);
-            requestAnimationFrame(() => resolve(performance.now() - start));
+            const commit = performance.now() - globalThis.auditReceivedPatchAt;
+            requestAnimationFrame(() => resolve({ frame: performance.now() - start, commit }));
           });
           observer.observe(document.querySelector('.thread'), {
             subtree: true,
@@ -254,7 +278,8 @@ try {
       const elapsed = await page.evaluate(() => globalThis.auditMeasurement);
       const scriptingMs = ((await scriptDuration()) - scriptingBefore) * 1000;
       if (i >= 5) {
-        durations.push(elapsed);
+        durations.push(elapsed.frame);
+        commits.push(elapsed.commit);
         scripting.push(scriptingMs);
       }
     }
@@ -279,6 +304,7 @@ try {
       ...spec,
       ...summary(durations),
       rendererScripting: summary(scripting),
+      receivedPatchToDom: summary(commits),
       rendererHeapAfterGcMiB: heap.usedSize / 1024 / 1024,
       dom,
       observation,
@@ -305,6 +331,65 @@ try {
     assert.equal(observation.renderedMessages, spec.patchLines ? 40 : spec.expand ? spec.messages : 80);
     const input = page.getByRole('textbox', { name: '任务输入' });
     await input.fill('');
+    if (spec.brackets) {
+      await input.focus();
+      await input.evaluate((element) => {
+        globalThis.auditPauseCounters = true;
+        globalThis.auditKeys = [];
+        element.addEventListener('keydown', () => {
+          const start = performance.now();
+          requestAnimationFrame(() => globalThis.auditKeys.push(performance.now() - start));
+        });
+      });
+      await app.evaluate(({ BrowserWindow }) => {
+        globalThis.auditDraftSaves = [];
+        globalThis.auditSavedDraft = '';
+        const r = globalThis.auditRuntime;
+        globalThis.auditTypingPatches = 0;
+        globalThis.auditTypingTimer = setInterval(() => {
+          r.messages.at(-1).content += ' 字';
+          globalThis.auditTypingPatches++;
+          BrowserWindow.getAllWindows()[0].webContents.send('desktop:event', {
+            type: 'runtimePatch',
+            patch: {
+              sessionId: r.sessionId,
+              messagesFrom: r.messages.length - 1,
+              messages: [r.messages.at(-1)],
+              messageCount: r.messages.length,
+              toolsFrom: 0,
+              tools: [],
+              toolCount: 0,
+            },
+          });
+        }, 40);
+      });
+      try {
+        await input.pressSequentially('x'.repeat(50), { delay: 20 });
+        await expect(input).toHaveValue('x'.repeat(50));
+        await page.waitForFunction(() => globalThis.auditKeys.length === 50);
+        await expect.poll(() => app.evaluate(() => globalThis.auditSavedDraft)).toBe('x'.repeat(50));
+        const { saves, patches } = await app.evaluate(() => ({
+          saves: globalThis.auditDraftSaves,
+          patches: globalThis.auditTypingPatches,
+        }));
+        assert.ok(patches > 0);
+        const peakSaves = Math.max(
+          ...saves.map((at) => saves.filter((other) => other >= at && other < at + 1000).length),
+        );
+        assert.ok(peakSaves <= 5);
+        result.streamingTyping = {
+          ...summary(await page.evaluate(() => globalThis.auditKeys)),
+          peakSaves,
+          patches,
+        };
+      } finally {
+        await app.evaluate(() => clearInterval(globalThis.auditTypingTimer));
+        await page.evaluate(() => {
+          globalThis.auditPauseCounters = false;
+        });
+      }
+      await input.fill('');
+    }
     if (spec.messages === 500 && spec.activeChars === 100 && !spec.expand) {
       const changeRuntime = async (fields) => {
         await app.evaluate(({ BrowserWindow }, fields) => {
@@ -501,6 +586,7 @@ try {
       );
       assert.ok((await outline.locator('button').count()) <= 60);
       assert.ok((await outline.locator('.turn-outline-row').count()) <= 60);
+      assert.ok((await outline.locator('.turn-tick').count()) <= 80);
       await modified.click();
       console.log('PASS a 5,000-message modified-turn filter keeps keyboard navigation and DOM bounded');
     }
@@ -516,6 +602,7 @@ try {
       await expect(page.locator('.message').filter({ hasText: 'Check module 0.' })).toBeVisible();
       assert.ok((await outline.locator('button').count()) <= 60);
       assert.ok((await outline.locator('.turn-outline-row').count()) <= 60);
+      assert.ok((await outline.locator('.turn-tick').count()) <= 80);
       await expect(page.locator('.message')).toHaveCount(80);
       await page.getByRole('button', { name: '加载更新的 80 条消息', exact: true }).click();
       await expect(page.locator('[data-message-index="80"]')).toBeVisible();
@@ -695,4 +782,331 @@ try {
 } finally {
   await closeApp(app);
   await provider.close();
+}
+
+/**
+ * 1. 在 Windows 独立启动实色、玻璃以及禁用 GPU 合成后的两组窗口。
+ * 2. 用同一段 5000 条消息测滚动、流式更新与空闲，记录 Electron CPU 和实际帧间隔。
+ * 3. 保存原始结果和预算判定，硬件玻璃无法生效时将相应预算标为未测。
+ */
+async function benchmarkGlass() {
+  const { prepareGlassFixture, loadGlassFixture } = await import('./test-glass-ui.mjs');
+  const { default: path } = await import('node:path');
+  const { default: os } = await import('node:os');
+  const output = process.env.PI_PERF_RESULT || 'test-results/glass-performance-ui.json';
+  const report = {
+    platform: process.platform,
+    os: os.release(),
+    cpu: os.cpus()[0].model,
+    viewport: [1280, 820],
+    messages: 5000,
+    cases: [],
+  };
+  // 1. 保持相同尺寸和独立数据目录。禁用 GPU 的比较两边使用相同启动参数。
+  try {
+    assert.equal(process.platform, 'win32', 'UI20 performance acceptance requires Windows Electron');
+    for (const disableGpu of [false, true]) {
+      for (const material of ['solid', 'glass']) {
+        const sample = { material, disableGpu };
+        report.cases.push(sample);
+        const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'pi-glass-perf-'));
+        try {
+          await collectGlassPerformance(sample, dir, prepareGlassFixture, loadGlassFixture);
+        } finally {
+          await fs.rm(dir, { recursive: true, force: true, maxRetries: 4 });
+        }
+      }
+    }
+    // 3. 一个模式无法生效时，保留其余实测，并给缺项单独标明原因。
+    const [solid, glass, gpuOffSolid, gpuOffGlass] = report.cases;
+    const activeCpu = (sample) => {
+      const { scroll, stream } = sample;
+      return (scroll.cpu * scroll.cpuMs + stream.cpu * stream.cpuMs) / (scroll.cpuMs + stream.cpuMs);
+    };
+    for (const sample of report.cases) if (sample.stream) sample.activeCpu = activeCpu(sample);
+    const budgets = [];
+    for (const [reference, candidate] of [
+      [solid, glass],
+      [gpuOffSolid, gpuOffGlass],
+    ]) {
+      if (reference.blocked || candidate.blocked) continue;
+      assert.ok(reference.activeCpu > 0, 'Cannot compute a CPU percentage increase from a zero baseline');
+      const actual = ((candidate.activeCpu - reference.activeCpu) / reference.activeCpu) * 100;
+      budgets.push({
+        metric: reference.disableGpu ? 'GPU-disabled active CPU difference (%)' : 'Active CPU increase (%)',
+        actual: reference.disableGpu ? Math.abs(actual) : actual,
+        limit: reference.disableGpu ? 5 : 15,
+      });
+      if (reference.disableGpu) continue;
+      budgets.push(
+        {
+          metric: 'Active p95 frame interval increase (ms)',
+          actual: candidate.p95Ms - reference.p95Ms,
+          limit: 2,
+        },
+        {
+          metric: 'Idle CPU difference (percentage points)',
+          actual: Math.abs(candidate.idle.cpu - reference.idle.cpu),
+          limit: 1,
+        },
+      );
+    }
+    report.budgets = budgets.map((budget) => ({ ...budget, passed: budget.actual <= budget.limit }));
+    if (report.cases.some(({ blocked }) => blocked) || report.budgets.some(({ passed }) => !passed))
+      process.exitCode = 1;
+  } catch (error) {
+    report.error = error.message;
+    throw error;
+  } finally {
+    await fs.mkdir(path.dirname(output), { recursive: true });
+    await fs.writeFile(output, JSON.stringify(report, null, 2) + '\n');
+    const cases = report.cases.map((sample) => ({
+      material: sample.material,
+      disableGpu: sample.disableGpu,
+      effectiveMaterial: sample.presentation?.effectiveMaterial,
+      blocked: sample.blocked,
+      scrollCpu: sample.scroll?.cpu,
+      streamCpu: sample.stream?.cpu,
+      activeCpu: sample.activeCpu,
+      idleCpu: sample.idle?.cpu,
+      p95Ms: sample.p95Ms,
+    }));
+    await new Promise((resolve) =>
+      process.stdout.write(
+        JSON.stringify({ cases, budgets: report.budgets, error: report.error, output }, null, 2) + '\n',
+        resolve,
+      ),
+    );
+  }
+}
+
+async function collectGlassPerformance(sample, dir, prepareFixture, loadFixture) {
+  const runtime = await prepareFixture(dir, sample.material);
+  runtime.tools = [];
+  runtime.messages = Array.from({ length: 5000 }, (_, index) => ({
+    role: index % 2 ? 'assistant' : 'user',
+    content:
+      index % 2
+        ? `Glass load ${index + 1}.\n\n- Verify input\n- Report results\n\n\`\`\`ts\nconst result = ${index};\n\`\`\``
+        : `Review item ${index + 1} and report the expected output.`,
+    timestamp: 1700000000000 + index,
+  }));
+  const { app, page, errors } = await launchApp({
+    dataDir: dir,
+    args: [
+      '--disable-background-timer-throttling',
+      '--disable-renderer-backgrounding',
+      '--disable-backgrounding-occluded-windows',
+      ...(sample.disableGpu ? ['--disable-gpu-compositing'] : []),
+      process.cwd(),
+    ],
+  });
+  try {
+    await loadFixture({ app, page }, runtime);
+    await expect(page.locator('.message.assistant').last()).toContainText('Glass load 5000.');
+    await page.evaluate(() => document.fonts.ready);
+    await page.waitForFunction(() => !document.documentElement.hasAttribute('data-resizing'));
+    sample.environment = await app.evaluate(async ({ app, BrowserWindow, powerMonitor }) => {
+      const window = BrowserWindow.getAllWindows()[0];
+      const gpu = await app.getGPUInfo('complete');
+      return {
+        electron: process.versions.electron,
+        gpuCompositing: app.getGPUFeatureStatus().gpu_compositing,
+        gpuDevices: gpu.gpuDevice,
+        gpuRenderer: gpu.auxAttributes?.glRenderer,
+        onBattery: powerMonitor.isOnBatteryPower(),
+        viewport: window.getContentSize(),
+      };
+    });
+    if (
+      !sample.disableGpu &&
+      sample.material === 'glass' &&
+      sample.environment.gpuCompositing === 'enabled' &&
+      !sample.environment.onBattery &&
+      !(await page.evaluate(() => matchMedia('(prefers-reduced-transparency: reduce)').matches))
+    )
+      await expect(page.locator('html')).toHaveAttribute('data-material', 'glass');
+    sample.presentation = await page.evaluate(() => ({
+      effectiveMaterial: document.documentElement.dataset.material ?? 'solid',
+      reducedTransparency: matchMedia('(prefers-reduced-transparency: reduce)').matches,
+      sidebarBlur: getComputedStyle(document.querySelector('.sidebar'), '::before').backdropFilter,
+    }));
+    if (!sample.disableGpu && sample.environment.gpuCompositing !== 'enabled') {
+      sample.blocked = `GPU compositing is ${sample.environment.gpuCompositing}`;
+      return;
+    }
+    if (
+      !sample.disableGpu &&
+      sample.material === 'glass' &&
+      (sample.environment.onBattery || sample.presentation.reducedTransparency)
+    ) {
+      sample.blocked = 'The host power or transparency preference prevents normal glass rendering';
+      return;
+    }
+    const glass = sample.material === 'glass' && !sample.disableGpu;
+    if (sample.disableGpu) assert.notEqual(sample.environment.gpuCompositing, 'enabled');
+    assert.equal(sample.presentation.effectiveMaterial, glass ? 'glass' : 'solid');
+    assert.equal(sample.presentation.sidebarBlur !== 'none', glass);
+    assert.deepEqual(sample.environment.viewport, [1280, 820]);
+
+    // 2. 在原生渲染窗口运行真实滚动与 IPC 流式更新。空闲阶段不挂 rAF。
+    const thread = page.locator('.thread');
+    const scroll = await measureGlassCpu(app, () =>
+      thread.evaluate(
+        (element) =>
+          new Promise((resolve) => {
+            const frames = [];
+            const distance = element.scrollHeight - element.clientHeight;
+            requestAnimationFrame((start) => {
+              let previous = start;
+              let minimum = distance;
+              const frame = (now) => {
+                frames.push(now - previous);
+                previous = now;
+                const elapsed = Math.min(now - start, 10_000);
+                element.scrollTop = distance * Math.abs(elapsed / 5_000 - 1);
+                minimum = Math.min(minimum, element.scrollTop);
+                if (elapsed === 10_000) resolve({ frames, traveled: distance - minimum });
+                if (elapsed < 10_000) requestAnimationFrame(frame);
+              };
+              requestAnimationFrame(frame);
+            });
+          }),
+      ),
+    );
+    assert.ok(scroll.work.traveled > 0, 'The long transcript must actually scroll');
+    const startStream = await app.evaluate(({ BrowserWindow }) => {
+      const runtime = globalThis.glassFixtureRuntime;
+      runtime.status = 'running';
+      runtime.messages.at(-1).content += '\n\nGlass stream begins';
+      BrowserWindow.getAllWindows()[0].webContents.send('desktop:event', { type: 'runtime', runtime });
+      return runtime.messages.length;
+    });
+    assert.equal(startStream, 5000);
+    const stop = page.getByRole('button', { name: '停止任务', exact: true });
+    await expect(stop).toBeVisible();
+    await expect(page.locator('.message.assistant').last()).toContainText('Glass stream begins');
+    const stream = await measureGlassCpu(app, async () => {
+      const collect = page.evaluate(
+        () =>
+          new Promise((resolve) => {
+            const frames = [];
+            requestAnimationFrame((start) => {
+              let previous = start;
+              const frame = (now) => {
+                frames.push(now - previous);
+                previous = now;
+                if (now - start >= 30_000) resolve(frames);
+                if (now - start < 30_000) requestAnimationFrame(frame);
+              };
+              requestAnimationFrame(frame);
+            });
+          }),
+      );
+      await app.evaluate(async ({ BrowserWindow }) => {
+        const { webContents } = BrowserWindow.getAllWindows()[0];
+        const runtime = globalThis.glassFixtureRuntime;
+        const message = runtime.messages.at(-1);
+        const start = performance.now();
+        for (let i = 1; i <= 300; i++) {
+          await new Promise((resolve) =>
+            setTimeout(resolve, Math.max(0, start + i * 100 - performance.now())),
+          );
+          message.content += `\n\nGlass stream update ${i}.`;
+          webContents.send('desktop:event', {
+            type: 'runtimePatch',
+            patch: {
+              sessionId: runtime.sessionId,
+              messagesFrom: runtime.messages.length - 1,
+              messages: [message],
+              messageCount: runtime.messages.length,
+              toolsFrom: 0,
+              tools: [],
+              toolCount: 0,
+            },
+          });
+        }
+      });
+      const frames = await collect;
+      await expect(page.locator('.message.assistant').last()).toContainText('Glass stream update 300.');
+      return frames;
+    });
+    await app.evaluate(({ BrowserWindow }) => {
+      const runtime = globalThis.glassFixtureRuntime;
+      runtime.status = 'completed';
+      BrowserWindow.getAllWindows()[0].webContents.send('desktop:event', { type: 'runtime', runtime });
+    });
+    await expect(stop).toHaveCount(0);
+    await page.evaluate(
+      () => new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve))),
+    );
+    const idle = await measureGlassCpu(app, () => new Promise((resolve) => setTimeout(resolve, 30_000)));
+    assert.deepEqual(errors, []);
+    const frameP95 = (frames) => {
+      assert.ok(frames.length > 0, 'A foreground Electron window must produce frame samples');
+      return frames.toSorted((a, b) => a - b)[Math.ceil(frames.length * 0.95) - 1];
+    };
+    sample.scroll = {
+      ...scroll.metrics,
+      traveled: scroll.work.traveled,
+      frames: scroll.work.frames.length,
+      p95Ms: frameP95(scroll.work.frames),
+    };
+    sample.stream = { ...stream.metrics, frames: stream.work.length, p95Ms: frameP95(stream.work) };
+    sample.idle = idle.metrics;
+    sample.p95Ms = frameP95([...scroll.work.frames, ...stream.work]);
+  } finally {
+    await closeApp(app);
+  }
+}
+
+async function measureGlassCpu(app, work) {
+  await app.evaluate(({ app, BrowserWindow }) => {
+    const rendererPid = BrowserWindow.getAllWindows()[0].webContents.getOSProcessId();
+    const byType = { Browser: 0, Tab: 0, GPU: 0 };
+    let last = performance.now();
+    const select = () =>
+      app
+        .getAppMetrics()
+        .filter((entry) => entry.type === 'GPU' || entry.pid === process.pid || entry.pid === rendererPid);
+    const processes = new Map();
+    const start = performance.now();
+    for (const entry of select()) processes.set(entry.pid, entry.type);
+    let samples = 0;
+    const sample = () => {
+      const entries = select();
+      const now = performance.now();
+      for (const entry of entries) {
+        processes.set(entry.pid, entry.type);
+        byType[entry.type] += entry.cpu.percentCPUUsage * (now - last);
+      }
+      last = now;
+      samples++;
+    };
+    const timer = setInterval(sample, 500);
+    globalThis.finishGlassCpu = () => {
+      clearInterval(timer);
+      sample();
+      const ms = last - start;
+      const percentages = Object.fromEntries(
+        Object.entries(byType).map(([type, value]) => [type, value / ms]),
+      );
+      return {
+        cpu: Object.values(percentages).reduce((sum, value) => sum + value, 0),
+        byType: percentages,
+        processes: Array.from(processes, ([pid, type]) => ({ pid, type })),
+        cpuMs: ms,
+        samples,
+      };
+    };
+  });
+  const result = await work();
+  const metrics = await app.evaluate(() => globalThis.finishGlassCpu());
+  assert.ok(metrics.processes.some(({ type }) => type === 'Browser'));
+  assert.ok(metrics.processes.some(({ type }) => type === 'Tab'));
+  assert.ok(
+    metrics.cpuMs >= 10_000 && metrics.samples > 1,
+    `CPU sampling ended before the scheduled workload: ${metrics.samples} samples over ${metrics.cpuMs} ms`,
+  );
+  return { work: result, metrics };
 }

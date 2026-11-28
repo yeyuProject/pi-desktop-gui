@@ -1,11 +1,16 @@
 import { useEffect, useRef, type PointerEvent as ReactPointerEvent } from 'react';
 
+type DropAction =
+  | { kind: 'section'; sectionId: string | null }
+  | { kind: 'project'; projectId: string | null; sectionId?: string };
+type DropDecision = DropAction | { reason: string } | undefined;
+
 export function useSessionDrag(options: {
-  reason: (id: string) => string;
+  decide: (id: string, target: string) => DropDecision;
   preflight: (id: string) => Promise<string>;
   exists: (id: string) => boolean;
   expand: (id: string) => void;
-  move: (id: string, target: string | null) => void;
+  drop: (id: string, action: DropAction) => void;
   closeMenu: () => void;
 }) {
   const latest = useRef(options);
@@ -19,13 +24,7 @@ export function useSessionDrag(options: {
   });
   return {
     suppressClick: () => suppressed.current,
-    start: (
-      event: ReactPointerEvent<HTMLElement>,
-      id: string,
-      source: string | null,
-      title: string,
-      pinned?: boolean,
-    ) => {
+    start: (event: ReactPointerEvent<HTMLElement>, id: string, title: string, pinned?: boolean) => {
       if (
         event.button !== 0 ||
         !event.isPrimary ||
@@ -48,29 +47,25 @@ export function useSessionDrag(options: {
       let ghost: HTMLDivElement | undefined;
       let target: HTMLElement | null = null;
       let hoverTimer: ReturnType<typeof setTimeout> | undefined;
-      let reason = latest.current.reason(id);
-      let checked = false;
       let ended = false;
-      let checking = false;
-      const refresh = async () => {
-        if (checking) return;
-        checking = true;
-        const nextReason = await latest.current.preflight(id);
-        checking = false;
-        if (ended) return;
-        if (checked && nextReason !== reason) {
-          finish();
-          return;
-        }
-        reason = nextReason;
-        checked = true;
-        if (ghost && reason) {
-          const note = document.createElement('small');
-          note.textContent = reason;
-          ghost.querySelector('small')?.remove();
-          ghost.append(note);
-          row.style.cursor = 'not-allowed';
-        }
+      let projectCheck:
+        { key: string; pending?: Promise<string>; reason?: string; checkedAt: number } | undefined;
+      const dropAt = (x: number, y: number) => {
+        const hit = document.elementFromPoint(x, y)?.closest<HTMLElement>('[data-drop-target]');
+        return hit && list.contains(hit) ? hit : undefined;
+      };
+      const refresh = (key: string) => {
+        if (projectCheck?.key !== key) projectCheck = { key, checkedAt: 0 };
+        const check = projectCheck;
+        if (check.pending || (check.reason !== undefined && performance.now() - check.checkedAt < 500))
+          return check;
+        check.pending = latest.current.preflight(id).then((result) => {
+          check.reason = result;
+          check.checkedAt = performance.now();
+          check.pending = undefined;
+          return result;
+        });
+        return check;
       };
       const selection = document.body.style.userSelect;
       const clearTarget = () => {
@@ -81,7 +76,6 @@ export function useSessionDrag(options: {
       const finish = () => {
         if (ended) return;
         ended = true;
-        clearInterval(polling);
         cancelAnimationFrame(frame);
         clearTarget();
         ghost?.remove();
@@ -103,10 +97,16 @@ export function useSessionDrag(options: {
         cancel.current = () => {};
       };
       const changed = () => {
-        if (!latest.current.exists(id) || (checked && latest.current.reason(id) !== reason)) finish();
+        if (!latest.current.exists(id)) finish();
       };
+      /**
+       * 1. 找到指针下的分区或项目。
+       * 2. 只有跨项目移动才检查 Pi 会话状态。
+       * 3. 根据检查结果更新提示和高亮。
+       */
       const tick = () => {
         if (!ghost) return;
+        // 1. 先滚动，再取指针下的目标，避免沿用上一帧的行。
         ghost.style.transform = `translate(${x + 12}px, ${y + 8}px)`;
         const bounds = list.getBoundingClientRect();
         if (x >= bounds.left && x <= bounds.right && y >= bounds.top && y <= bounds.bottom) {
@@ -118,14 +118,24 @@ export function useSessionDrag(options: {
                 : 0;
           list.scrollTop += speed;
         }
-        let next = document.elementFromPoint(x, y)?.closest<HTMLElement>('[data-drop-target]') ?? null;
-        if (
-          !checked ||
-          reason ||
-          next?.dataset.dropTarget === (source ?? 'standalone') ||
-          !list.contains(next)
-        )
-          next = null;
+        const hit = dropAt(x, y);
+        const key = hit?.dataset.dropTarget;
+        const decision = key ? latest.current.decide(id, key) : undefined;
+        // 2. 目标换成分区后，尚未返回的项目检查不能影响它。
+        const check =
+          key && decision && 'kind' in decision && decision.kind === 'project' ? refresh(key) : undefined;
+        if (!check) projectCheck = undefined;
+        const reason = decision && 'reason' in decision ? decision.reason : check?.reason;
+        // 3. 项目通过预检前不高亮，分区可以立刻高亮。
+        const next = hit && decision && 'kind' in decision && (!check || check.reason === '') ? hit : null;
+        const previousNote = ghost.querySelector('small');
+        if (reason && previousNote?.textContent !== reason) {
+          const note = previousNote ?? document.createElement('small');
+          note.textContent = reason;
+          if (!previousNote) ghost.append(note);
+        }
+        if (!reason) previousNote?.remove();
+        row.style.cursor = reason ? 'not-allowed' : '';
         if (target !== next) {
           clearTarget();
           target = next;
@@ -156,32 +166,32 @@ export function useSessionDrag(options: {
           const heading = document.createElement('div');
           heading.textContent = (pinned ? '📌 ' : '') + title;
           ghost.append(heading);
-          if (reason) {
-            const note = document.createElement('small');
-            note.textContent = reason;
-            ghost.append(note);
-            row.style.cursor = 'not-allowed';
-          }
           document.body.append(ghost);
           frame = requestAnimationFrame(tick);
         }
       };
       const up = (e: PointerEvent) => {
         if (e.pointerId !== pointerId) return;
-        const hit = document
-          .elementFromPoint(e.clientX, e.clientY)
-          ?.closest<HTMLElement>('[data-drop-target]');
-        const targetId = hit && list.contains(hit) ? hit.dataset.dropTarget : undefined;
-        const allowed =
-          active &&
-          checked &&
-          !reason &&
-          targetId &&
-          targetId !== (source ?? 'standalone') &&
-          !latest.current.reason(id);
+        const key = active ? dropAt(e.clientX, e.clientY)?.dataset.dropTarget : undefined;
+        const decision = key ? latest.current.decide(id, key) : undefined;
         finish();
-        row.style.cursor = '';
-        if (allowed) latest.current.move(id, targetId === 'standalone' ? null : targetId!);
+        if (!key || !decision || 'reason' in decision) return;
+        if (decision.kind === 'section') {
+          latest.current.drop(id, decision);
+          return;
+        }
+        const check = refresh(key);
+        void Promise.resolve(check.pending ?? check.reason).then((reason) => {
+          const current = latest.current.decide(id, key);
+          if (
+            reason === '' &&
+            current &&
+            'kind' in current &&
+            current.kind === 'project' &&
+            current.sectionId === decision.sectionId
+          )
+            latest.current.drop(id, current);
+        });
       };
       const key = (e: KeyboardEvent) => {
         if (e.key === 'Escape') {
@@ -198,8 +208,6 @@ export function useSessionDrag(options: {
       window.addEventListener('blur', finish);
       window.addEventListener('session-drag-state', changed);
       cancel.current = finish;
-      void refresh();
-      const polling = setInterval(() => void refresh(), 500);
     },
   };
 }

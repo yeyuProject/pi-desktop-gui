@@ -20,8 +20,34 @@ concurrency:
   group: ci-${{ github.workflow }}-${{ github.event_name }}-${{ github.event.pull_request.number || github.ref }}
   cancel-in-progress: ${{ github.event_name == 'pull_request' || (github.event_name == 'push' && !startsWith(github.ref, 'refs/tags/')) }}
 jobs:
+  verify-main:
+    if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      actions: read
+    outputs:
+      verified: ${{ steps.main.outputs.verified }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
+      - name: Validate the release tag
+        env:
+          RELEASE_TAG: ${{ github.ref_name }}
+        run: node scripts/validate-release.mjs
+      - name: Check main acceptance for this commit
+        id: main
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: node scripts/verified-main-run.mjs
+
   build-and-test:
-    if: ${{ github.event_name != 'workflow_dispatch' || !inputs.skip_tests }}
+    needs: verify-main
+    if: >-
+      ${{ !cancelled() && needs.verify-main.result != 'failure' &&
+          needs.verify-main.outputs.verified != 'true' &&
+          (github.event_name != 'workflow_dispatch' || !inputs.skip_tests) }}
     strategy:
       fail-fast: false
       matrix:
@@ -139,7 +165,11 @@ jobs:
   update-roundtrip:
     env:
       PI_UPDATE_PROGRESS_AUDIT: '1'
-    if: ${{ github.event_name != 'workflow_dispatch' || !inputs.skip_tests }}
+    needs: verify-main
+    if: >-
+      ${{ !cancelled() && needs.verify-main.result != 'failure' &&
+          needs.verify-main.outputs.verified != 'true' &&
+          (github.event_name != 'workflow_dispatch' || !inputs.skip_tests) }}
     strategy:
       fail-fast: false
       matrix:
@@ -173,15 +203,19 @@ jobs:
           if-no-files-found: ignore
 
   package:
-    needs: [build-and-test, update-roundtrip]
+    needs: [verify-main, build-and-test, update-roundtrip]
     env:
       PACKAGE_OUTPUT: ${{ matrix.os == 'macos-latest' && 'release/mac-builds.noindex' || 'release' }}
     if: >-
       ${{
         always() && !cancelled() &&
-        (startsWith(github.ref, 'refs/tags/v') || github.event_name == 'workflow_dispatch') &&
-        (needs.build-and-test.result == 'success' || (github.event_name == 'workflow_dispatch' && inputs.skip_tests && needs.build-and-test.result == 'skipped')) &&
-        (needs.update-roundtrip.result == 'success' || (github.event_name == 'workflow_dispatch' && inputs.skip_tests && needs.update-roundtrip.result == 'skipped'))
+        ((github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v') && needs.verify-main.result == 'success') ||
+         (github.event_name == 'workflow_dispatch' && needs.verify-main.result == 'skipped')) &&
+        ((github.event_name == 'push' && needs.verify-main.result == 'success' &&
+          needs.verify-main.outputs.verified == 'true' &&
+          needs.build-and-test.result == 'skipped' && needs.update-roundtrip.result == 'skipped') ||
+         ((needs.build-and-test.result == 'success' || (github.event_name == 'workflow_dispatch' && inputs.skip_tests && needs.build-and-test.result == 'skipped')) &&
+          (needs.update-roundtrip.result == 'success' || (github.event_name == 'workflow_dispatch' && inputs.skip_tests && needs.update-roundtrip.result == 'skipped'))))
       }}
     strategy:
       fail-fast: false
